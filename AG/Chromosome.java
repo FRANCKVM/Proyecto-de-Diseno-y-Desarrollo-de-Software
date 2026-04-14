@@ -59,60 +59,74 @@ public class Chromosome {
     }
 
     public void evaluate(Graph graph, ShipmentRequest request) {
-        Route candidateRoute = new Route();
-        boolean valid = true;
+		Route candidateRoute = new Route();
+		boolean valid = true;
 
-        if (genes.size() < 2) {
-            this.fitness = 1_000_000;
-            this.feasible = false;
-            this.route = candidateRoute;
-            return;
-        }
+		// 🔹 mínimo tamaño
+		if (genes.size() < 2) {
+			this.fitness = 1_000_000;
+			this.feasible = false;
+			this.route = candidateRoute;
+			return;
+		}
 
-        if (!genes.get(0).equals(request.getOrigin()) ||
-            !genes.get(genes.size() - 1).equals(request.getDestination())) {
-            this.fitness = 1_000_000;
-            this.feasible = false;
-            this.route = candidateRoute;
-            return;
-        }
+		// 🔹 origen y destino correctos
+		// ❌ AQUÍ estaba tu error con totalTime
+		if (!genes.get(0).equals(request.getOrigin()) ||
+			!genes.get(genes.size() - 1).equals(request.getDestination())) {
 
-        Set<Airport> visited = new HashSet<>();
+			// ✅ CORREGIDO: NO usar totalTime aquí
+			this.fitness = 1_000_000 + genes.size();
 
-        for (int i = 0; i < genes.size() - 1; i++) {
-            Airport from = genes.get(i);
-            Airport to = genes.get(i + 1);
+			this.feasible = false;
+			this.route = candidateRoute;
+			return;
+		}
 
-            if (visited.contains(from) && i > 0) {
-                valid = false;
-                break;
-            }
-            visited.add(from);
+		Set<Airport> visited = new HashSet<>();
 
-            Flight flight = findFlight(graph, from, to, request.getBagCount());
-            if (flight == null) {
-                valid = false;
-                break;
-            }
+		for (int i = 0; i < genes.size() - 1; i++) {
+			Airport from = genes.get(i);
+			Airport to = genes.get(i + 1);
 
-            candidateRoute.addFlight(flight);
-        }
+			// 🔹 evitar ciclos
+			if (!visited.add(from)) {
+				valid = false;
+				break;
+			}
 
-        candidateRoute.evaluate(request);
+			Flight flight = findFlight(graph, from, to, request.getBagCount());
+			if (flight == null) {
+				valid = false;
+				break;
+			}
 
-        if (!candidateRoute.isFeasible()) {
-            valid = false;
-        }
+			// 🔥 VALIDACIÓN CORRECTA DE TIEMPO (ANTES de agregar)
+			if (candidateRoute.getTotalTime() + flight.getTravelTimeDays() > request.getMaxTimeDays()) {
+				valid = false;
+				break;
+			}
 
-        this.route = candidateRoute;
-        this.feasible = valid;
+			candidateRoute.addFlight(flight);
+		}
 
-        if (valid) {
-            this.fitness = candidateRoute.getTotalTime();
-        } else {
-            this.fitness = 1_000_000 + candidateRoute.getTotalTime();
-        }
-    }
+		// 🔹 evaluación final (solo una vez)
+		candidateRoute.evaluate(request);
+
+		if (!candidateRoute.isFeasible()) {
+			valid = false;
+		}
+
+		this.route = candidateRoute;
+		this.feasible = valid;
+
+		// 🔹 fitness
+		if (valid) {
+			this.fitness = candidateRoute.getTotalTime() + 0.05 * genes.size();
+		} else {
+			this.fitness = 1_000_000 + candidateRoute.getTotalTime();
+		}
+	}
 
     private Flight findFlight(Graph graph, Airport from, Airport to, int bags) {
         for (Flight flight : graph.getOutgoingFlights(from)) {

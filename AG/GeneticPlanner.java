@@ -1,8 +1,4 @@
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
 public class GeneticPlanner {
     private final Graph graph;
@@ -42,7 +38,10 @@ public class GeneticPlanner {
         for (int generation = 0; generation < generations; generation++) {
             List<Chromosome> newPopulation = new ArrayList<>();
 
-            newPopulation.add(new Chromosome(globalBest)); // elitismo
+            // 🔥 ELITISMO (RE-EVALUADO)
+            Chromosome elite = new Chromosome(globalBest);
+            elite.evaluate(graph, request);
+            newPopulation.add(elite);
 
             while (newPopulation.size() < populationSize) {
                 Chromosome parent1 = tournamentSelection(population);
@@ -64,6 +63,7 @@ public class GeneticPlanner {
             }
 
             population = newPopulation;
+
             Chromosome generationBest = getBest(population);
 
             if (generationBest.getFitness() < globalBest.getFitness()) {
@@ -114,47 +114,40 @@ public class GeneticPlanner {
         }
     }
 
+    // 🔥 PRIORIZA FACTIBLES
     private Chromosome getBest(List<Chromosome> population) {
-        return Collections.min(population, Comparator.comparingDouble(Chromosome::getFitness));
+        return population.stream()
+                .min(Comparator
+                        .comparing(Chromosome::isFeasible).reversed()
+                        .thenComparingDouble(Chromosome::getFitness))
+                .orElseThrow();
     }
 
     private Chromosome tournamentSelection(List<Chromosome> population) {
         List<Chromosome> tournament = new ArrayList<>();
 
         for (int i = 0; i < tournamentSize; i++) {
-            Chromosome candidate = population.get(random.nextInt(population.size()));
-            tournament.add(candidate);
+            tournament.add(population.get(random.nextInt(population.size())));
         }
 
         return getBest(tournament);
     }
 
-    private Chromosome crossover(Chromosome parent1, Chromosome parent2, ShipmentRequest request) {
-        List<Airport> p1 = parent1.getGenes();
-        List<Airport> p2 = parent2.getGenes();
-
-        List<Airport> childGenes = new ArrayList<>();
-        childGenes.add(request.getOrigin());
-
-        List<Airport> middle1 = getMiddleGenes(p1);
-        List<Airport> middle2 = getMiddleGenes(p2);
-
-        int split1 = middle1.isEmpty() ? 0 : random.nextInt(middle1.size() + 1);
-        int split2 = middle2.isEmpty() ? 0 : random.nextInt(middle2.size() + 1);
+    private Chromosome crossover(Chromosome p1, Chromosome p2, ShipmentRequest request) {
+        List<Airport> middle1 = getMiddleGenes(p1.getGenes());
+        List<Airport> middle2 = getMiddleGenes(p2.getGenes());
 
         List<Airport> childMiddle = new ArrayList<>();
 
-        for (int i = 0; i < split1; i++) {
-            Airport airport = middle1.get(i);
-            if (!childMiddle.contains(airport)) {
-                childMiddle.add(airport);
+        for (Airport a : middle1) {
+            if (random.nextBoolean() && !childMiddle.contains(a)) {
+                childMiddle.add(a);
             }
         }
 
-        for (int i = split2; i < middle2.size(); i++) {
-            Airport airport = middle2.get(i);
-            if (!childMiddle.contains(airport)) {
-                childMiddle.add(airport);
+        for (Airport a : middle2) {
+            if (random.nextBoolean() && !childMiddle.contains(a)) {
+                childMiddle.add(a);
             }
         }
 
@@ -162,16 +155,16 @@ public class GeneticPlanner {
             childMiddle = childMiddle.subList(0, maxIntermediateStops);
         }
 
-        childGenes.addAll(childMiddle);
-        childGenes.add(request.getDestination());
+        List<Airport> genes = new ArrayList<>();
+        genes.add(request.getOrigin());
+        genes.addAll(childMiddle);
+        genes.add(request.getDestination());
 
-        return new Chromosome(childGenes);
+        return new Chromosome(genes);
     }
 
     private List<Airport> getMiddleGenes(List<Airport> genes) {
-        if (genes.size() <= 2) {
-            return new ArrayList<>();
-        }
+        if (genes.size() <= 2) return new ArrayList<>();
         return new ArrayList<>(genes.subList(1, genes.size() - 1));
     }
 
@@ -179,41 +172,29 @@ public class GeneticPlanner {
         List<Airport> genes = chromosome.getGenes();
 
         if (genes.size() <= 2) {
-            if (random.nextBoolean()) {
-                addRandomIntermediate(genes, request);
-            }
+            addRandomIntermediate(genes, request);
             return;
         }
 
-        int mutationType = random.nextInt(3);
+        int type = random.nextInt(3);
 
-        switch (mutationType) {
+        switch (type) {
             case 0 -> swapIntermediate(genes);
             case 1 -> removeIntermediate(genes);
             case 2 -> addRandomIntermediate(genes, request);
-            default -> {
-            }
         }
     }
 
     private void swapIntermediate(List<Airport> genes) {
-        if (genes.size() <= 3) {
-            return;
-        }
+        if (genes.size() <= 3) return;
 
         int i = 1 + random.nextInt(genes.size() - 2);
         int j = 1 + random.nextInt(genes.size() - 2);
 
-        Airport temp = genes.get(i);
-        genes.set(i, genes.get(j));
-        genes.set(j, temp);
+        Collections.swap(genes, i, j);
     }
 
     private void removeIntermediate(List<Airport> genes) {
-        if (genes.size() <= 2) {
-            return;
-        }
-
         if (genes.size() > 2) {
             int index = 1 + random.nextInt(genes.size() - 2);
             genes.remove(index);
@@ -221,21 +202,17 @@ public class GeneticPlanner {
     }
 
     private void addRandomIntermediate(List<Airport> genes, ShipmentRequest request) {
-        if (genes.size() - 2 >= maxIntermediateStops) {
-            return;
-        }
+        if (genes.size() - 2 >= maxIntermediateStops) return;
 
         List<Airport> available = new ArrayList<>(airports);
         available.remove(request.getOrigin());
         available.remove(request.getDestination());
         available.removeAll(genes);
 
-        if (available.isEmpty()) {
-            return;
-        }
+        if (available.isEmpty()) return;
 
         Airport newAirport = available.get(random.nextInt(available.size()));
-        int insertPos = 1 + random.nextInt(genes.size() - 1);
-        genes.add(insertPos, newAirport);
+        int pos = 1 + random.nextInt(genes.size() - 1);
+        genes.add(pos, newAirport);
     }
 }
