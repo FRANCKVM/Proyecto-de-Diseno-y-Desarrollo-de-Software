@@ -37,10 +37,11 @@ public class Ant {
 
         while (!current.equals(request.getDestination()) && hops < maxHops) {
             List<Flight> candidates = graph.getOutgoingFlights(current).stream()
-                    .filter(f -> !f.isCancelled())
-                    .filter(f -> f.hasCapacity(request.getBagCount()))
-                    .filter(f -> !visited.contains(f.getTo()))
-                    .toList();
+				.filter(f -> !f.isCancelled())
+				.filter(f -> f.hasCapacity(request.getBagCount()))
+				.filter(f -> !visited.contains(f.getTo()))
+				.filter(f -> route.getTotalTime() + f.getTravelTimeDays() <= request.getMaxTimeDays())
+				.toList();
 
             if (candidates.isEmpty()) {
                 break;
@@ -50,6 +51,7 @@ public class Ant {
             if (selected == null) {
                 break;
             }
+			
 
             route.addFlight(selected);
             current = selected.getTo();
@@ -70,9 +72,11 @@ public class Ant {
         for (int k = 0; k < candidates.size(); k++) {
             Flight f = candidates.get(k);
             int j = airportIndex.indexOf(f.getTo());
+			
+			if (f.getTravelTimeDays() <= 0) continue;
 
             double tau = Math.pow(pheromones[i][j], alpha);
-            double eta = Math.pow(1.0 / f.getTravelTimeDays(), beta);
+            double eta = Math.pow(1.0 / (f.getTravelTimeDays() * (1 + 0.2 * candidates.size())), beta);
 
             probabilities[k] = tau * eta;
             sum += probabilities[k];
