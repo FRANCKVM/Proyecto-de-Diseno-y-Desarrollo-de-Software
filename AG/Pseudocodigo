@@ -1,0 +1,11 @@
+Inicializar una población de rutas candidatas
+Evaluar la factibilidad y costo de cada ruta
+
+Mientras no se alcance el número máximo de generaciones:
+    Seleccionar padres mediante torneo
+    Aplicar cruce para generar descendencia
+    Aplicar mutación sobre algunos descendientes
+    Evaluar los nuevos individuos
+    Formar la nueva población conservando la mejor solución
+
+Retornar la mejor ruta encontrada
