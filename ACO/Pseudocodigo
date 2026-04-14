@@ -1,0 +1,16 @@
+Inicializar parámetros ACO
+Inicializar niveles de feromona en todas las rutas
+
+Mientras no se alcance el número máximo de iteraciones:
+    Para cada hormiga:
+        Construir una ruta desde origen hasta destino
+        Seleccionar el siguiente vuelo según:
+            - feromona
+            - heurística (menor tiempo)
+            - factibilidad por capacidad
+        Evaluar la ruta construida
+
+    Evaporar feromonas
+    Depositar feromonas en las mejores rutas factibles
+
+Retornar la mejor ruta encontrada
