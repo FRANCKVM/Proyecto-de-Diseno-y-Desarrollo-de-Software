@@ -42,38 +42,48 @@ public class Ruta {
         return factible;
     }
 
-    public void evaluar(SolicitudEnvio solicitud) {
-        boolean valido = !vuelos.isEmpty();
+	public void evaluar(SolicitudEnvio solicitud) {
+		boolean valido = !vuelos.isEmpty();
 
-        Aeropuerto actual = solicitud.getOrigen();
-        for (Vuelo v : vuelos) {
-            if (!v.getDesde().equals(actual)) {
-                valido = false;
-                break;
-            }
-            if (!v.tieneCapacidad(solicitud.getContarBolsas())) {
-                valido = false;
-                break;
-            }
-            actual = v.getHasta();
-        }
+		Aeropuerto actual = solicitud.getOrigen();
+		double penalizacion = 0;
 
-        if (!actual.equals(solicitud.getDestino())) {
-            valido = false;
-        }
+		for (Vuelo v : vuelos) {
+			// Secuencia incorrecta
+			if (!v.getDesde().equals(actual)) {
+				penalizacion += 5000;
+				valido = false;
+			}
 
-        if (tiempoTotal > solicitud.getDiasTiempoMaximo()) {
-            valido = false;
-        }
+			// Capacidad insuficiente
+			if (!v.tieneCapacidad(solicitud.getContarBolsas())) {
+				penalizacion += 10000;
+				valido = false;
+			}
 
-        this.factible = valido;
+			actual = v.getHasta();
+		}
 
-        if (valido) {
-            costo = tiempoTotal;
-        } else {
-            costo = 1000000 + tiempoTotal;
-        }
-    }
+		// No llega al destino
+		if (!actual.equals(solicitud.getDestino())) {
+			penalizacion += 7000;
+			valido = false;
+		}
+
+		// Exceso de tiempo (penalización proporcional)
+		if (tiempoTotal > solicitud.getDiasTiempoMaximo()) {
+			penalizacion += (tiempoTotal - solicitud.getDiasTiempoMaximo()) * 1000;
+			valido = false;
+		}
+
+		this.factible = valido;
+
+		if (valido) {
+			costo = tiempoTotal;
+		} else {
+			costo = tiempoTotal + penalizacion;
+		}
+	}
 
     public void reservarCapacidad(int bolsas) {
         for (Vuelo v : vuelos) {

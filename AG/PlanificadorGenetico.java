@@ -71,7 +71,8 @@ public class PlanificadorGenetico {
             }
 
             System.out.println("Generación " + (generacion + 1) +
-                    " | mejor fitness: " + mejorGlobal.getFitness());
+                    " | mejor fitness: " + mejorGlobal.getFitness() +
+					" | población: " + poblacion.size());
         }
 
         return mejorGlobal.getRoute();

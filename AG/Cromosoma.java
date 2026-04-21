@@ -58,7 +58,7 @@ public class Cromosoma {
         return genes.contains(aeropuerto);
     }
 
-    public void evaluate(Grafo grafo, SolicitudEnvio solicitud) {
+	public void evaluate(Grafo grafo, SolicitudEnvio solicitud) {
 		Ruta rutaCandidato = new Ruta();
 		boolean valido = true;
 
@@ -75,7 +75,6 @@ public class Cromosoma {
 			!genes.get(genes.size() - 1).equals(solicitud.getDestination())) {
 
 			this.fitness = 1_000_000 + genes.size();
-
 			this.factible = false;
 			this.ruta = rutaCandidato;
 			return;
@@ -99,7 +98,7 @@ public class Cromosoma {
 				break;
 			}
 
-			// 🔥 validación correcta de tiempo
+			// 🔹 validación de tiempo
 			if (rutaCandidato.getTotalTime() + vuelo.getTiempoViajarDias() > solicitud.getMaxTimeDays()) {
 				valido = false;
 				break;
@@ -108,7 +107,7 @@ public class Cromosoma {
 			rutaCandidato.addFlight(vuelo);
 		}
 
-		// 🔹 evaluación final
+		// 🔹 evaluación final de la ruta
 		rutaCandidato.evaluate(solicitud);
 
 		if (!rutaCandidato.isFeasible()) {
@@ -118,11 +117,23 @@ public class Cromosoma {
 		this.ruta = rutaCandidato;
 		this.factible = valido;
 
-		// 🔹 fitness
+		// 🔥 NUEVA FUNCIÓN DE FITNESS (MEJORADA)
+		double penalizacion = 0;
+
+		if (!valido) {
+			penalizacion += 5000; // base
+
+			// penaliza rutas largas
+			penalizacion += genes.size() * 100;
+
+			// penaliza tiempo acumulado
+			penalizacion += rutaCandidato.getTotalTime() * 500;
+		}
+
 		if (valido) {
 			this.fitness = rutaCandidato.getTotalTime() + 0.05 * genes.size();
 		} else {
-			this.fitness = 1_000_000 + rutaCandidato.getTotalTime();
+			this.fitness = rutaCandidato.getTotalTime() + penalizacion;
 		}
 	}
 

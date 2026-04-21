@@ -76,8 +76,9 @@ public class PlanificadorACO {
                 mejorGlobal = new Ruta(mejorIteracion);
             }
 
-            System.out.println("Iteración " + (iter + 1) +
-                    " | mejor costo: " + (mejorIteracion != null ? mejorIteracion.getCosto() : "N/A"));
+            System.out.println("Iteración " + (iter + 1) + " | mejor costo: " 
+					+ (mejorIteracion != null ? mejorIteracion.getCosto() : "N/A"
+					+ " | rutas generadas: " + rutas.size()));
         }
 
         return mejorGlobal;
@@ -95,7 +96,7 @@ public class PlanificadorACO {
     }
 
     private void depositar(Ruta ruta) {
-        double aporte = q / ruta.getCosto();
+        double aporte = q / (ruta.getCosto() + 0.0001);
 
         for (Vuelo v : ruta.getVuelos()) {
             int i = indiceAeropuertos.indexOf(v.getDesde());
