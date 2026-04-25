@@ -24,6 +24,8 @@ public class Ruta {
     public void addFlight(Vuelo vuelo) {
         vuelos.add(vuelo);
         tiempoTotal += vuelo.getTiempoViajarDias();
+		// tiempo en almacén (10 min que es aprox 0.007 dias)
+		tiempoTotal += 0.007;
     }
 
     public List<Vuelo> getFlights() {

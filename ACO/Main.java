@@ -6,83 +6,109 @@ import java.util.*;
 public class Main {
 
     public static void main(String[] args) {
-        try {
-            // ===== RUTA DE DATA =====
-            Path dirDatos = Path.of("data");
+		try {
+			Path dirDatos = Path.of("data");
 
-            // ===== CARGAR AEROPUERTOS =====
-            Map<String, Aeropuerto> aeropuertoPorCodigo = cargarAeropuertos(
-                dirDatos.resolve("c.1inf54.26.1.v1.Aeropuerto.husos.v1.20250818__estudiantes.txt")
-            );
+			Map<String, Aeropuerto> aeropuertoPorCodigo = cargarAeropuertos(
+					dirDatos.resolve("c.1inf54.26.1.v1.Aeropuerto.husos.v1.20250818__estudiantes.txt")
+			);
 
-            // ===== CARGAR VUELOS =====
-            Grafo grafo = cargarVuelos(
-                dirDatos.resolve("planes_vuelo.txt"),
-                aeropuertoPorCodigo
-            );
+			Grafo grafo = cargarVuelos(
+					dirDatos.resolve("planes_vuelo.txt"),
+					aeropuertoPorCodigo
+			);
 
-            // ===== GENERAR 20 SOLICITUDES =====
-            List<SolicitudEnvio> solicitudes = new ArrayList<>();
-            List<Aeropuerto> aeropuertos = new ArrayList<>(aeropuertoPorCodigo.values());
-            Random aleatorio = new Random();
+			// CARGAR ENVÍOS REALES
+			List<SolicitudEnvio> solicitudes = cargarEnvios(
+					dirDatos.resolve("_envios_preliminar_/_envios_SBBR_.txt"),
+					aeropuertoPorCodigo, "SBBR"
+			);
 
-            for (int i = 0; i < 20; i++) {
-                Aeropuerto origen = aeropuertos.get(aleatorio.nextInt(aeropuertos.size()));
-                Aeropuerto destino = aeropuertos.get(aleatorio.nextInt(aeropuertos.size()));
+			PlanificadorACO planificador = new PlanificadorACO(
+					grafo, 20, 50, 1.0, 2.0, 0.2, 100.0, 20
+			); //20, 50, ...
 
-                if (origen.equals(destino)) {
-                    i--;
-                    continue;
-                }
+			// ===============================
+			// SIMULACIÓN POR DÍAS
+			// ===============================
+			for (int dia = 1; dia <= 3; dia++) {
+				System.out.println("\n=====================");
+				System.out.println("DÍA " + dia);
+				System.out.println("=====================");
+				int resueltas = 0;
+				int noResueltas = 0;
+				double tiempoTotal = 0;
+				
+				
+				for (SolicitudEnvio s : solicitudes) {
 
-                solicitudes.add(new SolicitudEnvio(origen, destino, 2, 2.0));
-            }
+					Ruta r = planificador.encontrarMejorRuta(s);
 
-            // ===== ACO =====
-            PlanificadorACO planificador = new PlanificadorACO(
-                grafo,
-                20,     // hormigas
-                50,     // iteraciones
-                1.0,
-                2.0,
-                0.2,
-                100.0,
-                20      // saltos máximos
-            );
+					if (r != null && r.esFactible()) {
+						resueltas++;
+						tiempoTotal += r.getTiempoTotal();
+						
+						// reservar vuelos
+						r.reservarCapacidad(s.getContarBolsas());
 
-            int resueltas = 0;
-            int noResueltas = 0;
+						//  actualizar almacenes
+						for (Vuelo v : r.getVuelos()) {
+							v.getHasta().almacenar(s.getContarBolsas());
+						}
 
-            // ===== PROCESAR LAS 20 SOLICITUDES =====
-            for (int i = 0; i < solicitudes.size(); i++) {
+					} else {
+						noResueltas++;
+						System.out.println("FALLÓ: " 
+							+ s.getOrigen().getCodigo() + " -> " 
+							+ s.getDestino().getCodigo()
+							+ " | Motivo: " + (r != null ? r.getMotivoFallo() : "Sin ruta"));
+					}
+				}
 
-                SolicitudEnvio solicitud = solicitudes.get(i);
-                Ruta mejorRuta = planificador.encontrarMejorRuta(solicitud);
+				System.out.println("Total envíos: " + solicitudes.size());
+				System.out.println("Resueltas: " + resueltas);
+				System.out.println("No resueltas: " + noResueltas);
 
-                System.out.println("\n=== Solicitud " + (i + 1) + " ===");
-                System.out.println("Origen: " + solicitud.getOrigen().getCodigo() +
-                        " | Destino: " + solicitud.getDestino().getCodigo());
+				if (resueltas > 0) {
+					System.out.println("Tiempo promedio: " + (tiempoTotal / resueltas));
+				}
+			}
 
-                if (mejorRuta != null && mejorRuta.esFactible()) {
-                    resueltas++;
-                    System.out.println("RUTA ENCONTRADA:");
-                    System.out.println(mejorRuta);
-                } else {
-                    noResueltas++;
-                    System.out.println("No se encontró ruta");
-                }
-            }
+			// ===============================
+			// SIMULACIÓN AL COLAPSO
+			// ===============================
+			System.out.println("\n=== SIMULACIÓN AL COLAPSO ===");
 
-            // ===== RESUMEN =====
-            System.out.println("\n=== RESUMEN ===");
-            System.out.println("Total: " + solicitudes.size());
-            System.out.println("Resueltas: " + resueltas);
-            System.out.println("No resueltas: " + noResueltas);
+			List<Aeropuerto> aeropuertos = new ArrayList<>(aeropuertoPorCodigo.values());
+			Random rand = new Random();
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+			for (int carga = 5; carga <= 30; carga += 5) {
+
+				int resueltas = 0;
+
+				for (int i = 0; i < carga; i++) {
+
+					Aeropuerto origen = aeropuertos.get(rand.nextInt(aeropuertos.size()));
+					Aeropuerto destino = aeropuertos.get(rand.nextInt(aeropuertos.size()));
+
+					if (origen.equals(destino)) continue;
+
+					SolicitudEnvio s = new SolicitudEnvio(origen, destino, 2, 2.0);
+
+					Ruta r = planificador.encontrarMejorRuta(s);
+
+					if (r != null && r.esFactible()) {
+						resueltas++;
+					}
+				}
+
+				System.out.println("Carga: " + carga + " → " + resueltas + "/" + carga);
+			}
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
     // =========================
     // CARGA DE AEROPUERTOS
@@ -154,6 +180,52 @@ public class Main {
 
         return diferencia / 1440.0;
     }
+	
+	private static List<SolicitudEnvio> cargarEnvios(Path archivo, Map<String, Aeropuerto> mapa, String codigoOrigen) throws IOException {
+		List<SolicitudEnvio> lista = new ArrayList<>();
+		
+		Aeropuerto origen = mapa.get(codigoOrigen);
+		
+		if (origen == null) {
+			System.out.println("❌ ERROR: origen no encontrado: " + codigoOrigen);
+			return lista;
+		}
+		
+		List<String> lineas = Files.readAllLines(archivo);
+		
+		System.out.println("Archivo: " + archivo.getFileName());
+		System.out.println("Origen usado: " + codigoOrigen);
+		
+		
+		int contador=0;
+
+		for (String l : lineas) {
+			
+			if (contador >= 100) break;
+			
+			if (l.trim().isEmpty()) continue;
+			
+			String[] p = l.split("-");
+
+			if (p.length < 7) continue;
+
+			String codigoDestino = p[4].trim();;
+			int cantidad = Integer.parseInt(p[5]);
+
+			Aeropuerto destino = mapa.get(codigoDestino);
+
+			if (destino == null) continue;
+
+			if (!origen.equals(destino)) {
+				lista.add(new SolicitudEnvio(origen, destino, cantidad, 2.0));
+			}
+			contador++;
+		}
+		
+		System.out.println("Solicitudes creadas: " + lista.size());
+
+		return lista;
+	}
 
     // =========================
     // PARSE SEGURO

@@ -5,7 +5,8 @@ public class Aeropuerto {
 	private final String ciudad;
 	private final String region;
 	private final int desplazamientoGMT;
-	private final int capacidad;
+	private int capacidadMaxima;
+	private int ocupacionActual;
 
 	public Aeropuerto(String codigo, String ciudad, String region) {
 		this(codigo, ciudad, region, 0, 0);
@@ -16,7 +17,8 @@ public class Aeropuerto {
 		this.ciudad = ciudad;
 		this.region = region;
 		this.desplazamientoGMT = desplazamientoGMT;
-		this.capacidad = capacidad;
+		this.capacidadMaxima = capacidad;
+		this.ocupacionActual = ocupacionActual;
 	}
 
 	public String getCodigo() {
@@ -37,6 +39,18 @@ public class Aeropuerto {
 
 	public int getCapacidad() {
 		return capacidad;
+	}
+	
+	public boolean tieneEspacio(int cantidad) {
+		return ocupacionActual + cantidad <= capacidadMaxima;
+	}
+
+	public void almacenar(int cantidad) {
+		ocupacionActual += cantidad;
+	}
+
+	public void liberar(int cantidad) {
+		ocupacionActual -= cantidad;
 	}
 
 	@Override

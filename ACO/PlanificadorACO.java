@@ -75,10 +75,10 @@ public class PlanificadorACO {
                 (mejorGlobal == null || mejorIteracion.getCosto() < mejorGlobal.getCosto())) {
                 mejorGlobal = new Ruta(mejorIteracion);
             }
-
+			/*
             System.out.println("Iteración " + (iter + 1) + " | mejor costo: " 
 					+ (mejorIteracion != null ? mejorIteracion.getCosto() : "N/A"
-					+ " | rutas generadas: " + rutas.size()));
+					+ " | rutas generadas: " + rutas.size()));*/
         }
 
         return mejorGlobal;
