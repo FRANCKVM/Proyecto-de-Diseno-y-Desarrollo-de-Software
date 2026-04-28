@@ -1,0 +1,11 @@
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\algorithms\aco\Hormiga.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\algorithms\aco\Main.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\algorithms\aco\PlanificadorACO.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\algorithms\ga\Cromosoma.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\algorithms\ga\MainGA.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\algorithms\ga\PlanificadorGenetico.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Aeropuerto.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Grafo.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Ruta.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\SolicitudEnvio.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Vuelo.java
