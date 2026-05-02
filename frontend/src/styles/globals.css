@@ -1,0 +1,135 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================================================
+   BASE
+   Aplicada a toda la aplicacion. Resolucion de referencia 1440x900.
+   Sin responsive mobile (estandar 61, seccion 4.12).
+   ======================================================================== */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-page text-text-primary font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Foco visible consistente para accesibilidad
+     (estandar 61, seccion 4.13) */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+
+  /* Scrollbar discreta */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-tertiary;
+  }
+
+  /* ----------------------------------------------------------------------
+     FIX: Tailwind preflight + Leaflet
+     El preflight de Tailwind aplica `img { max-width: 100%; height: auto; }`
+     a todas las imagenes, lo que rompe los tiles del mapa en algunos
+     navegadores (los tiles aparecen superpuestos o no se cargan).
+     Anulamos esa regla SOLO dentro del contenedor de Leaflet.
+     ---------------------------------------------------------------------- */
+  .leaflet-container img {
+    max-width: none !important;
+    height: auto;
+  }
+}
+
+/* ========================================================================
+   COMPONENTS
+   Animaciones y estilos compartidos no expresables como utilidades simples.
+   ======================================================================== */
+@layer components {
+  /* Drawer slide-in 200ms desde la derecha (estandar 61, seccion 8) */
+  .drawer-enter {
+    transform: translateX(100%);
+  }
+
+  .drawer-enter-active {
+    transform: translateX(0);
+    transition: transform 200ms ease-out;
+  }
+
+  .drawer-exit {
+    transform: translateX(0);
+  }
+
+  .drawer-exit-active {
+    transform: translateX(100%);
+    transition: transform 200ms ease-in;
+  }
+
+  /* ----------------------------------------------------------------------
+     MARKERS DEL MAPA
+     Estilos para los divIcon de Leaflet. Se inyectan como HTML serializado
+     desde AirportMarker.tsx y FlightMarker.tsx, asi que viven aqui (en CSS
+     global) en vez de Tailwind utility classes.
+
+     Optimizados para CartoDB Positron (fondo gris claro): los labels usan
+     el color text-primary del estandar (#181B27) sin text-shadow, ya que
+     la legibilidad es nativa sobre el mapa claro.
+     ---------------------------------------------------------------------- */
+
+  /* Marcador de aeropuerto: contenedor de SVG + label */
+  .tasf-airport-marker {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+
+  .tasf-airport-label {
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    margin-top: 2px;
+    color: #181b27;
+    white-space: nowrap;
+  }
+
+  .tasf-airport-pct {
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 10px;
+    font-weight: 500;
+    color: #181b27;
+    line-height: 1;
+    margin-top: 1px;
+  }
+
+  /* Marcador de vuelo: contenedor que aplica la rotacion del bearing */
+  .tasf-flight-marker {
+    width: 22px;
+    height: 22px;
+    transform-origin: center;
+    cursor: pointer;
+  }
+}
