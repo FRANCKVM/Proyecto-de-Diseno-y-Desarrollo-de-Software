@@ -1,19 +1,37 @@
 package pucp.edu.pe.tasfb2b.entities;
 
+import jakarta.persistence.*;
 import java.util.ArrayList;
 import java.util.List;
 
+@Entity
+@Table(name = "ruta")
 public class Ruta {
-    private final List<Vuelo> vuelos;
-    private double tiempoTotal;
-    private double costo;
-    private boolean factible;
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id_ruta")
+    private Integer idRuta;
+
+    @ManyToMany
+    @JoinTable(
+            name = "ruta_vuelo",
+            joinColumns = @JoinColumn(name = "id_ruta"),
+            inverseJoinColumns = @JoinColumn(name = "id_vuelo")
+    )
+    @OrderColumn(name = "orden")
+    private List<Vuelo> vuelos = new ArrayList<>();
+
+    @Column(name = "tiempo_total", nullable = false)
+    private Double tiempoTotal = 0.0;
+
+    @Column(name = "costo", nullable = false)
+    private Double costo = 999999.9999;
+
+    @Column(name = "factible", nullable = false)
+    private Boolean factible = false;
 
     public Ruta() {
-        this.vuelos = new ArrayList<>();
-        this.tiempoTotal = 0.0;
-        this.costo = Double.MAX_VALUE;
-        this.factible = false;
     }
 
     public Ruta(Ruta otro) {
@@ -23,30 +41,76 @@ public class Ruta {
         this.factible = otro.factible;
     }
 
-    public void agregarVuelo(Vuelo vuelo) {
-        vuelos.add(vuelo);
-        tiempoTotal += vuelo.getTiempoViajarDias();
+    public Integer getIdRuta() {
+        return idRuta;
     }
 
-    public void agregarVuelo(Vuelo vuelo, double incrementoDias) {
-        vuelos.add(vuelo);
-        tiempoTotal += incrementoDias;
+    public void setIdRuta(Integer idRuta) {
+        this.idRuta = idRuta;
     }
 
     public List<Vuelo> getVuelos() {
         return vuelos;
     }
 
-    public double getTiempoTotal() {
+    public void setVuelos(List<Vuelo> vuelos) {
+        this.vuelos = vuelos;
+    }
+
+    public Double getTiempoTotal() {
         return tiempoTotal;
     }
 
-    public double getCosto() {
+    public void setTiempoTotal(Double tiempoTotal) {
+        this.tiempoTotal = tiempoTotal;
+    }
+
+    public Double getCosto() {
         return costo;
     }
 
-    public boolean esFactible() {
+    public void setCosto(Double costo) {
+        this.costo = costo;
+    }
+
+    public Boolean getFactible() {
         return factible;
+    }
+
+    public void setFactible(Boolean factible) {
+        this.factible = factible;
+    }
+
+    public boolean esFactible() {
+        return Boolean.TRUE.equals(factible);
+    }
+
+    public void agregarVuelo(Vuelo vuelo) {
+        if (vuelo == null) {
+            throw new IllegalArgumentException("El vuelo no puede ser null");
+        }
+
+        vuelos.add(vuelo);
+
+        if (tiempoTotal == null) {
+            tiempoTotal = 0.0;
+        }
+
+        tiempoTotal += vuelo.getTiempoViajarDias();
+    }
+
+    public void agregarVuelo(Vuelo vuelo, double incrementoDias) {
+        if (vuelo == null) {
+            throw new IllegalArgumentException("El vuelo no puede ser null");
+        }
+
+        vuelos.add(vuelo);
+
+        if (tiempoTotal == null) {
+            tiempoTotal = 0.0;
+        }
+
+        tiempoTotal += incrementoDias;
     }
 
     public void evaluar(SolicitudEnvio solicitud) {
@@ -56,13 +120,11 @@ public class Ruta {
         double penalizacion = 0;
 
         for (Vuelo v : vuelos) {
-            // Secuencia incorrecta
             if (!v.getDesde().equals(actual)) {
                 penalizacion += 5000;
                 valido = false;
             }
 
-            // Capacidad insuficiente
             if (!v.tieneCapacidad(solicitud.getContarBolsas())) {
                 penalizacion += 10000;
                 valido = false;
@@ -71,23 +133,16 @@ public class Ruta {
             actual = v.getHasta();
         }
 
-        // No llega al destino
         if (!actual.equals(solicitud.getDestino())) {
             penalizacion += 7000;
             valido = false;
         }
 
-        // Exceso de tiempo
         if (tiempoTotal > solicitud.getDiasTiempoMaximo()) {
             penalizacion += (tiempoTotal - solicitud.getDiasTiempoMaximo()) * 1000;
             valido = false;
         }
 
-        /*
-         * Penalización logística por cantidad de vuelos.
-         * No modifica el tiempo real, solo el costo que optimiza el algoritmo.
-         * Esto favorece rutas con menos escalas.
-         */
         double penalizacionSaltos = vuelos.size() * 0.03;
 
         this.factible = valido;
@@ -99,7 +154,7 @@ public class Ruta {
         }
     }
 
-    public void reservarCapacidad(int bolsas) {
+    public void reservarCapacidad(Integer bolsas) {
         for (Vuelo v : vuelos) {
             v.reservar(bolsas);
         }
@@ -111,9 +166,9 @@ public class Ruta {
 
         for (Vuelo v : vuelos) {
             sb.append(v.getDesde().getCodigo())
-              .append(" -> ")
-              .append(v.getHasta().getCodigo())
-              .append("\n");
+                    .append(" -> ")
+                    .append(v.getHasta().getCodigo())
+                    .append("\n");
         }
 
         sb.append("Tiempo total: ").append(tiempoTotal).append(" días\n");

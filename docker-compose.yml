@@ -1,0 +1,24 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: tasfb2b_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: pdds
+      MYSQL_DATABASE: tasfb2b
+      MYSQL_USER: pdds
+      MYSQL_PASSWORD: pdds
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/scripts:/docker-entrypoint-initdb.d
+    networks:
+      - tasfb2b_network
+
+volumes:
+  mysql_data:
+
+networks:
+  tasfb2b_network:
+    driver: bridge
