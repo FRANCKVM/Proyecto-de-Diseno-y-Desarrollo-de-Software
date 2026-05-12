@@ -1,3 +1,5 @@
+import type { TipoSimulacion } from "@/types/common.types";
+
 /**
  * Rutas del sistema Tasf.B2B.
  * Usar siempre estas constantes en lugar de strings hardcoded
@@ -15,3 +17,38 @@ export const ROUTES = {
     `/simulacion/resultados-colapso/${id}`,
   DASHBOARD: "/dashboard",
 } as const;
+
+export const resolveSimulationExecutionRoute = (
+  tipoSimulacion: TipoSimulacion | null | undefined
+) =>
+  tipoSimulacion === "colapso"
+    ? ROUTES.SIMULACION_COLAPSO
+    : ROUTES.SIMULACION_EJECUCION;
+
+export const resolveSimulationResultsRoute = (
+  tipoSimulacion: TipoSimulacion | null | undefined,
+  idSimulacion: string | number
+) =>
+  tipoSimulacion === "colapso"
+    ? ROUTES.SIMULACION_RESULTADOS_COLAPSO(idSimulacion)
+    : ROUTES.SIMULACION_RESULTADOS(idSimulacion);
+
+export const resolveSimulationModuleRoute = ({
+  idSimulacion,
+  isRunning,
+  tipoSimulacion,
+}: {
+  idSimulacion: number | null;
+  isRunning: boolean;
+  tipoSimulacion: TipoSimulacion | null | undefined;
+}) => {
+  if (idSimulacion === null) {
+    return ROUTES.SIMULACION_CONFIGURAR;
+  }
+
+  if (isRunning) {
+    return resolveSimulationExecutionRoute(tipoSimulacion);
+  }
+
+  return resolveSimulationResultsRoute(tipoSimulacion, idSimulacion);
+};

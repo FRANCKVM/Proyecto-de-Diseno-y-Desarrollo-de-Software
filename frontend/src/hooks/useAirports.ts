@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import { listAirports } from "@/services/airportService";
+import { useEffect } from "react";
+import {
+  initializeReferenceData,
+  useReferenceDataStore,
+} from "@/store/referenceDataStore";
 import type { AirportWithCoords } from "@/types/airport.types";
 
 /**
@@ -23,30 +26,12 @@ interface UseAirportsResult {
  * componentes consumidores no necesiten manejar undefined.
  */
 export const useAirports = (): UseAirportsResult => {
-  const [airports, setAirports] = useState<AirportWithCoords[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const airports = useReferenceDataStore((s) => s.airports);
+  const isLoading = useReferenceDataStore((s) => s.isLoading);
+  const error = useReferenceDataStore((s) => s.error);
 
   useEffect(() => {
-    let cancelled = false;
-
-    listAirports()
-      .then((data) => {
-        if (!cancelled) {
-          setAirports(data);
-          setIsLoading(false);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    void initializeReferenceData();
   }, []);
 
   return { airports, isLoading, error };

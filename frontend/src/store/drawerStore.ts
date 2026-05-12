@@ -9,13 +9,15 @@ export type DrawerSelection =
   | null
   | { type: "airport"; icao: string }
   | { type: "flight"; codigo: string }
-  | { type: "shipment"; codigo: string };
+  | { type: "shipment"; codigo: string }
+  | { type: "shipment-form" };
 
 interface DrawerState {
   selection: DrawerSelection;
   openAirport: (icao: string) => void;
   openFlight: (codigo: string) => void;
   openShipment: (codigo: string) => void;
+  openShipmentForm: () => void;
   close: () => void;
 }
 
@@ -32,5 +34,6 @@ export const useDrawerStore = create<DrawerState>((set) => ({
   openAirport: (icao) => set({ selection: { type: "airport", icao } }),
   openFlight: (codigo) => set({ selection: { type: "flight", codigo } }),
   openShipment: (codigo) => set({ selection: { type: "shipment", codigo } }),
+  openShipmentForm: () => set({ selection: { type: "shipment-form" } }),
   close: () => set({ selection: null }),
 }));

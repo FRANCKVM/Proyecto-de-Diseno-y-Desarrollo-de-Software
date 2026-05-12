@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Download } from "lucide-react";
 import PeriodTypeCard from "@/components/molecules/PeriodTypeCard";
@@ -7,7 +8,9 @@ import AlertBanner from "@/components/molecules/AlertBanner";
 import KpiValue from "@/components/atoms/KpiValue";
 import { useSimulationConfigStore } from "@/store/simulationConfigStore";
 import { useSimulationControlStore } from "@/store/simulationControlStore";
-import { ROUTES } from "@/utils/routes";
+import { useLiveSimulationStore } from "@/store/liveSimulationStore";
+import { startLiveSimulation } from "@/services/simulationService";
+import { ROUTES, resolveSimulationModuleRoute } from "@/utils/routes";
 import type { TipoSimulacion } from "@/types/common.types";
 import type { CsvSummary } from "@/store/simulationConfigStore";
 
@@ -17,16 +20,14 @@ import type { CsvSummary } from "@/store/simulationConfigStore";
 
 /**
  * Opciones de tipo de periodo disponibles.
- * Coinciden con los 4 tiles del mockup 02.
+ * La UI solo permite simulacion semanal de 5 dias o simulacion al colapso.
  */
 const PERIOD_OPTIONS: Array<{
   tipo: TipoSimulacion;
   label: string;
   sublabel: string;
 }> = [
-  { tipo: "semanal", label: "Semanal", sublabel: "7 dias" },
-  { tipo: "diario_5", label: "Diario", sublabel: "5 dias" },
-  { tipo: "diario_3", label: "Diario", sublabel: "3 dias" },
+  { tipo: "semanal", label: "Semanal", sublabel: "5 dias" },
   { tipo: "colapso", label: "Colapso", sublabel: "Sin limite" },
 ];
 
@@ -35,11 +36,13 @@ const PERIOD_OPTIONS: Array<{
  * Para "colapso" devuelve null (sin limite).
  */
 const DIAS_POR_TIPO: Record<TipoSimulacion, number | null> = {
-  semanal: 7,
-  diario_5: 5,
-  diario_3: 3,
+  semanal: 5,
   colapso: null,
-  dia_a_dia: null,
+};
+
+const K_BY_TIPO: Record<TipoSimulacion, number> = {
+  semanal: 15,
+  colapso: 30,
 };
 
 /**
@@ -82,6 +85,15 @@ const diaSemana = (iso: string): string => {
  */
 const SimulacionConfigPage = () => {
   const navigate = useNavigate();
+  const idSimulacion = useLiveSimulationStore((s) => s.idSimulacion);
+  const isRunning = useLiveSimulationStore((s) => s.isRunning);
+  const tipoSimulacion = useLiveSimulationStore((s) => s.tipoSimulacion);
+  const setIdSimulacion = useLiveSimulationStore((s) => s.setIdSimulacion);
+  const setTipoSimulacion = useLiveSimulationStore((s) => s.setTipoSimulacion);
+  const setEstadoSimulacion = useLiveSimulationStore((s) => s.setEstado);
+  const setIsRunning = useLiveSimulationStore((s) => s.setIsRunning);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
 
   const {
     tipoPeriodo,
@@ -98,30 +110,76 @@ const SimulacionConfigPage = () => {
 
   const { reset: resetControl } = useSimulationControlStore();
 
+  useEffect(() => {
+    if (idSimulacion === null) {
+      return;
+    }
+
+    navigate(
+      resolveSimulationModuleRoute({
+        idSimulacion,
+        isRunning,
+        tipoSimulacion,
+      }),
+      { replace: true }
+    );
+  }, [idSimulacion, isRunning, navigate, tipoSimulacion]);
+
   // Fecha fin estimada calculada segun el tipo de periodo.
   const diasPeriodo = DIAS_POR_TIPO[tipoPeriodo];
   const fechaFin =
     diasPeriodo && fechaInicio
       ? formatFechaDisplay(addDays(fechaInicio, diasPeriodo))
       : "Sin limite";
+  const periodoSeleccionado = PERIOD_OPTIONS.find((o) => o.tipo === tipoPeriodo);
 
-  const handleSimular = () => {
-    if (!csvSummary) return;
+  const handleSimular = async () => {
+    setStartError(null);
+    setIsStarting(true);
+
+    const k = K_BY_TIPO[tipoPeriodo];
+
     // Resetea el reloj de simulacion al arrancar una nueva corrida.
     resetControl();
-    // Navega segun el tipo: colapso va a su pantalla dedicada.
-    const destino =
-      tipoPeriodo === "colapso"
-        ? ROUTES.SIMULACION_COLAPSO
-        : ROUTES.SIMULACION_EJECUCION;
-    navigate(destino);
+
+    try {
+      const estado = await startLiveSimulation({
+        k,
+        fechaInicio,
+        horaInicio,
+        duracionDias: DIAS_POR_TIPO[tipoPeriodo],
+      });
+
+      if (!estado || estado.idSimulacion === null) {
+        setStartError("No se pudo iniciar la simulacion. Intente nuevamente.");
+        return;
+      }
+
+      setEstadoSimulacion(estado);
+      setIdSimulacion(estado.idSimulacion);
+      setTipoSimulacion(tipoPeriodo);
+      setIsRunning(Boolean(estado.activa));
+
+      // Navega segun el tipo: colapso va a su pantalla dedicada.
+      const destino =
+        tipoPeriodo === "colapso"
+          ? ROUTES.SIMULACION_COLAPSO
+          : ROUTES.SIMULACION_EJECUCION;
+      navigate(destino);
+    } catch (error) {
+      setStartError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo iniciar la simulacion."
+      );
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   const handleCancelar = () => {
     navigate(ROUTES.HOME);
   };
-
-  const puedeSimular = csvSummary !== null;
 
   return (
     <div className="p-8">
@@ -145,7 +203,7 @@ const SimulacionConfigPage = () => {
             <p className="text-body text-text-secondary mb-4">
               Seleccione el tipo de simulacion a ejecutar.
             </p>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               {PERIOD_OPTIONS.map((opt) => (
                 <PeriodTypeCard
                   key={opt.tipo}
@@ -255,7 +313,8 @@ const SimulacionConfigPage = () => {
               <h2 className="text-section-title">Carga de datos</h2>
             </div>
             <p className="text-body text-text-secondary mb-4">
-              Cargue los datos operativos desde un archivo plano CSV.
+              Puede cargar un CSV si desea revisar o sobrescribir datos, pero no
+              es obligatorio para ejecutar la simulacion.
             </p>
 
             {/* Boton descargar plantilla */}
@@ -295,9 +354,9 @@ const SimulacionConfigPage = () => {
                 <SummaryKpi
                   label="Periodo"
                   value={
-                    PERIOD_OPTIONS.find((o) => o.tipo === tipoPeriodo)
-                      ? `${PERIOD_OPTIONS.find((o) => o.tipo === tipoPeriodo)!.label} (${PERIOD_OPTIONS.find((o) => o.tipo === tipoPeriodo)!.sublabel})`
-                      : "—"
+                    periodoSeleccionado
+                      ? `${periodoSeleccionado.label} (${periodoSeleccionado.sublabel})`
+                      : "-"
                   }
                 />
                 <SummaryKpi label="Envios" value={csvSummary.envios} />
@@ -309,30 +368,37 @@ const SimulacionConfigPage = () => {
             </section>
           )}
 
-          {/* ---- Validacion: CSV requerido ---- */}
+          {/* ---- Validacion: CSV opcional ---- */}
           {!csvSummary && (
             <AlertBanner
               severity="informacion"
-              mensaje="Cargue un archivo CSV para habilitar la simulacion."
+              mensaje="No necesita cargar un CSV para simular: se usaran los datos disponibles en backend."
             />
           )}
 
           {/* ---- CTAs ---- */}
+          {startError && (
+            <AlertBanner severity="error" mensaje={startError} />
+          )}
+
           <div className="flex justify-end gap-3">
             <button
               type="button"
               onClick={handleCancelar}
+              disabled={isStarting}
               className="px-6 py-2.5 rounded-input border border-border text-button text-text-primary bg-card hover:bg-field transition-colors"
             >
               Cancelar
             </button>
             <button
               type="button"
-              onClick={handleSimular}
-              disabled={!puedeSimular}
-              className="px-6 py-2.5 rounded-input text-button text-text-inverse bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => {
+                void handleSimular();
+              }}
+              disabled={isStarting}
+              className="px-6 py-2.5 rounded-input text-button text-text-inverse bg-primary hover:bg-primary/90 transition-colors"
             >
-              Simular
+              {isStarting ? "Iniciando..." : "Simular"}
             </button>
           </div>
         </div>

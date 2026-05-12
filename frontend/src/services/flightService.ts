@@ -1,7 +1,14 @@
-import api from "@/services/api";
-import { mockResolve } from "@/services/sources2.0";
-import { VUELOS_DETALLE_MOCK } from "@/services/sources2.0/flightsDetail.mock";
-import { USE_MOCK_DATA } from "@/utils/constants";
+import {
+  fetchFlightsByAirportReferenceData,
+} from "@/services/referenceDataService";
+import {
+  cacheFlightsForAirport,
+  ensureFlightDetailCached,
+  getCachedFlightByCode,
+  getCachedFlightsByAirport,
+  hasCachedFlightsByAirport,
+  initializeReferenceData,
+} from "@/store/referenceDataStore";
 import type { VueloDetalle } from "@/types/flight.types";
 
 /**
@@ -22,16 +29,18 @@ import type { VueloDetalle } from "@/types/flight.types";
 export const getFlightByCode = async (
   codigo: string
 ): Promise<VueloDetalle | null> => {
-  if (USE_MOCK_DATA) {
-    const found = VUELOS_DETALLE_MOCK.find((v) => v.codigo === codigo);
-    return mockResolve<VueloDetalle | null>(found ?? null);
+  const cachedFlight = getCachedFlightByCode(codigo);
+  if (cachedFlight) {
+    return cachedFlight;
   }
+
   try {
-    const { data } = await api.get<VueloDetalle>(`/vuelos/${codigo}`);
-    return data;
+    await initializeReferenceData();
   } catch {
-    return null;
+    // Continuamos con fallback puntual por vuelo si la precarga falla.
   }
+
+  return ensureFlightDetailCached(codigo);
 };
 
 /**
@@ -44,12 +53,21 @@ export const getFlightByCode = async (
 export const listFlightsByAirport = async (
   icao: string
 ): Promise<VueloDetalle[]> => {
-  if (USE_MOCK_DATA) {
-    const filtered = VUELOS_DETALLE_MOCK.filter(
-      (v) => v.origenIcao === icao || v.destinoIcao === icao
-    );
-    return mockResolve<VueloDetalle[]>(filtered);
+  if (hasCachedFlightsByAirport(icao)) {
+    return getCachedFlightsByAirport(icao);
   }
-  const { data } = await api.get<VueloDetalle[]>(`/aeropuertos/${icao}/vuelos`);
-  return data;
+
+  try {
+    await initializeReferenceData();
+  } catch {
+    // Si falla la precarga global, cargamos solo el aeropuerto solicitado.
+  }
+
+  if (hasCachedFlightsByAirport(icao)) {
+    return getCachedFlightsByAirport(icao);
+  }
+
+  const flights = await fetchFlightsByAirportReferenceData(icao);
+  cacheFlightsForAirport(icao, flights);
+  return flights;
 };

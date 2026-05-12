@@ -1,459 +1,563 @@
 package pucp.edu.pe.tasfb2b.services;
 
-import org.springframework.core.io.ClassPathResource;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import pucp.edu.pe.tasfb2b.algorithms.ga.PlanificadorGenetico;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
+import pucp.edu.pe.tasfb2b.entities.EstadoEnvio;
 import pucp.edu.pe.tasfb2b.entities.Grafo;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
+import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
+import pucp.edu.pe.tasfb2b.entities.Vuelo;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
+import pucp.edu.pe.tasfb2b.repositories.RutaRepository;
+import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
+import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
+import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.util.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class SimulacionService {
 
-    private final GrafoService grafoService;
+    private static final Logger LOGGER = LoggerFactory.getLogger(SimulacionService.class);
+
+    private static final int SA_MINUTOS = 5;// bloque en minutos debe multiplicarse por k
+    private static final long INTERVALO_REAL_MS = 30000;//tiempo de espera entre ejecucion
+
+    private static final int TAMANO_POBLACION = 30;
+    private static final int GENERACIONES = 60;
+    private static final double TASA_CRUZAMIENTO = 0.85;
+    private static final double TASA_MUTACION = 0.25;
+    private static final int TAMANO_TORNEO = 3;
+    private static final int ESCALAS_INTERMEDIAS_MAX = 4;
+
+    private final SimulacionCargaService simulacionCargaService;
+    private final SimulacionEstadoService simulacionEstadoService;
     private final AeropuertoRepository aeropuertoRepository;
+    private final SolicitudEnvioRepository solicitudEnvioRepository;
+    private final RutaRepository rutaRepository;
+    private final SimulacionRepository simulacionRepository;
+    private final VueloRepository vueloRepository;
+    private final ObjectMapper objectMapper;
+
+    private boolean simulacionActiva = false;
+    private boolean procesandoBloque = false;
+
+    private Integer kActual;
+    private Integer scMinutos;
+    private Integer punteroConsumoMinutos;
+    private Integer ultimoMinutoSimulacion;
+
+    private LocalDateTime fechaHoraInicioSimulacion;
+    private List<SolicitudEnvio> solicitudesPendientes = new ArrayList<>();
+    private PlanificadorGenetico planificadorGA;
+    private final SimulacionMetricas metricas = new SimulacionMetricas();
+
+    private final Map<String, Aeropuerto> aeropuertosSimulados = new HashMap<>();
+    private final Map<Integer, Vuelo> vuelosSimulados = new HashMap<>();
+    private Simulacion simulacionActual;
+    private Integer ultimoIdSimulacion;
+    private int indiceSiguienteSolicitud = 0;
 
     public SimulacionService(
-            GrafoService grafoService,
-            AeropuertoRepository aeropuertoRepository
+            SimulacionCargaService simulacionCargaService,
+            SimulacionEstadoService simulacionEstadoService,
+            AeropuertoRepository aeropuertoRepository,
+            SolicitudEnvioRepository solicitudEnvioRepository,
+            RutaRepository rutaRepository,
+            SimulacionRepository simulacionRepository,
+            VueloRepository vueloRepository,
+            ObjectMapper objectMapper
     ) {
-        this.grafoService = grafoService;
+        this.simulacionCargaService = simulacionCargaService;
+        this.simulacionEstadoService = simulacionEstadoService;
         this.aeropuertoRepository = aeropuertoRepository;
+        this.solicitudEnvioRepository = solicitudEnvioRepository;
+        this.rutaRepository = rutaRepository;
+        this.simulacionRepository = simulacionRepository;
+        this.vueloRepository = vueloRepository;
+        this.objectMapper = objectMapper;
     }
 
-    @Transactional(readOnly = true)
-    public ResultadoSimulacion simularPeriodo(
-            String carpetaEnvios,
-            int limitePorArchivo,
-            int tamanoPoblacion,
-            int generaciones,
-            double tasaCruzamiento,
-            double tasaMutacion,
-            int tamanoTorneo,
-            int escalasIntermediasMax
+    public synchronized EstadoSimulacion iniciarSimulacion(
+            Integer k,
+            LocalDate fechaInicio,
+            LocalTime horaInicio,
+            Integer duracionDias
     ) throws IOException {
+        if (simulacionActiva) {
+            throw new IllegalStateException("Ya existe una simulacion activa. Detenla antes de iniciar otra.");
+        }
 
-        Map<String, Aeropuerto> aeropuertoPorCodigo = cargarAeropuertosDesdeBD();
+        if (k == null || k <= 0) {
+            throw new IllegalArgumentException("El parametro k debe ser mayor que 0.");
+        }
 
-        Path carpeta = new ClassPathResource(carpetaEnvios).getFile().toPath();
+        if (fechaInicio == null) {
+            throw new IllegalArgumentException("La fecha de inicio es obligatoria.");
+        }
 
-        List<SolicitudEnvio> solicitudes = cargarSolicitudesDesdeCarpeta(
-                carpeta,
-                aeropuertoPorCodigo,
-                limitePorArchivo
+        if (duracionDias != null && duracionDias <= 0) {
+            throw new IllegalArgumentException("La duracionDias debe ser mayor que 0 cuando se envia.");
+        }
+
+        LocalDateTime fechaHoraInicio = LocalDateTime.of(
+                fechaInicio,
+                horaInicio != null ? horaInicio : LocalTime.MIDNIGHT
         );
 
-        Grafo grafo = grafoService.construirGrafo();
+        this.kActual = k;
+        this.scMinutos = k * SA_MINUTOS;
+        this.punteroConsumoMinutos = 0;
+        this.indiceSiguienteSolicitud = 0;
+        this.fechaHoraInicioSimulacion = fechaHoraInicio;
 
-        PlanificadorGenetico planificadorGA = new PlanificadorGenetico(
-                grafo,
-                tamanoPoblacion,
-                generaciones,
-                tasaCruzamiento,
-                tasaMutacion,
-                tamanoTorneo,
-                escalasIntermediasMax
+        metricas.reiniciar();
+
+        this.solicitudesPendientes = simulacionCargaService.cargarSolicitudes(
+                fechaHoraInicioSimulacion,
+                duracionDias
         );
 
-        return procesarSolicitudes(solicitudes, planificadorGA);
+        if (solicitudesPendientes.isEmpty()) {
+            throw new IllegalArgumentException("No existen envios precargados dentro del rango solicitado.");
+        }
+
+        this.ultimoMinutoSimulacion = obtenerUltimoMinutoSimulacion(
+                solicitudesPendientes,
+                fechaHoraInicioSimulacion
+        );
+
+        this.simulacionActual = simulacionRepository.save(
+                new Simulacion(k, fechaHoraInicioSimulacion, true)
+        );
+        this.ultimoIdSimulacion = this.simulacionActual.getIdSimulacion();
+
+        inicializarEstadoSimulado();
+        this.simulacionActiva = true;
+
+        return obtenerEstado();
     }
 
-    @Transactional(readOnly = true)
-    public ResultadoSimulacion simularPeriodoPorDefecto() throws IOException {
-        return simularPeriodo(
-                "data/_envios_preliminar_",
-                50,
-                30,
-                60,
-                0.85,
-                0.25,
-                3,
-                4
+    public synchronized void detenerSimulacion() {
+        finalizarSimulacion();
+    }
+
+    public synchronized EstadoSimulacion obtenerEstado() {
+        return simulacionEstadoService.construirEstado(
+                simulacionActual != null ? simulacionActual.getIdSimulacion() : ultimoIdSimulacion,
+                simulacionActiva,
+                procesandoBloque,
+                kActual,
+                SA_MINUTOS,
+                scMinutos,
+                punteroConsumoMinutos,
+                ultimoMinutoSimulacion,
+                indiceSiguienteSolicitud,
+                solicitudesPendientes,
+                metricas
         );
     }
 
-    private ResultadoSimulacion procesarSolicitudes(
-            List<SolicitudEnvio> solicitudes,
-            PlanificadorGenetico planificadorGA
-    ) {
-        int resueltas = 0;
-        int noResueltas = 0;
+    public synchronized EstadoSimulacion obtenerEstado(Integer idSimulacion) {
+        if (idSimulacion == null || !idSimulacion.equals(ultimoIdSimulacion)) {
+            throw new IllegalArgumentException("No existe una simulacion con id " + idSimulacion + ".");
+        }
 
-        int noResueltasPorAlmacenOrigen = 0;
-        int noResueltasPorRutaVueloPlazo = 0;
+        return obtenerEstado();
+    }
 
-        int rutasDirectas = 0;
-        int rutasConParada = 0;
+    public synchronized List<SolicitudEnvio> obtenerEnviosSimulacion(Integer idSimulacion) {
+        validarSimulacionSolicitada(idSimulacion);
+        return solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
+    }
 
-        int totalVuelosUsados = 0;
-        int totalEscalas = 0;
+    public synchronized MapaSimulacionEstado obtenerMapaSimulacion(Integer idSimulacion) {
+        validarSimulacionSolicitada(idSimulacion);
 
-        double costoTotalRutas = 0.0;
-        long tiempoPlanificacionTotalNs = 0;
+        Map<String, Double> ocupacionPorAeropuerto = construirOcupacionPorAeropuerto(idSimulacion);
+        List<MapaSimulacionEstado.VueloMapa> vuelosMapa = construirVuelosMapa(idSimulacion);
 
-        for (int i = 0; i < solicitudes.size(); i++) {
-            SolicitudEnvio solicitud = solicitudes.get(i);
-            Aeropuerto origen = solicitud.getOrigen();
+        return new MapaSimulacionEstado(idSimulacion, ocupacionPorAeropuerto, vuelosMapa);
+    }
 
-            if (!origen.tieneCapacidad(solicitud.getContarBolsas())) {
-                noResueltas++;
-                noResueltasPorAlmacenOrigen++;
+    @Scheduled(fixedRate = INTERVALO_REAL_MS)
+    @Transactional
+    public synchronized void procesarSiguienteBloqueProgramado() {
+        if (!simulacionActiva || procesandoBloque) {
+            return;
+        }
+
+        try {
+            procesandoBloque = true;
+            procesarSiguienteBloque();
+        } finally {
+            procesandoBloque = false;
+        }
+    }
+
+    private void procesarSiguienteBloque() {
+        if (solicitudesPendientes == null || solicitudesPendientes.isEmpty()) {
+            finalizarSimulacion();
+            return;
+        }
+
+        if (punteroConsumoMinutos == null || scMinutos == null) {
+            finalizarSimulacion();
+            return;
+        }
+
+        if (punteroConsumoMinutos > ultimoMinutoSimulacion) {
+            finalizarSimulacion();
+            return;
+        }
+
+        int inicioVentana = punteroConsumoMinutos;
+        int finVentana = punteroConsumoMinutos + scMinutos;
+
+        List<SolicitudEnvio> bloque = obtenerSolicitudesDelBloque(
+                solicitudesPendientes,
+                fechaHoraInicioSimulacion,
+                inicioVentana,
+                finVentana
+        );
+
+        for (SolicitudEnvio solicitud : bloque) {
+            procesarSolicitudSimulada(solicitud);
+        }
+
+        metricas.incrementarBloquesProcesados();
+        punteroConsumoMinutos += scMinutos;
+
+        if (indiceSiguienteSolicitud >= solicitudesPendientes.size()
+                || punteroConsumoMinutos > ultimoMinutoSimulacion) {
+            finalizarSimulacion();
+        }
+    }
+
+    private void procesarSolicitudSimulada(SolicitudEnvio solicitud) {
+        metricas.incrementarTotalConsumidas();
+
+        solicitud.setSimulacion(simulacionActual);
+        solicitud.setEstado(EstadoEnvio.INGRESADO);
+        SolicitudEnvio solicitudGuardada = solicitudEnvioRepository.save(solicitud);
+
+        Aeropuerto origenSimulado = aeropuertosSimulados.get(solicitudGuardada.getOrigen().getCodigo());
+
+        if (origenSimulado == null || !origenSimulado.tieneCapacidad(solicitudGuardada.getContarBolsas())) {
+            metricas.incrementarNoResueltasPorAlmacenOrigen();
+            return;
+        }
+
+        solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
+        solicitudEnvioRepository.save(solicitudGuardada);
+
+        SolicitudEnvio solicitudSimulada = construirSolicitudSimulada(solicitudGuardada);
+
+        long inicioPlanificacion = System.nanoTime();
+        Ruta mejorRutaSimulada = planificadorGA.encontrarMejorRuta(solicitudSimulada);
+        long finPlanificacion = System.nanoTime();
+
+        metricas.registrarTiempoPlanificacion(finPlanificacion - inicioPlanificacion);
+
+        if (mejorRutaSimulada != null && mejorRutaSimulada.esFactible()) {
+            origenSimulado.descontarCapacidad(solicitudGuardada.getContarBolsas());
+            mejorRutaSimulada.reservarCapacidad(solicitudGuardada.getContarBolsas());
+
+            Ruta rutaGuardada = rutaRepository.save(convertirRutaPersistible(mejorRutaSimulada));
+
+            solicitudGuardada.setRuta(rutaGuardada);
+            solicitudGuardada.setEstado(EstadoEnvio.COMPLETADO);
+            solicitudEnvioRepository.save(solicitudGuardada);
+
+            int cantidadVuelos = mejorRutaSimulada.getVuelos().size();
+            metricas.registrarRutaResuelta(mejorRutaSimulada.getCosto(), cantidadVuelos);
+        } else {
+            metricas.incrementarNoResueltasPorRutaVueloPlazo();
+
+            solicitudGuardada.setEstado(EstadoEnvio.INGRESADO);
+            solicitudEnvioRepository.save(solicitudGuardada);
+        }
+    }
+
+    private void inicializarEstadoSimulado() {
+        aeropuertosSimulados.clear();
+        vuelosSimulados.clear();
+
+        for (Aeropuerto aeropuertoReal : aeropuertoRepository.findAll()) {
+            Aeropuerto aeropuertoClonado = clonarAeropuerto(aeropuertoReal);
+            aeropuertosSimulados.put(aeropuertoClonado.getCodigo(), aeropuertoClonado);
+        }
+
+        for (Vuelo vueloReal : vueloRepository.findByCancelado(false)) {
+            Vuelo vueloClonado = clonarVuelo(vueloReal);
+            vuelosSimulados.put(vueloClonado.getIdVuelo(), vueloClonado);
+        }
+
+        Grafo grafoSimulado = new Grafo();
+
+        for (Aeropuerto aeropuerto : aeropuertosSimulados.values()) {
+            grafoSimulado.agregarAeropuerto(aeropuerto);
+        }
+
+        for (Vuelo vuelo : vuelosSimulados.values()) {
+            grafoSimulado.agregarVuelo(vuelo);
+        }
+
+        this.planificadorGA = crearPlanificador(grafoSimulado);
+    }
+
+    private Aeropuerto clonarAeropuerto(Aeropuerto aeropuertoReal) {
+        return new Aeropuerto(
+                aeropuertoReal.getCodigo(),
+                aeropuertoReal.getCiudad(),
+                aeropuertoReal.getRegion(),
+                aeropuertoReal.getPais(),
+                aeropuertoReal.getAlias(),
+                aeropuertoReal.getDesplazamientoGMT(),
+                aeropuertoReal.getCapacidad(),
+                aeropuertoReal.getLatitud(),
+                aeropuertoReal.getLongitud()
+        );
+    }
+
+    private Vuelo clonarVuelo(Vuelo vueloReal) {
+        Aeropuerto desde = aeropuertosSimulados.get(vueloReal.getDesde().getCodigo());
+        Aeropuerto hasta = aeropuertosSimulados.get(vueloReal.getHasta().getCodigo());
+
+        Vuelo vueloClonado = new Vuelo(
+                desde,
+                hasta,
+                vueloReal.getTiempoViajarDias(),
+                vueloReal.getCapacidad(),
+                vueloReal.getSalidaUtcMin(),
+                vueloReal.getLlegadaUtcMin()
+        );
+        vueloClonado.setIdVuelo(vueloReal.getIdVuelo());
+        vueloClonado.setCapacidadUsada(vueloReal.getCapacidadUsada());
+        vueloClonado.setCancelado(vueloReal.getCancelado());
+
+        return vueloClonado;
+    }
+
+    private SolicitudEnvio construirSolicitudSimulada(SolicitudEnvio solicitudReal) {
+        Aeropuerto origenSimulado = aeropuertosSimulados.get(solicitudReal.getOrigen().getCodigo());
+        Aeropuerto destinoSimulado = aeropuertosSimulados.get(solicitudReal.getDestino().getCodigo());
+
+        return new SolicitudEnvio(
+                solicitudReal.getIdEnvio(),
+                solicitudReal.getFecha(),
+                solicitudReal.getHora(),
+                solicitudReal.getIdCliente(),
+                origenSimulado,
+                destinoSimulado,
+                solicitudReal.getContarBolsas(),
+                solicitudReal.getDiasTiempoMaximo()
+        );
+    }
+
+    private Ruta convertirRutaPersistible(Ruta rutaSimulada) {
+        Ruta rutaPersistible = new Ruta();
+        rutaPersistible.setTiempoTotal(rutaSimulada.getTiempoTotal());
+        rutaPersistible.setCosto(rutaSimulada.getCosto());
+        rutaPersistible.setFactible(rutaSimulada.getFactible());
+
+        List<Vuelo> vuelosPersistibles = new ArrayList<>();
+        for (Vuelo vueloSimulado : rutaSimulada.getVuelos()) {
+            vuelosPersistibles.add(vueloRepository.getReferenceById(vueloSimulado.getIdVuelo()));
+        }
+
+        rutaPersistible.setVuelos(vuelosPersistibles);
+        return rutaPersistible;
+    }
+
+    private void finalizarSimulacion() {
+        Integer idSimulacionFinal = simulacionActual != null
+                ? simulacionActual.getIdSimulacion()
+                : ultimoIdSimulacion;
+
+        if (this.simulacionActual != null) {
+            this.simulacionActual.setActiva(false);
+            this.simulacionActual.setFechaFin(LocalDateTime.now());
+            simulacionRepository.save(this.simulacionActual);
+        }
+
+        EstadoSimulacion estadoFinal = simulacionEstadoService.construirEstado(
+                idSimulacionFinal,
+                false,
+                false,
+                kActual,
+                SA_MINUTOS,
+                scMinutos,
+                punteroConsumoMinutos,
+                ultimoMinutoSimulacion,
+                indiceSiguienteSolicitud,
+                solicitudesPendientes,
+                metricas
+        );
+        imprimirEstadoFinalJson(estadoFinal);
+
+        this.simulacionActiva = false;
+        this.procesandoBloque = false;
+        this.planificadorGA = null;
+        this.fechaHoraInicioSimulacion = null;
+        this.aeropuertosSimulados.clear();
+        this.vuelosSimulados.clear();
+        this.simulacionActual = null;
+    }
+
+    private void validarSimulacionSolicitada(Integer idSimulacion) {
+        if (idSimulacion == null || !idSimulacion.equals(ultimoIdSimulacion)) {
+            throw new IllegalArgumentException("No existe una simulacion con id " + idSimulacion + ".");
+        }
+    }
+
+    private Map<String, Double> construirOcupacionPorAeropuerto(Integer idSimulacion) {
+        Map<String, Double> ocupacion = new LinkedHashMap<>();
+
+        if (simulacionActual != null && idSimulacion.equals(simulacionActual.getIdSimulacion())) {
+            for (Aeropuerto aeropuerto : aeropuertosSimulados.values()) {
+                double porcentaje = calcularOcupacionPorcentaje(
+                        aeropuerto.getCapacidad(),
+                        aeropuertoRepository.findByCodigo(aeropuerto.getCodigo())
+                                .map(Aeropuerto::getCapacidad)
+                                .orElse(aeropuerto.getCapacidad())
+                );
+                ocupacion.put(aeropuerto.getCodigo(), porcentaje);
+            }
+            return ocupacion;
+        }
+
+        for (Aeropuerto aeropuerto : aeropuertoRepository.findAll()) {
+            ocupacion.put(aeropuerto.getCodigo(), 0.0);
+        }
+
+        return ocupacion;
+    }
+
+    private double calcularOcupacionPorcentaje(Integer capacidadActual, Integer capacidadBase) {
+        if (capacidadBase == null || capacidadBase <= 0) {
+            return 0.0;
+        }
+
+        int actual = capacidadActual != null ? capacidadActual : 0;
+        double usado = Math.max(0, capacidadBase - actual);
+        return Math.min(100.0, (usado * 100.0) / capacidadBase);
+    }
+
+    private List<MapaSimulacionEstado.VueloMapa> construirVuelosMapa(Integer idSimulacion) {
+        List<MapaSimulacionEstado.VueloMapa> vuelosMapa = new ArrayList<>();
+        List<SolicitudEnvio> solicitudes = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
+
+        for (SolicitudEnvio solicitud : solicitudes) {
+            if (solicitud.getRuta() == null || solicitud.getRuta().getVuelos() == null) {
                 continue;
             }
 
-            long inicioPlanificacion = System.nanoTime();
-
-            Ruta mejorRuta = planificadorGA.encontrarMejorRuta(solicitud);
-
-            long finPlanificacion = System.nanoTime();
-
-            tiempoPlanificacionTotalNs += (finPlanificacion - inicioPlanificacion);
-
-            if (mejorRuta != null && mejorRuta.esFactible()) {
-                costoTotalRutas += mejorRuta.getCosto();
-
-                origen.descontarCapacidad(solicitud.getContarBolsas());
-                mejorRuta.reservarCapacidad(solicitud.getContarBolsas());
-
-                resueltas++;
-
-                int cantidadVuelos = mejorRuta.getVuelos().size();
-                int cantidadEscalas = Math.max(0, cantidadVuelos - 1);
-
-                totalVuelosUsados += cantidadVuelos;
-                totalEscalas += cantidadEscalas;
-
-                if (cantidadVuelos == 1) {
-                    rutasDirectas++;
-                } else {
-                    rutasConParada++;
-                }
-
-            } else {
-                noResueltas++;
-                noResueltasPorRutaVueloPlazo++;
+            int indice = 0;
+            for (Vuelo vuelo : solicitud.getRuta().getVuelos()) {
+                vuelosMapa.add(new MapaSimulacionEstado.VueloMapa(
+                        "sim-" + solicitud.getIdEnvio() + "-vuelo-" + vuelo.getIdVuelo() + "-" + indice,
+                        vuelo.getDesde().getCodigo(),
+                        vuelo.getHasta().getCodigo(),
+                        solicitud.getEstado() == EstadoEnvio.COMPLETADO ? 0.5 : 0.0
+                ));
+                indice++;
             }
         }
 
-        int totalSolicitudes = solicitudes.size();
+        return vuelosMapa;
+    }
 
-        double tiempoPlanificacionTotalSeg = tiempoPlanificacionTotalNs / 1_000_000_000.0;
-
-        double tiempoPromedioPorSolicitudMs = totalSolicitudes == 0
-                ? 0.0
-                : tiempoPlanificacionTotalNs / 1_000_000.0 / totalSolicitudes;
-
-        double porcentajeResueltas = totalSolicitudes == 0
-                ? 0.0
-                : ((double) resueltas / totalSolicitudes) * 100.0;
-
-        double costoPromedioRutas = resueltas == 0
-                ? 0.0
-                : costoTotalRutas / resueltas;
-
-        double promedioVuelos = resueltas == 0
-                ? 0.0
-                : (double) totalVuelosUsados / resueltas;
-
-        double promedioEscalas = resueltas == 0
-                ? 0.0
-                : (double) totalEscalas / resueltas;
-
-        double porcentajeDirectas = resueltas == 0
-                ? 0.0
-                : (double) rutasDirectas * 100.0 / resueltas;
-
-        double porcentajeConParada = resueltas == 0
-                ? 0.0
-                : (double) rutasConParada * 100.0 / resueltas;
-
-        double penalizacionEscalas = promedioEscalas * 2.0;
-        double penalizacionTiempo = tiempoPlanificacionTotalSeg * 0.05;
-
-        double fitnessGlobal = porcentajeResueltas - penalizacionEscalas - penalizacionTiempo;
-        fitnessGlobal = Math.max(0.0, Math.min(100.0, fitnessGlobal));
-
-        return new ResultadoSimulacion(
-                totalSolicitudes,
-                resueltas,
-                noResueltas,
-                noResueltasPorAlmacenOrigen,
-                noResueltasPorRutaVueloPlazo,
-                rutasDirectas,
-                rutasConParada,
-                totalVuelosUsados,
-                totalEscalas,
-                promedioVuelos,
-                promedioEscalas,
-                porcentajeDirectas,
-                porcentajeConParada,
-                costoPromedioRutas,
-                porcentajeResueltas,
-                tiempoPlanificacionTotalSeg,
-                tiempoPromedioPorSolicitudMs,
-                fitnessGlobal
+    private PlanificadorGenetico crearPlanificador(Grafo grafo) {
+        return new PlanificadorGenetico(
+                grafo,
+                TAMANO_POBLACION,
+                GENERACIONES,
+                TASA_CRUZAMIENTO,
+                TASA_MUTACION,
+                TAMANO_TORNEO,
+                ESCALAS_INTERMEDIAS_MAX
         );
     }
 
-    private Map<String, Aeropuerto> cargarAeropuertosDesdeBD() {
-        Map<String, Aeropuerto> aeropuertoPorCodigo = new HashMap<>();
+    private List<SolicitudEnvio> obtenerSolicitudesDelBloque(
+            List<SolicitudEnvio> solicitudes,
+            LocalDateTime fechaHoraInicioSimulacion,
+            int inicioVentana,
+            int finVentana
+    ) {
+        List<SolicitudEnvio> bloque = new ArrayList<>();
 
-        for (Aeropuerto aeropuerto : aeropuertoRepository.findAll()) {
-            aeropuertoPorCodigo.put(aeropuerto.getCodigo(), aeropuerto);
-        }
+        while (indiceSiguienteSolicitud < solicitudes.size()) {
+            SolicitudEnvio solicitud = solicitudes.get(indiceSiguienteSolicitud);
+            int minutoSimulacion = calcularMinutoSimulacion(solicitud, fechaHoraInicioSimulacion);
 
-        return aeropuertoPorCodigo;
-    }
-
-    private List<SolicitudEnvio> cargarSolicitudesDesdeCarpeta(
-            Path carpetaEnvios,
-            Map<String, Aeropuerto> aeropuertoPorCodigo,
-            int limitePorArchivo
-    ) throws IOException {
-
-        List<SolicitudEnvio> todasLasSolicitudes = new ArrayList<>();
-        List<Path> archivos = new ArrayList<>();
-
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(carpetaEnvios, "_envios_*_.txt")) {
-            for (Path archivo : stream) {
-                archivos.add(archivo);
+            if (minutoSimulacion < inicioVentana) {
+                indiceSiguienteSolicitud++;
+                continue;
             }
-        }
 
-        archivos.sort(Comparator.comparing(path -> path.getFileName().toString()));
-
-        for (Path archivo : archivos) {
-            List<SolicitudEnvio> solicitudesArchivo = cargarSolicitudesDesdeArchivo(
-                    archivo,
-                    aeropuertoPorCodigo,
-                    limitePorArchivo
-            );
-
-            todasLasSolicitudes.addAll(solicitudesArchivo);
-        }
-
-        return todasLasSolicitudes;
-    }
-
-    private List<SolicitudEnvio> cargarSolicitudesDesdeArchivo(
-            Path archivoEnvios,
-            Map<String, Aeropuerto> aeropuertoPorCodigo,
-            int limite
-    ) throws IOException {
-
-        List<SolicitudEnvio> solicitudes = new ArrayList<>();
-
-        String nombreArchivo = archivoEnvios.getFileName().toString();
-
-        String[] partesNombre = nombreArchivo.split("_");
-
-        if (partesNombre.length < 3) {
-            throw new IllegalArgumentException(
-                    "No se pudo obtener el aeropuerto origen desde el archivo: " + nombreArchivo
-            );
-        }
-
-        String codigoOrigen = partesNombre[2];
-        Aeropuerto origen = aeropuertoPorCodigo.get(codigoOrigen);
-
-        if (origen == null) {
-            throw new IllegalArgumentException("No existe aeropuerto origen en la BD: " + codigoOrigen);
-        }
-
-        try (var lineas = Files.lines(archivoEnvios, StandardCharsets.UTF_8)) {
-            Iterator<String> iterador = lineas.iterator();
-
-            while (iterador.hasNext() && solicitudes.size() < limite) {
-                String linea = iterador.next().trim();
-
-                if (linea.isEmpty()) {
-                    continue;
-                }
-
-                String[] partes = linea.split("-");
-
-                if (partes.length < 7) {
-                    continue;
-                }
-
-                String codigoDestino = partes[4].trim();
-                int cantidadMaletas = Integer.parseInt(partes[5].trim());
-
-                Aeropuerto destino = aeropuertoPorCodigo.get(codigoDestino);
-
-                if (destino == null) {
-                    continue;
-                }
-
-                if (origen.equals(destino)) {
-                    continue;
-                }
-
-                double plazoMaximoDias = calcularPlazoMaximoDias(origen, destino);
-
-                solicitudes.add(new SolicitudEnvio(
-                        origen,
-                        destino,
-                        cantidadMaletas,
-                        plazoMaximoDias
-                ));
+            if (minutoSimulacion >= finVentana) {
+                break;
             }
+
+            bloque.add(solicitud);
+            indiceSiguienteSolicitud++;
         }
 
-        return solicitudes;
+        return bloque;
     }
 
-    private double calcularPlazoMaximoDias(Aeropuerto origen, Aeropuerto destino) {
-        if (origen.getRegion().equals(destino.getRegion())) {
-            return 1.0;
+    private int calcularMinutoSimulacion(
+            SolicitudEnvio solicitud,
+            LocalDateTime fechaHoraInicioSimulacion
+    ) {
+        LocalDateTime fechaHoraSolicitud = solicitud.getFechaHoraRegistro();
+
+        if (fechaHoraSolicitud == null || fechaHoraInicioSimulacion == null) {
+            return 0;
         }
 
-        return 2.0;
+        return (int) ChronoUnit.MINUTES.between(
+                fechaHoraInicioSimulacion,
+                fechaHoraSolicitud
+        );
     }
 
-    public static class ResultadoSimulacion {
+    private int obtenerUltimoMinutoSimulacion(
+            List<SolicitudEnvio> solicitudes,
+            LocalDateTime fechaHoraInicioSimulacion
+    ) {
+        return solicitudes.stream()
+                .mapToInt(solicitud -> calcularMinutoSimulacion(solicitud, fechaHoraInicioSimulacion))
+                .max()
+                .orElse(0);
+    }
 
-        private final int totalSolicitudes;
-        private final int resueltas;
-        private final int noResueltas;
-        private final int noResueltasPorAlmacenOrigen;
-        private final int noResueltasPorRutaVueloPlazo;
-
-        private final int rutasDirectas;
-        private final int rutasConParada;
-        private final int totalVuelosUsados;
-        private final int totalEscalas;
-
-        private final double promedioVuelos;
-        private final double promedioEscalas;
-        private final double porcentajeDirectas;
-        private final double porcentajeConParada;
-
-        private final double costoPromedioRutas;
-        private final double porcentajeResueltas;
-        private final double tiempoPlanificacionTotalSeg;
-        private final double tiempoPromedioPorSolicitudMs;
-        private final double fitnessGlobal;
-
-        public ResultadoSimulacion(
-                int totalSolicitudes,
-                int resueltas,
-                int noResueltas,
-                int noResueltasPorAlmacenOrigen,
-                int noResueltasPorRutaVueloPlazo,
-                int rutasDirectas,
-                int rutasConParada,
-                int totalVuelosUsados,
-                int totalEscalas,
-                double promedioVuelos,
-                double promedioEscalas,
-                double porcentajeDirectas,
-                double porcentajeConParada,
-                double costoPromedioRutas,
-                double porcentajeResueltas,
-                double tiempoPlanificacionTotalSeg,
-                double tiempoPromedioPorSolicitudMs,
-                double fitnessGlobal
-        ) {
-            this.totalSolicitudes = totalSolicitudes;
-            this.resueltas = resueltas;
-            this.noResueltas = noResueltas;
-            this.noResueltasPorAlmacenOrigen = noResueltasPorAlmacenOrigen;
-            this.noResueltasPorRutaVueloPlazo = noResueltasPorRutaVueloPlazo;
-            this.rutasDirectas = rutasDirectas;
-            this.rutasConParada = rutasConParada;
-            this.totalVuelosUsados = totalVuelosUsados;
-            this.totalEscalas = totalEscalas;
-            this.promedioVuelos = promedioVuelos;
-            this.promedioEscalas = promedioEscalas;
-            this.porcentajeDirectas = porcentajeDirectas;
-            this.porcentajeConParada = porcentajeConParada;
-            this.costoPromedioRutas = costoPromedioRutas;
-            this.porcentajeResueltas = porcentajeResueltas;
-            this.tiempoPlanificacionTotalSeg = tiempoPlanificacionTotalSeg;
-            this.tiempoPromedioPorSolicitudMs = tiempoPromedioPorSolicitudMs;
-            this.fitnessGlobal = fitnessGlobal;
-        }
-
-        public int getTotalSolicitudes() {
-            return totalSolicitudes;
-        }
-
-        public int getResueltas() {
-            return resueltas;
-        }
-
-        public int getNoResueltas() {
-            return noResueltas;
-        }
-
-        public int getNoResueltasPorAlmacenOrigen() {
-            return noResueltasPorAlmacenOrigen;
-        }
-
-        public int getNoResueltasPorRutaVueloPlazo() {
-            return noResueltasPorRutaVueloPlazo;
-        }
-
-        public int getRutasDirectas() {
-            return rutasDirectas;
-        }
-
-        public int getRutasConParada() {
-            return rutasConParada;
-        }
-
-        public int getTotalVuelosUsados() {
-            return totalVuelosUsados;
-        }
-
-        public int getTotalEscalas() {
-            return totalEscalas;
-        }
-
-        public double getPromedioVuelos() {
-            return promedioVuelos;
-        }
-
-        public double getPromedioEscalas() {
-            return promedioEscalas;
-        }
-
-        public double getPorcentajeDirectas() {
-            return porcentajeDirectas;
-        }
-
-        public double getPorcentajeConParada() {
-            return porcentajeConParada;
-        }
-
-        public double getCostoPromedioRutas() {
-            return costoPromedioRutas;
-        }
-
-        public double getPorcentajeResueltas() {
-            return porcentajeResueltas;
-        }
-
-        public double getTiempoPlanificacionTotalSeg() {
-            return tiempoPlanificacionTotalSeg;
-        }
-
-        public double getTiempoPromedioPorSolicitudMs() {
-            return tiempoPromedioPorSolicitudMs;
-        }
-
-        public double getFitnessGlobal() {
-            return fitnessGlobal;
+    private void imprimirEstadoFinalJson(EstadoSimulacion estadoFinal) {
+        try {
+            String estadoJson = objectMapper.writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(estadoFinal);
+            LOGGER.info("Estado final de la simulacion:\n{}", estadoJson);
+        } catch (JsonProcessingException e) {
+            LOGGER.error("No se pudo serializar el estado final de la simulacion.", e);
         }
     }
 }

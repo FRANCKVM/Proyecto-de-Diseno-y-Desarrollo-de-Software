@@ -14,6 +14,7 @@ import RouteLine from "@/components/map/RouteLine";
  */
 export interface MapFlight {
   id: string;
+  code?: string;
   fromIcao: string;
   toIcao: string;
   progress: number;
@@ -138,7 +139,7 @@ const WorldMap = ({
         return (
           <FlightMarker
             key={f.id}
-            flightId={f.id}
+            flightId={f.code ?? f.id}
             fromAirport={from}
             toAirport={to}
             progress={f.progress}

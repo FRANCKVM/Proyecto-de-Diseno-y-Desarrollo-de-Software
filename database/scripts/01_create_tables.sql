@@ -3,6 +3,7 @@ USE tasfb2b;
 
 DROP TABLE IF EXISTS ruta_vuelo;
 DROP TABLE IF EXISTS solicitud_envio;
+DROP TABLE IF EXISTS simulacion;
 DROP TABLE IF EXISTS ruta;
 DROP TABLE IF EXISTS vuelo;
 DROP TABLE IF EXISTS aeropuerto;
@@ -81,6 +82,17 @@ CREATE TABLE ruta_vuelo (
         REFERENCES vuelo(id_vuelo)
 );
 
+CREATE TABLE simulacion (
+    id_simulacion INT AUTO_INCREMENT PRIMARY KEY,
+    k INT NOT NULL,
+    fecha_inicio DATETIME NOT NULL,
+    fecha_fin DATETIME NULL,
+    activa BOOLEAN NOT NULL DEFAULT TRUE,
+
+    CONSTRAINT chk_simulacion_k
+        CHECK (k > 0)
+);
+
 CREATE TABLE solicitud_envio (
     id_envio INT AUTO_INCREMENT PRIMARY KEY,
 
@@ -89,6 +101,7 @@ CREATE TABLE solicitud_envio (
 
     id_cliente INT NOT NULL,
     id_ruta INT NULL,
+    id_simulacion INT NULL,
 
     codigo_aeropuerto_origen VARCHAR(10) NOT NULL,
     codigo_aeropuerto_destino VARCHAR(10) NOT NULL,
@@ -102,6 +115,11 @@ CREATE TABLE solicitud_envio (
     CONSTRAINT fk_solicitud_ruta
         FOREIGN KEY (id_ruta)
         REFERENCES ruta(id_ruta)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_solicitud_simulacion
+        FOREIGN KEY (id_simulacion)
+        REFERENCES simulacion(id_simulacion)
         ON DELETE SET NULL,
 
     CONSTRAINT fk_solicitud_origen

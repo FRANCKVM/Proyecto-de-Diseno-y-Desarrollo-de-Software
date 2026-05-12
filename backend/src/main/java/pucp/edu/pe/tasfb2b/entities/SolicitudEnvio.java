@@ -27,6 +27,10 @@ public class SolicitudEnvio {
     @JoinColumn(name = "id_ruta")
     private Ruta ruta;
 
+    @ManyToOne
+    @JoinColumn(name = "id_simulacion")
+    private Simulacion simulacion;
+
     @ManyToOne(optional = false)
     @JoinColumn(
             name = "codigo_aeropuerto_origen",
@@ -61,6 +65,7 @@ public class SolicitudEnvio {
         this.hora = LocalTime.now();
         this.idCliente = 1;
         this.ruta = null;
+        this.simulacion = null;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -83,6 +88,7 @@ public class SolicitudEnvio {
         this.hora = hora;
         this.idCliente = idCliente;
         this.ruta = null;
+        this.simulacion = null;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -96,6 +102,7 @@ public class SolicitudEnvio {
             LocalTime hora,
             Integer idCliente,
             Ruta ruta,
+            Simulacion simulacion,
             Aeropuerto origen,
             Aeropuerto destino,
             Integer contarBolsas,
@@ -106,6 +113,7 @@ public class SolicitudEnvio {
         this.hora = hora;
         this.idCliente = idCliente;
         this.ruta = ruta;
+        this.simulacion = simulacion;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -119,6 +127,7 @@ public class SolicitudEnvio {
             LocalTime hora,
             Integer idCliente,
             Ruta ruta,
+            Simulacion simulacion,
             Aeropuerto origen,
             Aeropuerto destino,
             Integer contarBolsas,
@@ -130,6 +139,7 @@ public class SolicitudEnvio {
         this.hora = hora;
         this.idCliente = idCliente;
         this.ruta = ruta;
+        this.simulacion = simulacion;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -181,8 +191,20 @@ public class SolicitudEnvio {
         return ruta != null ? ruta.getIdRuta() : null;
     }
 
+    public Integer getIdSimulacion() {
+        return simulacion != null ? simulacion.getIdSimulacion() : null;
+    }
+
     public Aeropuerto getOrigen() {
         return origen;
+    }
+
+    public Simulacion getSimulacion() {
+        return simulacion;
+    }
+
+    public void setSimulacion(Simulacion simulacion) {
+        this.simulacion = simulacion;
     }
 
     public void setOrigen(Aeropuerto origen) {
@@ -236,6 +258,7 @@ public class SolicitudEnvio {
                 ", hora=" + hora +
                 ", idCliente=" + idCliente +
                 ", idRuta=" + getIdRuta() +
+                ", idSimulacion=" + (simulacion != null ? simulacion.getIdSimulacion() : null) +
                 ", origen=" + (origen != null ? origen.getCodigo() : null) +
                 ", destino=" + (destino != null ? destino.getCodigo() : null) +
                 ", contarBolsas=" + contarBolsas +

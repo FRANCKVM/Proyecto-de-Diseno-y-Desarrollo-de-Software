@@ -5,9 +5,6 @@
  * el shape para animacion visual. Aqui modelamos el vuelo como entidad
  * de negocio con horarios, capacidad, envios asociados, etc.
  */
-
-import type { Estado } from "@/types/common.types";
-
 /** Tipo de vuelo segun cobertura geografica. */
 export type TipoVuelo = "intracontinental" | "intercontinental";
 

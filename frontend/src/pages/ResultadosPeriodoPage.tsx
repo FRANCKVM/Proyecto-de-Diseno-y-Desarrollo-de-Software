@@ -5,6 +5,7 @@ import KpiCard from "@/components/molecules/KpiCard";
 import InfoRow from "@/components/molecules/InfoRow";
 import ResultsTable from "@/components/organisms/ResultsTable";
 import { getPeriodResult } from "@/services/simulationService";
+import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { ROUTES } from "@/utils/routes";
 import type { ResultadoPeriodo } from "@/types/simulationResult.types";
 
@@ -21,6 +22,7 @@ const ResultadosPeriodoPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [resultado, setResultado] = useState<ResultadoPeriodo | null>(null);
+  const resetLiveSimulation = useLiveSimulationStore((s) => s.reset);
 
   useEffect(() => {
     if (!id) return;
@@ -144,7 +146,10 @@ const ResultadosPeriodoPage = () => {
             </button>
             <button
               type="button"
-              onClick={() => navigate(ROUTES.SIMULACION_CONFIGURAR)}
+              onClick={() => {
+                resetLiveSimulation();
+                navigate(ROUTES.SIMULACION_CONFIGURAR);
+              }}
               className="px-6 py-2.5 rounded-input text-button text-text-inverse bg-primary hover:bg-primary/90 transition-colors"
             >
               Nueva simulacion

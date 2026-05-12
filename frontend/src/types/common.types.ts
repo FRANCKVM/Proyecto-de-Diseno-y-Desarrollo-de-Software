@@ -13,12 +13,7 @@ export type TipoEnvio = "intracontinental" | "intercontinental";
 export type Continente = "America" | "Europa" | "Asia";
 
 /** Tipo de simulacion soportado por el sistema. */
-export type TipoSimulacion =
-  | "semanal"
-  | "diario_5"
-  | "diario_3"
-  | "colapso"
-  | "dia_a_dia";
+export type TipoSimulacion = "semanal" | "colapso";
 
 /** Estado generico de operacion. */
 export type Estado =

@@ -2,6 +2,8 @@ import { useDrawerStore } from "@/store/drawerStore";
 import AirportDrawer from "@/components/drawers/AirportDrawer";
 import FlightDrawer from "@/components/drawers/FlightDrawer";
 import ShipmentDrawer from "@/components/drawers/ShipmentDrawer";
+import ShipmentFormDrawer from "@/components/drawers/ShipmentFormDrawer";
+import type { AirportWithCoords } from "@/types/airport.types";
 
 interface DrawerHostProps {
   /**
@@ -9,6 +11,8 @@ interface DrawerHostProps {
    * el porcentaje del semaforo. Cada pagina pasa su dataset propio.
    */
   occupancyByIcao?: Record<string, number>;
+  airports?: AirportWithCoords[];
+  onShipmentCreated?: () => Promise<void> | void;
 }
 
 /**
@@ -24,7 +28,11 @@ interface DrawerHostProps {
  * (o entre items del mismo tipo) la animacion slide-in se reinicie
  * y los efectos del componente se reseten.
  */
-const DrawerHost = ({ occupancyByIcao }: DrawerHostProps) => {
+const DrawerHost = ({
+  occupancyByIcao,
+  airports = [],
+  onShipmentCreated,
+}: DrawerHostProps) => {
   const selection = useDrawerStore((s) => s.selection);
 
   if (!selection) return null;
@@ -50,6 +58,14 @@ const DrawerHost = ({ occupancyByIcao }: DrawerHostProps) => {
         <ShipmentDrawer
           key={`shipment-${selection.codigo}`}
           codigo={selection.codigo}
+        />
+      );
+    case "shipment-form":
+      return (
+        <ShipmentFormDrawer
+          key="shipment-form"
+          airports={airports}
+          onCreated={onShipmentCreated}
         />
       );
   }

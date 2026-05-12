@@ -48,9 +48,13 @@ export const RESOLUCION_REFERENCIA = { width: 1440, height: 900 } as const;
 // SIMULACION
 // Limites operativos para los distintos escenarios de simulacion.
 // ============================================================================
-export const DURACION_SIMULACION_SEMANAL_DIAS = 7;
-export const DURACION_SIMULACION_DIARIA_5_DIAS = 5;
-export const DURACION_SIMULACION_DIARIA_3_DIAS = 3;
+export const DURACION_SIMULACION_SEMANAL_DIAS = 5;
+
+/**
+ * Intervalo real entre bloques de simulacion enviados/procesados por backend.
+ * Debe mantenerse alineado con SimulacionService.INTERVALO_REAL_MS.
+ */
+export const BACKEND_SIMULATION_BLOCK_INTERVAL_MS = 300000;
 
 /** Velocidades disponibles del reloj de simulacion. */
 export const VELOCIDADES_SIMULACION = [0.5, 1, 2, 4] as const;

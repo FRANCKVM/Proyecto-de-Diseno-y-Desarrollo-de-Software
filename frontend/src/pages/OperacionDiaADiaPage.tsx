@@ -5,7 +5,9 @@ import DrawerHost from "@/components/organisms/DrawerHost";
 import { OCCUPANCY_NORMAL } from "@/services/sources2.0/demoOccupancy.mock";
 import { useAirports } from "@/hooks/useAirports";
 import { useFlightSimulation } from "@/hooks/useFlightSimulation";
+import { useOperationData } from "@/hooks/useOperationData";
 import { useDrawerStore } from "@/store/drawerStore";
+import { USE_MOCK_DATA } from "@/utils/constants";
 
 /**
  * Pantalla de operacion dia a dia.
@@ -15,32 +17,42 @@ import { useDrawerStore } from "@/store/drawerStore";
  */
 const OperacionDiaADiaPage = () => {
   const { airports, isLoading } = useAirports();
+  const { estado, mapa, envios, refresh } = useOperationData();
 
   const flights = useFlightSimulation({
     baseFlightCount: 25,
     scaleByDemand: false,
+    backendShipments: USE_MOCK_DATA ? undefined : envios,
   });
+
+  const occupancy = USE_MOCK_DATA
+    ? OCCUPANCY_NORMAL
+    : (mapa?.ocupacionPorAeropuerto ?? {});
 
   const openAirport = useDrawerStore((s) => s.openAirport);
   const openFlight = useDrawerStore((s) => s.openFlight);
+  const openShipmentForm = useDrawerStore((s) => s.openShipmentForm);
 
   const handleRegistrarEnvio = () => {
-    // TODO: drawer "Registrar nuevo envio". Pendiente de un nuevo
-    // tipo en el drawerStore (form en lugar de detalle de entidad).
-    // eslint-disable-next-line no-console
-    console.info("[abrir drawer registrar envio]");
+    openShipmentForm();
   };
 
   return (
     <>
       <TopBar
         variant="dia-a-dia"
-        fechaActual="Lun 07/04/2026 09:45 (GMT-5)"
+        fechaActual={
+          USE_MOCK_DATA
+            ? "Lun 07/04/2026 09:45 (GMT-5)"
+            : (estado?.fechaActual ?? new Date().toISOString())
+        }
         kpis={{
-          enviosHoy: 23,
-          enTransito: flights.length,
-          entregadas: 89,
-          cumplimiento: "100%",
+          enviosHoy: USE_MOCK_DATA ? 23 : (estado?.enviosHoy ?? envios.length),
+          enTransito: USE_MOCK_DATA ? flights.length : (estado?.enTransito ?? 0),
+          entregadas: USE_MOCK_DATA ? 89 : (estado?.entregadas ?? 0),
+          cumplimiento: USE_MOCK_DATA
+            ? "100%"
+            : `${estado?.cumplimiento ?? 0}%`,
         }}
         onRegistrarEnvio={handleRegistrarEnvio}
       />
@@ -49,12 +61,16 @@ const OperacionDiaADiaPage = () => {
           <WorldMap
             airports={airports}
             flights={flights}
-            occupancyByIcao={OCCUPANCY_NORMAL}
+            occupancyByIcao={occupancy}
             onAirportClick={(a) => openAirport(a.icao)}
             onFlightClick={(id) => openFlight(id)}
           />
         )}
-        <DrawerHost occupancyByIcao={OCCUPANCY_NORMAL} />
+        <DrawerHost
+          occupancyByIcao={occupancy}
+          airports={airports}
+          onShipmentCreated={refresh}
+        />
       </main>
       <LegendBar variant="dia-a-dia" />
     </>

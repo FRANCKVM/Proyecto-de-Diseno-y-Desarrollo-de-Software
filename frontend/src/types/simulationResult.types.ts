@@ -41,7 +41,7 @@ export interface ResumenOperativo {
 }
 
 /**
- * Resultado de una simulacion de periodo (semanal / 5 dias / 3 dias).
+ * Resultado de una simulacion de periodo.
  * Mockup 07 del Figma.
  */
 export interface ResultadoPeriodo {

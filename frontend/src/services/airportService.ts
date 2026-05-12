@@ -1,9 +1,11 @@
-import api from "@/services/api";
-import { mockResolve } from "@/services/sources2.0";
-import { AIRPORTS_MOCK } from "@/services/sources2.0/airports.mock";
-import { USE_MOCK_DATA } from "@/utils/constants";
-import { parseAirportsList } from "@/utils/airportHelpers";
-import type { Airport, AirportWithCoords } from "@/types/airport.types";
+import { fetchAllAirportsReferenceData } from "@/services/referenceDataService";
+import {
+  getCachedAirportByIcao,
+  getCachedAirports,
+  initializeReferenceData,
+  useReferenceDataStore,
+} from "@/store/referenceDataStore";
+import type { AirportWithCoords } from "@/types/airport.types";
 
 /**
  * Servicio de aeropuertos.
@@ -21,12 +23,25 @@ import type { Airport, AirportWithCoords } from "@/types/airport.types";
  * Endpoint: GET /aeropuertos
  */
 export const listAirports = async (): Promise<AirportWithCoords[]> => {
-  if (USE_MOCK_DATA) {
-    const data = await mockResolve<Airport[]>(AIRPORTS_MOCK);
-    return parseAirportsList(data);
+  const cachedAirports = getCachedAirports();
+  if (cachedAirports.length > 0) {
+    return cachedAirports;
   }
-  const { data } = await api.get<Airport[]>("/aeropuertos");
-  return parseAirportsList(data);
+
+  try {
+    await initializeReferenceData();
+  } catch {
+    // Si falla la precarga global, reintentamos solo aeropuertos.
+  }
+
+  const hydratedAirports = getCachedAirports();
+  if (hydratedAirports.length > 0) {
+    return hydratedAirports;
+  }
+
+  const airports = await fetchAllAirportsReferenceData();
+  useReferenceDataStore.getState().setAirports(airports);
+  return airports;
 };
 
 /**
@@ -36,15 +51,11 @@ export const listAirports = async (): Promise<AirportWithCoords[]> => {
 export const getAirportByIcao = async (
   icao: string
 ): Promise<AirportWithCoords | null> => {
-  if (USE_MOCK_DATA) {
-    const found = AIRPORTS_MOCK.find((a) => a.icao === icao);
-    if (!found) return mockResolve<AirportWithCoords | null>(null);
-    return mockResolve<AirportWithCoords | null>(parseAirportsList([found])[0]);
+  const cachedAirport = getCachedAirportByIcao(icao);
+  if (cachedAirport) {
+    return cachedAirport;
   }
-  try {
-    const { data } = await api.get<Airport>(`/aeropuertos/${icao}`);
-    return parseAirportsList([data])[0];
-  } catch {
-    return null;
-  }
+
+  const airports = await listAirports();
+  return airports.find((airport) => airport.icao === icao) ?? null;
 };

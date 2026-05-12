@@ -15,6 +15,8 @@ export type { Airport };
  * Producto de aplicar `parseAirportCoords` sobre un `Airport`.
  */
 export interface AirportWithCoords extends Airport {
+  /** Continente o region operativa cuando viene del backend. */
+  region?: string;
   /** Latitud decimal. Negativa para hemisferio sur. */
   lat: number;
   /** Longitud decimal. Negativa para hemisferio oeste. */

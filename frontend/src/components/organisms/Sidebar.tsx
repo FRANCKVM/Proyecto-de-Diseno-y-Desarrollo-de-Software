@@ -1,7 +1,8 @@
 import { useLocation } from "react-router-dom";
 import { cn } from "@/utils/cn";
-import { ROUTES } from "@/utils/routes";
+import { ROUTES, resolveSimulationModuleRoute } from "@/utils/routes";
 import { useUserStore } from "@/store/userStore";
+import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import NavItem from "@/components/molecules/NavItem";
 import AvatarInitials from "@/components/atoms/AvatarInitials";
 
@@ -21,33 +22,6 @@ interface NavConfig {
   esActivoFn: (pathname: string) => boolean;
 }
 
-const NAV_ITEMS: NavConfig[] = [
-  {
-    letra: "H",
-    label: "Inicio",
-    to: ROUTES.HOME,
-    esActivoFn: (p) => p === ROUTES.HOME,
-  },
-  {
-    letra: "E",
-    label: "Envios",
-    to: ROUTES.ENVIOS_OPERACION,
-    esActivoFn: (p) => p.startsWith("/envios"),
-  },
-  {
-    letra: "S",
-    label: "Simulacion",
-    to: ROUTES.SIMULACION_CONFIGURAR,
-    esActivoFn: (p) => p.startsWith("/simulacion"),
-  },
-  {
-    letra: "D",
-    label: "Dashboard",
-    to: ROUTES.DASHBOARD,
-    esActivoFn: (p) => p.startsWith("/dashboard"),
-  },
-];
-
 /**
  * Sidebar de navegacion persistente del sistema Tasf.B2B.
  *
@@ -60,6 +34,40 @@ const NAV_ITEMS: NavConfig[] = [
 const Sidebar = ({ collapsed }: SidebarProps) => {
   const { pathname } = useLocation();
   const { nombre, rol } = useUserStore();
+  const idSimulacion = useLiveSimulationStore((s) => s.idSimulacion);
+  const isRunning = useLiveSimulationStore((s) => s.isRunning);
+  const tipoSimulacion = useLiveSimulationStore((s) => s.tipoSimulacion);
+
+  const navItems: NavConfig[] = [
+    {
+      letra: "H",
+      label: "Inicio",
+      to: ROUTES.HOME,
+      esActivoFn: (p) => p === ROUTES.HOME,
+    },
+    {
+      letra: "E",
+      label: "Envios",
+      to: ROUTES.ENVIOS_OPERACION,
+      esActivoFn: (p) => p.startsWith("/envios"),
+    },
+    {
+      letra: "S",
+      label: "Simulacion",
+      to: resolveSimulationModuleRoute({
+        idSimulacion,
+        isRunning,
+        tipoSimulacion,
+      }),
+      esActivoFn: (p) => p.startsWith("/simulacion"),
+    },
+    {
+      letra: "D",
+      label: "Dashboard",
+      to: ROUTES.DASHBOARD,
+      esActivoFn: (p) => p.startsWith("/dashboard"),
+    },
+  ];
 
   return (
     <aside
@@ -86,7 +94,7 @@ const Sidebar = ({ collapsed }: SidebarProps) => {
 
       {/* Navegacion principal */}
       <nav className="flex-1 py-4 flex flex-col gap-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavItem
             key={item.to}
             letra={item.letra}
