@@ -25,38 +25,115 @@ const getCurrentUtcMinute = (): number => {
 const clampProgress = (value: number): number =>
   Math.max(0, Math.min(1, value));
 
+const DAY_MINUTES = 24 * 60;
+
+const normalizeDailyMinute = (minute: number): number =>
+  ((minute % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+
+const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+};
+
+const getShipmentMinute = (
+  shipment: BackendSolicitudEnvio,
+  simulationStartMs: number | null
+): number | null => {
+  if (simulationStartMs === null) {
+    return null;
+  }
+
+  const shipmentMs = parseLocalDateTimeMs(`${shipment.fecha}T${shipment.hora}`);
+  if (shipmentMs === null) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor((shipmentMs - simulationStartMs) / 60_000));
+};
+
+const getNextFlightWindow = (
+  earliestMinute: number,
+  departureMinute: number | null | undefined,
+  arrivalMinute: number | null | undefined
+): { departure: number; arrival: number; durationMinutes: number } => {
+  const departure = normalizeDailyMinute(departureMinute ?? 0);
+  let arrival = arrivalMinute ?? departure;
+
+  while (arrival <= departure) {
+    arrival += DAY_MINUTES;
+  }
+
+  const durationMinutes = Math.max(1, arrival - departure);
+  const occurrenceOffset = Math.max(
+    0,
+    Math.ceil((earliestMinute - departure) / DAY_MINUTES)
+  );
+  const occurrenceDeparture = departure + occurrenceOffset * DAY_MINUTES;
+
+  return {
+    departure: occurrenceDeparture,
+    arrival: occurrenceDeparture + durationMinutes,
+    durationMinutes,
+  };
+};
+
+const calculateOccupancyPct = (
+  usedCapacity: number | null | undefined,
+  totalCapacity: number | null | undefined
+): number | undefined => {
+  if (!totalCapacity || totalCapacity <= 0) {
+    return undefined;
+  }
+
+  const used = Math.max(0, usedCapacity ?? 0);
+  return Math.min(100, (used * 100) / totalCapacity);
+};
+
 const buildFlightsFromShipments = (
   shipments: BackendSolicitudEnvio[],
-  currentMinute: number
+  currentMinute: number,
+  simulationStartMs: number | null
 ): AnimatedFlight[] => {
   const flights: AnimatedFlight[] = [];
 
   shipments.forEach((shipment, shipmentIndex) => {
     const routeFlights = shipment.ruta?.vuelos ?? [];
+    const shipmentMinute = getShipmentMinute(shipment, simulationStartMs);
+    let earliestDeparture = shipmentMinute ?? 0;
 
     routeFlights.forEach((flight, segmentIndex) => {
-      const durationMinutes = Math.max(
-        1,
-        (flight.llegadaUtcMin ?? 0) - (flight.salidaUtcMin ?? 0)
+      const { departure, arrival, durationMinutes } = getNextFlightWindow(
+        earliestDeparture,
+        flight.salidaUtcMin,
+        flight.llegadaUtcMin
       );
 
-      const progress =
-        currentMinute <= flight.salidaUtcMin
-          ? 0
-          : currentMinute >= flight.llegadaUtcMin
-          ? 1
-          : clampProgress(
-              (currentMinute - flight.salidaUtcMin) / durationMinutes
-            );
+      earliestDeparture = arrival;
+
+      if (currentMinute < departure || currentMinute >= arrival) {
+        return;
+      }
+
+      const progress = clampProgress(
+        (currentMinute - departure) / durationMinutes
+      );
 
       flights.push({
         id: `shipment-${shipment.idEnvio ?? shipmentIndex}-flight-${
           flight.idVuelo
-        }-${segmentIndex}`,
+        }-${segmentIndex}-${departure}`,
         code: String(flight.idVuelo),
         fromIcao: flight.desde.codigo,
         toIcao: flight.hasta.codigo,
         progress,
+        occupancyPct: calculateOccupancyPct(
+          flight.capacidadUsada,
+          flight.capacidad
+        ),
         durationSeconds: durationMinutes * 60,
       });
     });
@@ -91,6 +168,7 @@ export const useFlightSimulation = (
     scaleByDemand = false,
     backendShipments,
     backendClockMinutes,
+    backendSimulationStart,
     backendSimMinutesPerSecond,
   } = config;
 
@@ -134,7 +212,8 @@ export const useFlightSimulation = (
 
         const nextFlights = buildFlightsFromShipments(
           backendShipments,
-          currentMinute
+          currentMinute,
+          parseLocalDateTimeMs(backendSimulationStart)
         );
         flightsRef.current = nextFlights;
         setFlights(nextFlights);
@@ -148,7 +227,8 @@ export const useFlightSimulation = (
           : getCurrentUtcMinute();
       const initialFlights = buildFlightsFromShipments(
         backendShipments,
-        initialMinute
+        initialMinute,
+        parseLocalDateTimeMs(backendSimulationStart)
       );
       flightsRef.current = initialFlights;
       setFlights(initialFlights);
@@ -218,6 +298,7 @@ export const useFlightSimulation = (
     scaleByDemand,
     backendShipments,
     backendClockMinutes,
+    backendSimulationStart,
     backendSimMinutesPerSecond,
   ]);
 

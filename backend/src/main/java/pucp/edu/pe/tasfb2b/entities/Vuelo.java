@@ -45,6 +45,9 @@ public class Vuelo {
     @Column(name = "llegada_utc_min", nullable = false)
     private Integer llegadaUtcMin;
 
+    @Transient
+    private boolean bloqueadoPorVueloActivo = false;
+
     public Vuelo() {
     }
 
@@ -154,8 +157,16 @@ public class Vuelo {
         this.llegadaUtcMin = llegadaUtcMin;
     }
 
+    public boolean isBloqueadoPorVueloActivo() {
+        return bloqueadoPorVueloActivo;
+    }
+
+    public void setBloqueadoPorVueloActivo(boolean bloqueadoPorVueloActivo) {
+        this.bloqueadoPorVueloActivo = bloqueadoPorVueloActivo;
+    }
+
     public boolean tieneCapacidad(int bolsas) {
-        return !estaCancelado() && getCapacidadDisponible() >= bolsas;
+        return !bloqueadoPorVueloActivo && !estaCancelado() && getCapacidadDisponible() >= bolsas;
     }
 
     public void reservar(int bolsas) {

@@ -6,6 +6,7 @@ import {
 } from "@/services/sources2.0/simulationResults.mock";
 import { USE_MOCK_DATA } from "@/utils/constants";
 import type {
+  HistorialSimulacion,
   ResultadoPeriodo,
   ResultadoColapso,
 } from "@/types/simulationResult.types";
@@ -15,6 +16,45 @@ import type {
   BackendSolicitudEnvio,
 } from "@/types/backendSimulation.types";
 import axios from "axios";
+
+const SIMULATION_HISTORY_MOCK: HistorialSimulacion[] = [
+  {
+    id: 2,
+    tipo: "colapso",
+    k: 200,
+    activa: false,
+    fechaInicio: "2026-04-07T08:00:00",
+    fechaFin: "2026-04-07T10:45:00",
+    rango: RESULTADO_COLAPSO_MOCK.rango,
+    totalMaletas: RESULTADO_COLAPSO_MOCK.maletasProcesadas,
+    cumplimiento: null,
+    vuelosEjecutados: 248,
+    cancelaciones: 14,
+    replanificaciones: 38,
+    diasHastaColapso: RESULTADO_COLAPSO_MOCK.diasHastaColapso,
+    plazosIncumplidos: RESULTADO_COLAPSO_MOCK.plazosIncumplidos,
+    almacenesSaturados: RESULTADO_COLAPSO_MOCK.almacenesSaturados.cantidad,
+    mensajeResumen: RESULTADO_COLAPSO_MOCK.sugerencia,
+  },
+  {
+    id: 1,
+    tipo: "semanal",
+    k: 15,
+    activa: false,
+    fechaInicio: "2026-04-01T08:00:00",
+    fechaFin: "2026-04-01T09:07:00",
+    rango: RESULTADO_PERIODO_MOCK.rango,
+    totalMaletas: RESULTADO_PERIODO_MOCK.totalMaletas,
+    cumplimiento: RESULTADO_PERIODO_MOCK.cumplimiento,
+    vuelosEjecutados: RESULTADO_PERIODO_MOCK.vuelosEjecutados,
+    cancelaciones: RESULTADO_PERIODO_MOCK.cancelaciones,
+    replanificaciones: RESULTADO_PERIODO_MOCK.replanificaciones,
+    diasHastaColapso: null,
+    plazosIncumplidos: null,
+    almacenesSaturados: null,
+    mensajeResumen: RESULTADO_PERIODO_MOCK.conclusion,
+  },
+];
 
 /**
  * Servicio de resultados de simulacion.
@@ -72,6 +112,15 @@ export const getCollapseResult = async (
   } catch {
     return null;
   }
+};
+
+export const listSimulationHistory = async (): Promise<HistorialSimulacion[]> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<HistorialSimulacion[]>(SIMULATION_HISTORY_MOCK);
+  }
+
+  const { data } = await api.get<HistorialSimulacion[]>("/simulaciones/historial");
+  return data;
 };
 
 /**

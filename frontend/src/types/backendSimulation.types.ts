@@ -58,6 +58,8 @@ export interface BackendEstadoSimulacion {
   idSimulacion: number | null;
   activa: boolean;
   procesandoBloque: boolean;
+  fechaHoraInicioReal: string | null;
+  fechaHoraInicioSimulacion: string | null;
   k: number | null;
   saMinutos: number | null;
   scMinutos: number | null;

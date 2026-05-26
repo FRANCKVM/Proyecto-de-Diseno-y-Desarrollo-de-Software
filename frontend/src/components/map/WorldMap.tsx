@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { MapContainer as LeafletMap, TileLayer } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
+import type { RangoSemaforo } from "@/types/common.types";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import AirportMarker from "@/components/map/AirportMarker";
 import FlightMarker from "@/components/map/FlightMarker";
@@ -18,6 +19,7 @@ export interface MapFlight {
   fromIcao: string;
   toIcao: string;
   progress: number;
+  occupancyPct?: number;
 }
 
 interface WorldMapProps {
@@ -25,6 +27,7 @@ interface WorldMapProps {
   flights?: MapFlight[];
   /** Mapa de ICAO -> porcentaje de ocupacion 0-100. */
   occupancyByIcao?: Record<string, number>;
+  rangosSemaforo?: RangoSemaforo;
   onAirportClick?: (airport: AirportWithCoords) => void;
   onFlightClick?: (flightId: string) => void;
 }
@@ -79,6 +82,7 @@ const WorldMap = ({
   airports,
   flights = [],
   occupancyByIcao = {},
+  rangosSemaforo,
   onAirportClick,
   onFlightClick,
 }: WorldMapProps) => {
@@ -112,14 +116,23 @@ const WorldMap = ({
         const from = airportsByIcao.get(f.fromIcao);
         const to = airportsByIcao.get(f.toIcao);
         if (!from || !to) return null;
-        return <RouteLine key={`route-${f.id}`} from={from} to={to} />;
+        return (
+          <RouteLine
+            key={`route-${f.id}`}
+            from={from}
+            to={to}
+            progress={f.progress}
+          />
+        );
       })}
 
       {/* Capa 2: aeropuertos */}
       {airports.map((a) => {
         const ocupacion = occupancyByIcao[a.icao];
         const estado =
-          ocupacion !== undefined ? getEstadoSemaforo(ocupacion) : "normal";
+          ocupacion !== undefined
+            ? getEstadoSemaforo(ocupacion, rangosSemaforo)
+            : "normal";
         return (
           <AirportMarker
             key={a.id}
@@ -136,6 +149,10 @@ const WorldMap = ({
         const from = airportsByIcao.get(f.fromIcao);
         const to = airportsByIcao.get(f.toIcao);
         if (!from || !to) return null;
+        const flightEstado =
+          f.occupancyPct !== undefined
+            ? getEstadoSemaforo(f.occupancyPct, rangosSemaforo)
+            : undefined;
         return (
           <FlightMarker
             key={f.id}
@@ -143,6 +160,7 @@ const WorldMap = ({
             fromAirport={from}
             toAirport={to}
             progress={f.progress}
+            estado={flightEstado}
             onClick={onFlightClick}
           />
         );

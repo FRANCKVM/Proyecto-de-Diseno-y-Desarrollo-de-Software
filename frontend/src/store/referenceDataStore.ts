@@ -1,5 +1,8 @@
 import { create } from "zustand";
-import { fetchAllAirportsReferenceData, fetchFlightDetailReferenceData, fetchFlightsByAirportReferenceData } from "@/services/referenceDataService";
+import {
+  fetchAllAirportsReferenceData,
+  fetchFlightDetailReferenceData,
+} from "@/services/referenceDataService";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { VueloDetalle } from "@/types/flight.types";
 
@@ -124,39 +127,6 @@ export const initializeReferenceData = async (): Promise<void> => {
     try {
       const airports = await fetchAllAirportsReferenceData();
       useReferenceDataStore.getState().setAirports(airports);
-
-      const flightResults = await Promise.allSettled(
-        airports.map(async (airport) => ({
-          icao: airport.icao,
-          flights: await fetchFlightsByAirportReferenceData(airport.icao),
-        }))
-      );
-
-      const failedAirports: string[] = [];
-
-      for (const result of flightResults) {
-        if (result.status === "fulfilled") {
-          useReferenceDataStore
-            .getState()
-            .cacheFlightsForAirport(result.value.icao, result.value.flights);
-          continue;
-        }
-
-        const reason = result.reason;
-        failedAirports.push(
-          reason instanceof Error ? reason.message : "Error al cargar vuelos."
-        );
-      }
-
-      if (failedAirports.length > 0) {
-        useReferenceDataStore
-          .getState()
-          .setError(
-            new Error(
-              "Se cargaron los datos base, pero algunos vuelos no pudieron precargarse."
-            )
-          );
-      }
 
       useReferenceDataStore.getState().setInitialized(true);
     } catch (error) {

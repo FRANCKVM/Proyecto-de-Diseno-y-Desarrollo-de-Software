@@ -17,6 +17,11 @@ public class ResultadosSimulacionController {
         this.resultadosSimulacionService = resultadosSimulacionService;
     }
 
+    @GetMapping("/historial")
+    public ResponseEntity<?> listarHistorialSimulaciones() {
+        return ResponseEntity.ok(resultadosSimulacionService.listarHistorialSimulaciones());
+    }
+
     @GetMapping("/periodo/{id}")
     public ResponseEntity<?> obtenerResultadoPeriodo(@PathVariable Integer id) {
         try {

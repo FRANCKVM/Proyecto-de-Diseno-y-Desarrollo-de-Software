@@ -1,4 +1,4 @@
-import { Search, Plus, Pause, ChevronDown } from "lucide-react";
+import { Search, Plus } from "lucide-react";
 import { cn } from "@/utils/cn";
 import StatusDot from "@/components/atoms/StatusDot";
 
@@ -57,19 +57,55 @@ const ModoBadge = ({ variant, texto }: ModoBadgeProps) => {
 /**
  * Buscador minimalista de la topbar.
  */
-const SearchInput = ({ placeholder }: { placeholder: string }) => (
-  <div className="relative">
-    <Search
-      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary"
-      size={14}
-      aria-hidden
-    />
+interface SearchInputProps {
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  isLoading?: boolean;
+  error?: string | null;
+}
+
+const SearchInput = ({
+  placeholder,
+  value,
+  onChange,
+  onSubmit,
+  isLoading = false,
+  error,
+}: SearchInputProps) => (
+  <form
+    className="relative"
+    onSubmit={(event) => {
+      event.preventDefault();
+      onSubmit();
+    }}
+  >
+    <button
+      type="submit"
+      className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary transition-colors"
+      aria-label="Buscar vuelo"
+      disabled={isLoading}
+    >
+      <Search size={14} aria-hidden />
+    </button>
     <input
       type="search"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
-      className="bg-card border border-border rounded-input pl-8 pr-3 py-1.5 text-body w-64 placeholder:text-text-tertiary focus:outline-none focus:border-primary"
+      aria-invalid={Boolean(error)}
+      className={cn(
+        "bg-card border rounded-input pl-8 pr-3 py-1.5 text-body w-64 placeholder:text-text-tertiary focus:outline-none",
+        error ? "border-danger focus:border-danger" : "border-border focus:border-primary"
+      )}
     />
-  </div>
+    {error ? (
+      <p className="absolute top-full mt-1 left-0 text-secondary text-danger whitespace-nowrap">
+        {error}
+      </p>
+    ) : null}
+  </form>
 );
 
 // ============================================================================
@@ -78,21 +114,32 @@ const SearchInput = ({ placeholder }: { placeholder: string }) => (
 
 interface TopBarEjecucionProps {
   variant: "ejecucion";
-  fechaSimulada: string;
+  reloj: {
+    inicioSimulacion: string;
+    horaActual: string;
+    horaSimulacion: string;
+    tiempoRealTranscurrido: string;
+    tiempoSimulacionTranscurrido: string;
+  };
   dia: { actual: number; total: number };
-  tiempoReal: { transcurrido: string; estimado: string };
   kpis: {
     entregas: string;
     enTransito: number;
     entregadas: number;
     cancelados: number;
   };
-  onPausar?: () => void;
 }
 
 interface TopBarDiaADiaProps {
   variant: "dia-a-dia";
   fechaActual: string;
+  buscador: {
+    valor: string;
+    error?: string | null;
+    isLoading?: boolean;
+    onChange: (value: string) => void;
+    onSubmit: () => void;
+  };
   kpis: {
     enviosHoy: number;
     enTransito: number;
@@ -104,12 +151,18 @@ interface TopBarDiaADiaProps {
 
 interface TopBarColapsoProps {
   variant: "colapso";
+  reloj: {
+    inicioSimulacion: string;
+    horaActual: string;
+    horaSimulacion: string;
+    tiempoRealTranscurrido: string;
+    tiempoSimulacionTranscurrido: string;
+  };
   diaSimulado: number;
   demanda: string;
   enviosTotales: number;
   cumplimiento: string;
   estado: string;
-  onAbrirEscenarios?: () => void;
 }
 
 export type TopBarProps =
@@ -138,14 +191,26 @@ const TopBar = (props: TopBarProps) => {
       return (
         <header className={baseClass}>
           <ModoBadge variant="ejecucion" texto="En ejecucion" />
-          <KpiInline label="Fecha simulada:" value={props.fechaSimulada} />
+          <KpiInline
+            label="Inicio sim.:"
+            value={props.reloj.inicioSimulacion}
+          />
+          <KpiInline label="Hora actual:" value={props.reloj.horaActual} />
+          <KpiInline
+            label="Hora simulacion:"
+            value={props.reloj.horaSimulacion}
+          />
+          <KpiInline
+            label="Transcurrido real:"
+            value={props.reloj.tiempoRealTranscurrido}
+          />
+          <KpiInline
+            label="Transcurrido sim.:"
+            value={props.reloj.tiempoSimulacionTranscurrido}
+          />
           <span className="text-button text-primary">
             Dia {props.dia.actual} de {props.dia.total}
           </span>
-          <KpiInline
-            label="Tiempo real:"
-            value={`${props.tiempoReal.transcurrido} / ${props.tiempoReal.estimado}`}
-          />
           <div className="flex items-center gap-5 ml-auto mr-4">
             <KpiInline
               label="Entregas:"
@@ -160,15 +225,6 @@ const TopBar = (props: TopBarProps) => {
             />
             <KpiInline label="Cancelados:" value={props.kpis.cancelados} />
           </div>
-          <SearchInput placeholder="Buscar almacen, vuelo, envio..." />
-          <button
-            type="button"
-            onClick={props.onPausar}
-            className="w-9 h-9 rounded-input border border-border bg-card hover:bg-field flex items-center justify-center text-text-secondary"
-            aria-label="Pausar simulacion"
-          >
-            <Pause size={16} />
-          </button>
         </header>
       );
 
@@ -195,7 +251,14 @@ const TopBar = (props: TopBarProps) => {
               valueClass="text-success"
             />
           </div>
-          <SearchInput placeholder="Buscar..." />
+          <SearchInput
+            placeholder="Buscar vuelo por ID..."
+            value={props.buscador.valor}
+            error={props.buscador.error}
+            isLoading={props.buscador.isLoading}
+            onChange={props.buscador.onChange}
+            onSubmit={props.buscador.onSubmit}
+          />
           <button
             type="button"
             onClick={props.onRegistrarEnvio}
@@ -211,6 +274,23 @@ const TopBar = (props: TopBarProps) => {
       return (
         <header className={baseClass}>
           <ModoBadge variant="colapso" texto="Escenario de estres" />
+          <KpiInline
+            label="Inicio sim.:"
+            value={props.reloj.inicioSimulacion}
+          />
+          <KpiInline label="Hora actual:" value={props.reloj.horaActual} />
+          <KpiInline
+            label="Hora simulacion:"
+            value={props.reloj.horaSimulacion}
+          />
+          <KpiInline
+            label="Transcurrido real:"
+            value={props.reloj.tiempoRealTranscurrido}
+          />
+          <KpiInline
+            label="Transcurrido sim.:"
+            value={props.reloj.tiempoSimulacionTranscurrido}
+          />
           <KpiInline label="Dia simulado:" value={props.diaSimulado} />
           <KpiInline
             label="Demanda:"
@@ -231,14 +311,6 @@ const TopBar = (props: TopBarProps) => {
             value={props.estado}
             valueClass="text-danger"
           />
-          <button
-            type="button"
-            onClick={props.onAbrirEscenarios}
-            className="ml-auto inline-flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-text-inverse text-button px-3 py-2 rounded-input transition-colors"
-          >
-            Escenarios
-            <ChevronDown size={14} />
-          </button>
         </header>
       );
   }

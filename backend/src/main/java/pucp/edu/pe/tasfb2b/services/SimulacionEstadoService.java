@@ -3,6 +3,7 @@ package pucp.edu.pe.tasfb2b.services;
 import org.springframework.stereotype.Service;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -12,6 +13,8 @@ public class SimulacionEstadoService {
             Integer idSimulacion,
             boolean simulacionActiva,
             boolean procesandoBloque,
+            LocalDateTime fechaHoraInicioReal,
+            LocalDateTime fechaHoraInicioSimulacion,
             Integer kActual,
             Integer saMinutos,
             Integer scMinutos,
@@ -65,6 +68,8 @@ public class SimulacionEstadoService {
                 idSimulacion,
                 simulacionActiva,
                 procesandoBloque,
+                fechaHoraInicioReal,
+                fechaHoraInicioSimulacion,
                 kActual,
                 saMinutos,
                 scMinutos,

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import TopBar from "@/components/organisms/TopBar";
 import LegendBar from "@/components/organisms/LegendBar";
 import WorldMap from "@/components/map/WorldMap";
@@ -17,6 +17,11 @@ import {
   USE_MOCK_DATA,
 } from "@/utils/constants";
 import { resolveSimulationResultsRoute } from "@/utils/routes";
+import { useSimulationConfigStore } from "@/store/simulationConfigStore";
+import {
+  formatDuration,
+  resolveSimulationClockData,
+} from "@/utils/simulationClock";
 
 /**
  * Pantalla de simulacion en ejecucion.
@@ -27,14 +32,27 @@ import { resolveSimulationResultsRoute } from "@/utils/routes";
 const SimulacionEjecucionPage = () => {
   const navigate = useNavigate();
   const { airports, isLoading } = useAirports();
+  const fechaInicioConfig = useSimulationConfigStore((s) => s.fechaInicio);
+  const horaInicioConfig = useSimulationConfigStore((s) => s.horaInicio);
+  const rangosSemaforo = useSimulationConfigStore((s) => s.rangos);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const {
     idSimulacion,
     tipoSimulacion,
     occupancyByIcao,
     estado,
     envios,
-    stop,
   } = useLiveSimulation({ autoStart: true, enablePolling: false });
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const backendSimMinutesPerSecond =
     estado?.scMinutos && BACKEND_SIMULATION_BLOCK_INTERVAL_MS > 0
@@ -48,6 +66,9 @@ const SimulacionEjecucionPage = () => {
     backendClockMinutes: USE_MOCK_DATA
       ? undefined
       : estado?.punteroConsumoMinutos,
+    backendSimulationStart: USE_MOCK_DATA
+      ? undefined
+      : estado?.fechaHoraInicioSimulacion,
     backendSimMinutesPerSecond: USE_MOCK_DATA
       ? undefined
       : backendSimMinutesPerSecond,
@@ -58,15 +79,30 @@ const SimulacionEjecucionPage = () => {
   const openAirport = useDrawerStore((s) => s.openAirport);
   const openFlight = useDrawerStore((s) => s.openFlight);
 
-  const totalSolicitudes = estado?.totalSolicitudes ?? envios.length;
   const porcentajeResueltas = estado?.porcentajeResueltas ?? 0;
   const resueltas = estado?.resueltas ?? 0;
   const noResueltas = estado?.noResueltas ?? 0;
+  const {
+    elapsedRealMs,
+    elapsedSimulatedMs,
+    inicioSimulacion,
+    horaActual,
+    horaSimulacion,
+  } = resolveSimulationClockData({
+    estado,
+    fechaInicio: fechaInicioConfig,
+    horaInicio: horaInicioConfig,
+    nowMs,
+    useMockData: USE_MOCK_DATA,
+    backendBlockIntervalMs: BACKEND_SIMULATION_BLOCK_INTERVAL_MS,
+  });
   const diaActualBackend =
-    estado?.punteroConsumoMinutos !== null &&
-    estado?.punteroConsumoMinutos !== undefined
-      ? Math.floor(estado.punteroConsumoMinutos / (24 * 60)) + 1
-      : null;
+    elapsedSimulatedMs > 0
+      ? Math.floor(elapsedSimulatedMs / (24 * 60 * 60_000)) + 1
+      : estado?.punteroConsumoMinutos !== null &&
+          estado?.punteroConsumoMinutos !== undefined
+        ? Math.floor(estado.punteroConsumoMinutos / (24 * 60)) + 1
+        : null;
   const diaActual = USE_MOCK_DATA
     ? simulatedDay
     : Math.min(DURACION_SIMULACION_SEMANAL_DIAS, diaActualBackend ?? 1);
@@ -90,29 +126,22 @@ const SimulacionEjecucionPage = () => {
     <>
       <TopBar
         variant="ejecucion"
-        fechaSimulada={
-          USE_MOCK_DATA
-            ? "Mie 09/04/2026 14:30"
-            : `Simulacion #${estado?.idSimulacion ?? "-"}`
-        }
+        reloj={{
+          inicioSimulacion,
+          horaActual,
+          horaSimulacion,
+          tiempoRealTranscurrido: formatDuration(elapsedRealMs),
+          tiempoSimulacionTranscurrido: formatDuration(elapsedSimulatedMs),
+        }}
         dia={{
           actual: diaActual,
           total: DURACION_SIMULACION_SEMANAL_DIAS,
-        }}
-        tiempoReal={{
-          transcurrido: `${estado?.bloquesProcesados ?? 0} bloques`,
-          estimado: `${estado?.totalSolicitudesCargadas ?? totalSolicitudes} envios`,
         }}
         kpis={{
           entregas: `${Math.round(porcentajeResueltas)}%`,
           enTransito: flights.length,
           entregadas: resueltas,
           cancelados: noResueltas,
-        }}
-        onPausar={() => {
-          if (!USE_MOCK_DATA) {
-            void stop();
-          }
         }}
       />
       <main className="flex-1 min-h-0 bg-map-bg relative">
@@ -121,12 +150,18 @@ const SimulacionEjecucionPage = () => {
             airports={airports}
             flights={flights}
             occupancyByIcao={occupancy}
+            rangosSemaforo={rangosSemaforo}
             onAirportClick={(a) => openAirport(a.icao)}
-            onFlightClick={(id) => openFlight(id)}
+            onFlightClick={(id) => openFlight(id, { idSimulacion })}
           />
         )}
         <SimulationControlPanel variant="ejecucion" />
-        <DrawerHost occupancyByIcao={occupancy} airports={airports} />
+        <DrawerHost
+          occupancyByIcao={occupancy}
+          airports={airports}
+          rangosSemaforo={rangosSemaforo}
+          idSimulacion={idSimulacion}
+        />
       </main>
       <LegendBar variant="simulacion" />
     </>

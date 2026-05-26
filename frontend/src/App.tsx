@@ -4,6 +4,7 @@ import ReferenceDataBootstrap from "@/components/organisms/ReferenceDataBootstra
 import ManagementLayout from "@/layouts/ManagementLayout";
 import SimulationLayout from "@/layouts/SimulationLayout";
 import HomePage from "@/pages/HomePage";
+import DashboardPage from "@/pages/DashboardPage";
 import SimulacionConfigPage from "@/pages/SimulacionConfigPage";
 import SimulacionEjecucionPage from "@/pages/SimulacionEjecucionPage";
 import SimulacionColapsoPage from "@/pages/SimulacionColapsoPage";
@@ -16,6 +17,7 @@ import ResultadosColapsoPage from "@/pages/ResultadosColapsoPage";
  *
  * Pantallas de gestion (ManagementLayout, sidebar 220px):
  * - /                                              Home
+ * - /dashboard                                     Dashboard de simulaciones
  * - /simulacion/configurar                         Configuracion
  * - /simulacion/resultados/:id                     Resultados periodo
  * - /simulacion/resultados-colapso/:id             Resultados colapso
@@ -34,6 +36,7 @@ const App = () => (
     <Routes>
       <Route element={<ManagementLayout />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/simulacion/configurar" element={<SimulacionConfigPage />} />
         <Route
           path="/simulacion/resultados/:id"

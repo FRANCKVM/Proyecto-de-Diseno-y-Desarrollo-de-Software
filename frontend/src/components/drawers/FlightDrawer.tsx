@@ -8,6 +8,7 @@ import type { VueloDetalle } from "@/types/flight.types";
 
 interface FlightDrawerProps {
   codigo: string;
+  idSimulacion?: number | null;
 }
 
 /**
@@ -31,36 +32,52 @@ const formatFecha = (iso: string): string => {
  * envios transportados. Los envios son clickeables y abren el
  * ShipmentDrawer correspondiente.
  */
-const FlightDrawer = ({ codigo }: FlightDrawerProps) => {
+const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
 
   const [flight, setFlight] = useState<VueloDetalle | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setNotFound(false);
 
-    getFlightByCode(codigo)
+    getFlightByCode(codigo, idSimulacion)
       .then((data) => {
         if (cancelled) return;
         setFlight(data);
+        setNotFound(!data);
         setIsLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setNotFound(true);
+          setIsLoading(false);
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [codigo]);
+  }, [codigo, idSimulacion]);
 
-  if (isLoading || !flight) {
+  if (isLoading) {
     return (
       <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
         <p className="text-body text-text-tertiary">Cargando informacion...</p>
+      </DrawerBase>
+    );
+  }
+
+  if (notFound || !flight) {
+    return (
+      <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
+        <p className="text-body text-text-tertiary">
+          No se encontro informacion para este vuelo.
+        </p>
       </DrawerBase>
     );
   }

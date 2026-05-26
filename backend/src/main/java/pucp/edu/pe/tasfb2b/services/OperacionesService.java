@@ -1,5 +1,6 @@
 package pucp.edu.pe.tasfb2b.services;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pucp.edu.pe.tasfb2b.controllers.dto.EstadoOperacionResponse;
@@ -11,9 +12,11 @@ import pucp.edu.pe.tasfb2b.entities.Grafo;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.entities.VueloCancelacion;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
 import pucp.edu.pe.tasfb2b.repositories.RutaRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
+import pucp.edu.pe.tasfb2b.repositories.VueloCancelacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
 
 import java.time.LocalDate;
@@ -42,19 +45,28 @@ public class OperacionesService {
     private final SolicitudEnvioRepository solicitudEnvioRepository;
     private final RutaRepository rutaRepository;
     private final VueloRepository vueloRepository;
+    private final VueloCancelacionRepository vueloCancelacionRepository;
+    private final VueloCancelacionService vueloCancelacionService;
+    private final EstadoLogisticoService estadoLogisticoService;
 
     public OperacionesService(
             GrafoService grafoService,
             AeropuertoRepository aeropuertoRepository,
             SolicitudEnvioRepository solicitudEnvioRepository,
             RutaRepository rutaRepository,
-            VueloRepository vueloRepository
+            VueloRepository vueloRepository,
+            VueloCancelacionRepository vueloCancelacionRepository,
+            VueloCancelacionService vueloCancelacionService,
+            EstadoLogisticoService estadoLogisticoService
     ) {
         this.grafoService = grafoService;
         this.aeropuertoRepository = aeropuertoRepository;
         this.solicitudEnvioRepository = solicitudEnvioRepository;
         this.rutaRepository = rutaRepository;
         this.vueloRepository = vueloRepository;
+        this.vueloCancelacionRepository = vueloCancelacionRepository;
+        this.vueloCancelacionService = vueloCancelacionService;
+        this.estadoLogisticoService = estadoLogisticoService;
     }
 
     @Transactional
@@ -64,15 +76,61 @@ public class OperacionesService {
         }
 
         List<SolicitudEnvio> solicitudes = normalizarSolicitudes(solicitudesEntrantes);
-        Grafo grafo = grafoService.construirGrafo();
-        PlanificadorGenetico planificador = crearPlanificador(grafo);
         List<SolicitudEnvio> resultados = new ArrayList<>();
 
         for (SolicitudEnvio solicitud : solicitudes) {
-            resultados.add(procesarSolicitudReal(solicitud, planificador));
+            resultados.add(procesarSolicitudReal(solicitud));
         }
 
         return resultados;
+    }
+
+    @Scheduled(fixedRate = 60000)
+    @Transactional
+    public void procesarCancelacionesProgramadasOperacion() {
+        LocalDateTime ahora = LocalDateTime.now();
+        LocalDate hoy = ahora.toLocalDate();
+        List<LocalDate> fechas = List.of(hoy, hoy.plusDays(1));
+
+        for (Vuelo vuelo : vueloRepository.findByCancelado(false)) {
+            for (LocalDate fecha : fechas) {
+                LocalDateTime fechaHoraSalida = vueloCancelacionService.construirFechaHoraSalida(
+                        fecha.atStartOfDay(),
+                        vuelo
+                );
+
+                if (fechaHoraSalida.isBefore(ahora.plusMinutes(VueloCancelacionService.MINUTOS_AVISO_MIN))
+                        || fechaHoraSalida.isAfter(ahora.plusMinutes(VueloCancelacionService.MINUTOS_AVISO_MAX))) {
+                    continue;
+                }
+
+                long claveSalida = vueloCancelacionService.convertirAClaveMinutos(fechaHoraSalida);
+                if (!vueloCancelacionService.debeCancelar(vuelo, claveSalida)) {
+                    continue;
+                }
+
+                LocalDateTime fechaHoraCancelacion = vueloCancelacionService.calcularFechaHoraCancelacion(
+                        vuelo,
+                        fechaHoraSalida
+                );
+
+                if (fechaHoraCancelacion.isAfter(ahora)
+                        || vueloCancelacionRepository.existsByVuelo_IdVueloAndFechaHoraSalida(
+                        vuelo.getIdVuelo(),
+                        fechaHoraSalida
+                )) {
+                    continue;
+                }
+
+                VueloCancelacion cancelacion = vueloCancelacionRepository.save(new VueloCancelacion(
+                        vuelo,
+                        fechaHoraSalida,
+                        fechaHoraCancelacion,
+                        ahora
+                ));
+                replanificarEnviosAfectadosOperacion(cancelacion);
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -129,8 +187,13 @@ public class OperacionesService {
         int enviosHoy = (int) envios.stream()
                 .filter(envio -> hoy.equals(envio.getFecha()))
                 .count();
+        int minutoActualUtc = estadoLogisticoService.obtenerMinutoActualUtc();
         int entregadas = (int) envios.stream()
-                .filter(envio -> envio.getEstado() == EstadoEnvio.COMPLETADO)
+                .filter(envio -> estadoLogisticoService.estaEnvioEntregado(
+                        envio,
+                        minutoActualUtc,
+                        false
+                ))
                 .count();
         int cumplimiento = envios.isEmpty()
                 ? 100
@@ -195,16 +258,16 @@ public class OperacionesService {
         return solicitudes;
     }
 
-    private SolicitudEnvio procesarSolicitudReal(
-            SolicitudEnvio solicitud,
-            PlanificadorGenetico planificador
-    ) {
+    private SolicitudEnvio procesarSolicitudReal(SolicitudEnvio solicitud) {
         validarSolicitud(solicitud);
 
         solicitud.setEstado(EstadoEnvio.INGRESADO);
         solicitud.setSimulacion(null);
         SolicitudEnvio solicitudGuardada = solicitudEnvioRepository.save(solicitud);
+        return planificarSolicitudRealGuardada(solicitudGuardada);
+    }
 
+    private SolicitudEnvio planificarSolicitudRealGuardada(SolicitudEnvio solicitudGuardada) {
         Aeropuerto origen = solicitudGuardada.getOrigen();
 
         if (!origen.tieneCapacidad(solicitudGuardada.getContarBolsas())) {
@@ -214,6 +277,16 @@ public class OperacionesService {
         solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
         solicitudEnvioRepository.save(solicitudGuardada);
 
+        Ruta rutaDirecta = encontrarRutaDirectaFactible(solicitudGuardada);
+        if (rutaDirecta != null) {
+            return guardarRutaPlanificada(solicitudGuardada, rutaDirecta);
+        }
+
+        Grafo grafo = grafoService.construirGrafo();
+        PlanificadorGenetico planificador = crearPlanificador(
+                grafo,
+                solicitudGuardada.getFechaHoraRegistro()
+        );
         Ruta mejorRuta = planificador.encontrarMejorRuta(solicitudGuardada);
 
         if (mejorRuta == null || !mejorRuta.esFactible()) {
@@ -221,20 +294,114 @@ public class OperacionesService {
             return solicitudEnvioRepository.save(solicitudGuardada);
         }
 
+        return guardarRutaPlanificada(solicitudGuardada, mejorRuta);
+    }
+
+    private SolicitudEnvio guardarRutaPlanificada(SolicitudEnvio solicitudGuardada, Ruta ruta) {
+        Aeropuerto origen = solicitudGuardada.getOrigen();
+
         origen.descontarCapacidad(solicitudGuardada.getContarBolsas());
         aeropuertoRepository.save(origen);
 
-        mejorRuta.reservarCapacidad(solicitudGuardada.getContarBolsas());
-        guardarCapacidadesVuelos(mejorRuta);
+        ruta.reservarCapacidad(solicitudGuardada.getContarBolsas());
+        guardarCapacidadesVuelos(ruta);
 
-        Ruta rutaGuardada = rutaRepository.save(mejorRuta);
+        Ruta rutaGuardada = rutaRepository.save(ruta);
 
         solicitudGuardada.setRuta(rutaGuardada);
-        solicitudGuardada.setEstado(EstadoEnvio.COMPLETADO);
+        solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
         return solicitudEnvioRepository.save(solicitudGuardada);
     }
 
-    private PlanificadorGenetico crearPlanificador(Grafo grafo) {
+    private Ruta encontrarRutaDirectaFactible(SolicitudEnvio solicitud) {
+        int minutoInicio = solicitud.getFechaHoraRegistro() != null
+                ? solicitud.getFechaHoraRegistro().getHour() * 60 + solicitud.getFechaHoraRegistro().getMinute()
+                : -1;
+        LocalDateTime fechaBase = solicitud.getFechaHoraRegistro() != null
+                ? solicitud.getFechaHoraRegistro().toLocalDate().atStartOfDay()
+                : LocalDate.now().atStartOfDay();
+
+        Vuelo mejorVuelo = null;
+        double mejorIncrementoDias = Double.MAX_VALUE;
+
+        for (Vuelo vuelo : vueloRepository.findByDesde_CodigoAndHasta_Codigo(
+                solicitud.getOrigen().getCodigo(),
+                solicitud.getDestino().getCodigo()
+        )) {
+            if (vuelo.estaCancelado() || !vuelo.tieneCapacidad(solicitud.getContarBolsas())) {
+                continue;
+            }
+
+            VentanaVueloOperacionDirecta ventana = calcularVentanaVueloOperacionDirecta(vuelo, minutoInicio, fechaBase);
+            if (!estaOcurrenciaOperacionDisponible(vuelo, ventana.fechaHoraSalida())) {
+                continue;
+            }
+
+            double incrementoDias = calcularIncrementoDiasOperacionDirecta(ventana, minutoInicio);
+            if (incrementoDias <= 0 || incrementoDias > solicitud.getDiasTiempoMaximo()) {
+                continue;
+            }
+
+            if (incrementoDias < mejorIncrementoDias) {
+                mejorIncrementoDias = incrementoDias;
+                mejorVuelo = vuelo;
+            }
+        }
+
+        if (mejorVuelo == null) {
+            return null;
+        }
+
+        Ruta ruta = new Ruta();
+        ruta.agregarVuelo(mejorVuelo, mejorIncrementoDias);
+        ruta.evaluar(solicitud);
+        return ruta.esFactible() ? ruta : null;
+    }
+
+    private VentanaVueloOperacionDirecta calcularVentanaVueloOperacionDirecta(
+            Vuelo vuelo,
+            int minutoReferencia,
+            LocalDateTime fechaBase
+    ) {
+        int salida = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
+        int llegada = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salida;
+
+        while (llegada <= salida) {
+            llegada += VueloCancelacionService.MINUTOS_DIA;
+        }
+
+        if (minutoReferencia >= 0) {
+            while (salida < minutoReferencia) {
+                salida += VueloCancelacionService.MINUTOS_DIA;
+                llegada += VueloCancelacionService.MINUTOS_DIA;
+            }
+        }
+
+        return new VentanaVueloOperacionDirecta(
+                vuelo,
+                salida,
+                llegada,
+                fechaBase.plusMinutes(salida),
+                fechaBase.plusMinutes(llegada)
+        );
+    }
+
+    private double calcularIncrementoDiasOperacionDirecta(
+            VentanaVueloOperacionDirecta ventana,
+            int minutoReferencia
+    ) {
+        int referencia = minutoReferencia >= 0 ? minutoReferencia : ventana.salidaMinuto();
+        return (ventana.llegadaMinuto() - referencia) / (double) VueloCancelacionService.MINUTOS_DIA;
+    }
+
+    private PlanificadorGenetico crearPlanificador(Grafo grafo, LocalDateTime fechaHoraInicio) {
+        int minutoInicio = fechaHoraInicio != null
+                ? fechaHoraInicio.getHour() * 60 + fechaHoraInicio.getMinute()
+                : -1;
+        LocalDateTime fechaBase = fechaHoraInicio != null
+                ? fechaHoraInicio.toLocalDate().atStartOfDay()
+                : LocalDate.now().atStartOfDay();
+
         return new PlanificadorGenetico(
                 grafo,
                 TAMANO_POBLACION,
@@ -242,8 +409,98 @@ public class OperacionesService {
                 TASA_CRUZAMIENTO,
                 TASA_MUTACION,
                 TAMANO_TORNEO,
-                ESCALAS_INTERMEDIAS_MAX
+                ESCALAS_INTERMEDIAS_MAX,
+                minutoInicio,
+                (vuelo, salidaMinuto) -> estaOcurrenciaOperacionDisponible(vuelo, fechaBase.plusMinutes(salidaMinuto))
         );
+    }
+
+    private boolean estaOcurrenciaOperacionDisponible(Vuelo vuelo, LocalDateTime fechaHoraSalida) {
+        return !vueloCancelacionRepository.existsByVuelo_IdVueloAndFechaHoraSalida(
+                vuelo.getIdVuelo(),
+                fechaHoraSalida
+        );
+    }
+
+    private void replanificarEnviosAfectadosOperacion(VueloCancelacion cancelacion) {
+        for (SolicitudEnvio envio : solicitudEnvioRepository.findBySimulacionIsNullOrderByIdEnvioAsc()) {
+            if (envio.getRuta() == null
+                    || envio.getEstado() == EstadoEnvio.COMPLETADO
+                    || !envioUsaOcurrenciaCancelada(envio, cancelacion)) {
+                continue;
+            }
+
+            liberarRutaOperacion(envio);
+            envio.setRuta(null);
+            envio.setEstado(EstadoEnvio.INGRESADO);
+            solicitudEnvioRepository.save(envio);
+            planificarSolicitudRealGuardada(envio);
+        }
+    }
+
+    private boolean envioUsaOcurrenciaCancelada(SolicitudEnvio envio, VueloCancelacion cancelacion) {
+        for (VentanaVueloOperacion ventana : calcularVentanasRutaOperacion(envio)) {
+            if (ventana.vuelo().getIdVuelo().equals(cancelacion.getVuelo().getIdVuelo())
+                    && ventana.fechaHoraSalida().equals(cancelacion.getFechaHoraSalida())
+                    && ventana.fechaHoraSalida().isAfter(cancelacion.getFechaHoraCancelacion())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private List<VentanaVueloOperacion> calcularVentanasRutaOperacion(SolicitudEnvio envio) {
+        List<VentanaVueloOperacion> ventanas = new ArrayList<>();
+        if (envio.getRuta() == null || envio.getRuta().getVuelos() == null || envio.getFecha() == null) {
+            return ventanas;
+        }
+
+        LocalDateTime fechaBase = envio.getFecha().atStartOfDay();
+        int minutoReferencia = envio.getHora() != null
+                ? envio.getHora().getHour() * 60 + envio.getHora().getMinute()
+                : 0;
+
+        for (Vuelo vuelo : envio.getRuta().getVuelos()) {
+            int salida = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
+            int llegada = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salida;
+
+            while (llegada <= salida) {
+                llegada += VueloCancelacionService.MINUTOS_DIA;
+            }
+
+            while (salida < minutoReferencia) {
+                salida += VueloCancelacionService.MINUTOS_DIA;
+                llegada += VueloCancelacionService.MINUTOS_DIA;
+            }
+
+            ventanas.add(new VentanaVueloOperacion(
+                    vuelo,
+                    fechaBase.plusMinutes(salida),
+                    fechaBase.plusMinutes(llegada)
+            ));
+            minutoReferencia = llegada;
+        }
+
+        return ventanas;
+    }
+
+    private void liberarRutaOperacion(SolicitudEnvio envio) {
+        Aeropuerto origen = envio.getOrigen();
+        if (origen != null) {
+            origen.aumentarCapacidad(envio.getContarBolsas());
+            aeropuertoRepository.save(origen);
+        }
+
+        if (envio.getRuta() == null || envio.getRuta().getVuelos() == null) {
+            return;
+        }
+
+        for (Vuelo vuelo : envio.getRuta().getVuelos()) {
+            int capacidadUsada = vuelo.getCapacidadUsada() != null ? vuelo.getCapacidadUsada() : 0;
+            vuelo.setCapacidadUsada(Math.max(0, capacidadUsada - envio.getContarBolsas()));
+            vueloRepository.save(vuelo);
+        }
     }
 
     private void validarSolicitud(SolicitudEnvio solicitud) {
@@ -358,5 +615,21 @@ public class OperacionesService {
         }
 
         return (minutoActualUtc - salida) / (double) (llegada - salida);
+    }
+
+    private record VentanaVueloOperacion(
+            Vuelo vuelo,
+            LocalDateTime fechaHoraSalida,
+            LocalDateTime fechaHoraLlegada
+    ) {
+    }
+
+    private record VentanaVueloOperacionDirecta(
+            Vuelo vuelo,
+            int salidaMinuto,
+            int llegadaMinuto,
+            LocalDateTime fechaHoraSalida,
+            LocalDateTime fechaHoraLlegada
+    ) {
     }
 }

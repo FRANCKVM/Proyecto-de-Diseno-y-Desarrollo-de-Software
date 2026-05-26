@@ -36,9 +36,12 @@ public class AeropuertoController {
     }
 
     @GetMapping("/{codigo}/vuelos")
-    public ResponseEntity<?> obtenerVuelosAeropuerto(@PathVariable String codigo) {
+    public ResponseEntity<?> obtenerVuelosAeropuerto(
+            @PathVariable String codigo,
+            @RequestParam(required = false) Integer idSimulacion
+    ) {
         try {
-            return ResponseEntity.ok(seguimientoService.listarVuelosPorAeropuerto(codigo));
+            return ResponseEntity.ok(seguimientoService.listarVuelosPorAeropuerto(codigo, idSimulacion));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }

@@ -36,7 +36,8 @@ export const fetchAllAirportsReferenceData = async (): Promise<
 };
 
 export const fetchFlightsByAirportReferenceData = async (
-  icao: string
+  icao: string,
+  idSimulacion?: number | null
 ): Promise<VueloDetalle[]> => {
   if (USE_MOCK_DATA) {
     const filtered = VUELOS_DETALLE_MOCK.filter(
@@ -45,12 +46,15 @@ export const fetchFlightsByAirportReferenceData = async (
     return mockResolve<VueloDetalle[]>(filtered);
   }
 
-  const { data } = await api.get<VueloDetalle[]>(`/aeropuertos/${icao}/vuelos`);
+  const { data } = await api.get<VueloDetalle[]>(`/aeropuertos/${icao}/vuelos`, {
+    params: idSimulacion != null ? { idSimulacion } : undefined,
+  });
   return data;
 };
 
 export const fetchFlightDetailReferenceData = async (
-  codigo: string
+  codigo: string,
+  idSimulacion?: number | null
 ): Promise<VueloDetalle | null> => {
   if (USE_MOCK_DATA) {
     const found = VUELOS_DETALLE_MOCK.find((v) => v.codigo === codigo);
@@ -58,7 +62,9 @@ export const fetchFlightDetailReferenceData = async (
   }
 
   try {
-    const { data } = await api.get<VueloDetalle>(`/vuelos/${codigo}`);
+    const { data } = await api.get<VueloDetalle>(`/vuelos/${codigo}`, {
+      params: idSimulacion != null ? { idSimulacion } : undefined,
+    });
     return data;
   } catch {
     return null;

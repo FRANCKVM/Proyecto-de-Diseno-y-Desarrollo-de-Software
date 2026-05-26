@@ -2,10 +2,10 @@ package pucp.edu.pe.tasfb2b.services;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import pucp.edu.pe.tasfb2b.controllers.dto.HistorialSimulacionResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.ResultadoColapsoResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.ResultadoPeriodoResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
-import pucp.edu.pe.tasfb2b.entities.EstadoEnvio;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,21 +42,31 @@ public class ResultadosSimulacionService {
     public ResultadoPeriodoResponse obtenerResultadoPeriodo(Integer idSimulacion) {
         Simulacion simulacion = obtenerSimulacion(idSimulacion);
         List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
+        return construirResultadoPeriodo(simulacion, envios);
+    }
 
+    private ResultadoPeriodoResponse construirResultadoPeriodo(
+            Simulacion simulacion,
+            List<SolicitudEnvio> envios
+    ) {
         Map<String, AeropuertoStats> statsPorAeropuerto = construirStatsPorAeropuerto(envios);
         List<ResultadoPeriodoResponse.DesempenoAeropuertoResponse> desempeno = statsPorAeropuerto.values().stream()
                 .map(this::mapearDesempenoAeropuerto)
                 .toList();
 
         int totalMaletas = envios.stream().mapToInt(envio -> valor(envio.getContarBolsas())).sum();
-        int totalResueltas = (int) envios.stream().filter(envio -> envio.getEstado() == EstadoEnvio.COMPLETADO).count();
+        int totalResueltas = (int) envios.stream()
+                .filter(envio -> envio.getRuta() != null)
+                .count();
         int cumplimiento = calcularPorcentaje(totalResueltas, envios.size());
         int vuelosEjecutados = envios.stream()
                 .map(SolicitudEnvio::getRuta)
                 .filter(ruta -> ruta != null && ruta.getVuelos() != null)
                 .mapToInt(ruta -> ruta.getVuelos().size())
                 .sum();
-        int cancelaciones = (int) envios.stream().filter(envio -> envio.getEstado() != EstadoEnvio.COMPLETADO).count();
+        int cancelaciones = (int) envios.stream()
+                .filter(envio -> envio.getRuta() == null)
+                .count();
         int replanificaciones = (int) envios.stream()
                 .map(SolicitudEnvio::getRuta)
                 .filter(ruta -> ruta != null && ruta.getVuelos() != null && ruta.getVuelos().size() > 1)
@@ -76,7 +87,7 @@ public class ResultadosSimulacionService {
                 : null;
 
         return new ResultadoPeriodoResponse(
-                String.valueOf(idSimulacion),
+                String.valueOf(simulacion.getIdSimulacion()),
                 "semanal",
                 construirRango(simulacion),
                 totalMaletas,
@@ -92,8 +103,13 @@ public class ResultadosSimulacionService {
     }
 
     public ResultadoColapsoResponse obtenerResultadoColapso(Integer idSimulacion) {
-        ResultadoPeriodoResponse periodo = obtenerResultadoPeriodo(idSimulacion);
+        Simulacion simulacion = obtenerSimulacion(idSimulacion);
+        List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
+        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios);
+        return construirResultadoColapso(periodo);
+    }
 
+    private ResultadoColapsoResponse construirResultadoColapso(ResultadoPeriodoResponse periodo) {
         List<ResultadoColapsoResponse.AeropuertoCriticoResponse> aeropuertosCriticos = periodo.desempenoPorAeropuerto().stream()
                 .filter(a -> a.ocupacionMaxima() >= UMBRAL_ELEVADO)
                 .sorted(Comparator.comparing(ResultadoPeriodoResponse.DesempenoAeropuertoResponse::ocupacionMaxima).reversed())
@@ -133,7 +149,7 @@ public class ResultadosSimulacionService {
                 + ".");
 
         return new ResultadoColapsoResponse(
-                String.valueOf(idSimulacion),
+                periodo.id(),
                 periodo.rango(),
                 Math.max(1, periodo.resumen().duracionMinutos().intValue() / (24 * 60)),
                 periodo.totalMaletas(),
@@ -151,9 +167,89 @@ public class ResultadosSimulacionService {
         );
     }
 
+    public List<HistorialSimulacionResponse> listarHistorialSimulaciones() {
+        Map<Integer, List<SolicitudEnvio>> enviosPorSimulacion = agruparEnviosPorSimulacion();
+
+        return simulacionRepository.findAll().stream()
+                .sorted(Comparator.comparing(
+                        Simulacion::getFechaInicio,
+                        Comparator.nullsLast(Comparator.naturalOrder())
+                ).reversed())
+                .map(simulacion -> mapearHistorialSimulacion(
+                        simulacion,
+                        enviosPorSimulacion.getOrDefault(simulacion.getIdSimulacion(), List.of())
+                ))
+                .toList();
+    }
+
     private Simulacion obtenerSimulacion(Integer idSimulacion) {
         return simulacionRepository.findById(idSimulacion)
                 .orElseThrow(() -> new IllegalArgumentException("No existe una simulacion con id " + idSimulacion + "."));
+    }
+
+    private Map<Integer, List<SolicitudEnvio>> agruparEnviosPorSimulacion() {
+        Map<Integer, List<SolicitudEnvio>> enviosPorSimulacion = new HashMap<>();
+
+        for (SolicitudEnvio envio : solicitudEnvioRepository.findAllConRelacionesDeSimulacion()) {
+            Integer idSimulacion = envio.getIdSimulacion();
+            if (idSimulacion == null) {
+                continue;
+            }
+
+            enviosPorSimulacion.computeIfAbsent(idSimulacion, ignored -> new ArrayList<>())
+                    .add(envio);
+        }
+
+        return enviosPorSimulacion;
+    }
+
+    private HistorialSimulacionResponse mapearHistorialSimulacion(
+            Simulacion simulacion,
+            List<SolicitudEnvio> envios
+    ) {
+        String tipo = inferirTipo(simulacion);
+        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios);
+
+        if ("colapso".equals(tipo)) {
+            ResultadoColapsoResponse colapso = construirResultadoColapso(periodo);
+            return new HistorialSimulacionResponse(
+                    simulacion.getIdSimulacion(),
+                    tipo,
+                    simulacion.getK(),
+                    simulacion.getActiva(),
+                    simulacion.getFechaInicio(),
+                    simulacion.getFechaFin(),
+                    colapso.rango(),
+                    colapso.maletasProcesadas(),
+                    null,
+                    periodo.vuelosEjecutados(),
+                    periodo.cancelaciones(),
+                    periodo.replanificaciones(),
+                    colapso.diasHastaColapso(),
+                    colapso.plazosIncumplidos(),
+                    colapso.almacenesSaturados().cantidad(),
+                    colapso.sugerencia()
+            );
+        }
+
+        return new HistorialSimulacionResponse(
+                simulacion.getIdSimulacion(),
+                tipo,
+                simulacion.getK(),
+                simulacion.getActiva(),
+                simulacion.getFechaInicio(),
+                simulacion.getFechaFin(),
+                periodo.rango(),
+                periodo.totalMaletas(),
+                periodo.cumplimiento(),
+                periodo.vuelosEjecutados(),
+                periodo.cancelaciones(),
+                periodo.replanificaciones(),
+                null,
+                null,
+                null,
+                periodo.conclusion()
+        );
     }
 
     private Map<String, AeropuertoStats> construirStatsPorAeropuerto(List<SolicitudEnvio> envios) {
@@ -266,6 +362,12 @@ public class ResultadosSimulacionService {
     private String construirRango(Simulacion simulacion) {
         return "Simulacion " + simulacion.getIdSimulacion()
                 + " (" + simulacion.getFechaInicio().toLocalDate() + ")";
+    }
+
+    private String inferirTipo(Simulacion simulacion) {
+        return simulacion.getK() != null && simulacion.getK() >= 30
+                ? "colapso"
+                : "semanal";
     }
 
     private String calcularEstadoSemaforo(double ocupacion) {

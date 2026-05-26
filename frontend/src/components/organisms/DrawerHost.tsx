@@ -4,6 +4,7 @@ import FlightDrawer from "@/components/drawers/FlightDrawer";
 import ShipmentDrawer from "@/components/drawers/ShipmentDrawer";
 import ShipmentFormDrawer from "@/components/drawers/ShipmentFormDrawer";
 import type { AirportWithCoords } from "@/types/airport.types";
+import type { RangoSemaforo } from "@/types/common.types";
 
 interface DrawerHostProps {
   /**
@@ -12,6 +13,8 @@ interface DrawerHostProps {
    */
   occupancyByIcao?: Record<string, number>;
   airports?: AirportWithCoords[];
+  rangosSemaforo?: RangoSemaforo;
+  idSimulacion?: number | null;
   onShipmentCreated?: () => Promise<void> | void;
 }
 
@@ -31,6 +34,8 @@ interface DrawerHostProps {
 const DrawerHost = ({
   occupancyByIcao,
   airports = [],
+  rangosSemaforo,
+  idSimulacion,
   onShipmentCreated,
 }: DrawerHostProps) => {
   const selection = useDrawerStore((s) => s.selection);
@@ -44,13 +49,16 @@ const DrawerHost = ({
           key={`airport-${selection.icao}`}
           icao={selection.icao}
           ocupacion={occupancyByIcao?.[selection.icao]}
+          rangosSemaforo={rangosSemaforo}
+          idSimulacion={idSimulacion}
         />
       );
     case "flight":
       return (
         <FlightDrawer
-          key={`flight-${selection.codigo}`}
+          key={`flight-${selection.codigo}-${selection.idSimulacion ?? "real"}`}
           codigo={selection.codigo}
+          idSimulacion={selection.idSimulacion}
         />
       );
     case "shipment":

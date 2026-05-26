@@ -26,6 +26,8 @@ interface SimulationConfigState {
   horaInicio: string;
   /** Umbrales del semaforo configurados por el operador. */
   rangos: RangoSemaforo;
+  /** Factor k usado para la simulacion al colapso. */
+  kColapso: number;
   /** Resumen del CSV cargado; null si no se ha cargado nada. */
   csvSummary: CsvSummary | null;
 
@@ -34,18 +36,20 @@ interface SimulationConfigState {
   setFechaInicio: (fecha: string) => void;
   setHoraInicio: (hora: string) => void;
   setRangos: (rangos: Partial<RangoSemaforo>) => void;
+  setKColapso: (k: number) => void;
   setCsvSummary: (summary: CsvSummary | null) => void;
   reset: () => void;
 }
 
 const INITIAL_STATE: Pick<
   SimulationConfigState,
-  "tipoPeriodo" | "fechaInicio" | "horaInicio" | "rangos" | "csvSummary"
+  "tipoPeriodo" | "fechaInicio" | "horaInicio" | "rangos" | "kColapso" | "csvSummary"
 > = {
   tipoPeriodo: "semanal",
   fechaInicio: "2026-04-07",
   horaInicio: "06:00",
   rangos: { verde: 60, ambar: 85 },
+  kColapso: 200,
   csvSummary: null,
 };
 
@@ -57,6 +61,8 @@ export const useSimulationConfigStore = create<SimulationConfigState>(
     setHoraInicio: (horaInicio) => set({ horaInicio }),
     setRangos: (partial) =>
       set((s) => ({ rangos: { ...s.rangos, ...partial } })),
+    setKColapso: (kColapso) =>
+      set({ kColapso: Math.max(1, Math.floor(kColapso)) }),
     setCsvSummary: (csvSummary) => set({ csvSummary }),
     reset: () => set(INITIAL_STATE),
   })

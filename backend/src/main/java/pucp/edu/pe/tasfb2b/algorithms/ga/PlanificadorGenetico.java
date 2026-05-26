@@ -22,6 +22,8 @@ public class PlanificadorGenetico {
     private final int tamanoTorneo;
     private final int escalasIntermediasMax;
     private final Random aleatorio;
+    private final int minutoInicioUtc;
+    private final VueloOcurrenciaChecker ocurrenciaChecker;
 
     public PlanificadorGenetico(Grafo grafo,
                                 int tamanoPoblacion,
@@ -30,6 +32,28 @@ public class PlanificadorGenetico {
                                 double tasaMutacion,
                                 int tamanoTorneo,
                                 int escalasIntermediasMax) {
+        this(
+                grafo,
+                tamanoPoblacion,
+                generaciones,
+                tasaCruzamiento,
+                tasaMutacion,
+                tamanoTorneo,
+                escalasIntermediasMax,
+                -1,
+                (vuelo, salidaMinuto) -> true
+        );
+    }
+
+    public PlanificadorGenetico(Grafo grafo,
+                                int tamanoPoblacion,
+                                int generaciones,
+                                double tasaCruzamiento,
+                                double tasaMutacion,
+                                int tamanoTorneo,
+                                int escalasIntermediasMax,
+                                int minutoInicioUtc,
+                                VueloOcurrenciaChecker ocurrenciaChecker) {
         this.grafo = grafo;
         this.tamanoPoblacion = tamanoPoblacion;
         this.generaciones = generaciones;
@@ -38,6 +62,8 @@ public class PlanificadorGenetico {
         this.tamanoTorneo = tamanoTorneo;
         this.escalasIntermediasMax = escalasIntermediasMax;
         this.aleatorio = new Random();
+        this.minutoInicioUtc = minutoInicioUtc;
+        this.ocurrenciaChecker = ocurrenciaChecker != null ? ocurrenciaChecker : (vuelo, salidaMinuto) -> true;
     }
 
     public Ruta encontrarMejorRuta(SolicitudEnvio solicitud) {
@@ -51,7 +77,7 @@ public class PlanificadorGenetico {
 
             // Elitismo: se conserva el mejor cromosoma encontrado.
             Cromosoma elite = new Cromosoma(mejorGlobal);
-            elite.evaluar(grafo, solicitud);
+            elite.evaluar(grafo, solicitud, minutoInicioUtc, ocurrenciaChecker);
             nuevaPoblacion.add(elite);
 
             while (nuevaPoblacion.size() < tamanoPoblacion) {
@@ -70,7 +96,7 @@ public class PlanificadorGenetico {
                     mutar(hijo, solicitud);
                 }
 
-                hijo.evaluar(grafo, solicitud);
+                hijo.evaluar(grafo, solicitud, minutoInicioUtc, ocurrenciaChecker);
                 nuevaPoblacion.add(hijo);
             }
 
@@ -273,7 +299,7 @@ public class PlanificadorGenetico {
 
     private void evaluarPoblacion(List<Cromosoma> poblacion, SolicitudEnvio solicitud) {
         for (Cromosoma cromosoma : poblacion) {
-            cromosoma.evaluar(grafo, solicitud);
+            cromosoma.evaluar(grafo, solicitud, minutoInicioUtc, ocurrenciaChecker);
         }
     }
 

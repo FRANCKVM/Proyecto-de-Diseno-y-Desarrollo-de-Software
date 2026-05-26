@@ -18,6 +18,8 @@ export interface AnimatedFlight {
   fromIcao: string;
   /** ICAO del aeropuerto destino. */
   toIcao: string;
+  /** Porcentaje de ocupacion del vuelo para semaforo visual. */
+  occupancyPct?: number;
   /**
    * Avance entre 0 (acaba de despegar) y 1 (esta aterrizando).
    * Cuando alcanza 1, el motor lo respawnea con nuevos extremos.
@@ -65,6 +67,11 @@ export interface FlightSimulationConfig {
    * el reloj UTC actual del navegador (operacion real).
    */
   backendClockMinutes?: number | null;
+  /**
+   * Fecha/hora inicial de la simulacion enviada por backend.
+   * Permite ubicar cada envio dentro de la linea de tiempo simulada.
+   */
+  backendSimulationStart?: string | null;
   /**
    * Velocidad base del reloj simulado enviada/derivada del backend.
    * Expresada en minutos simulados por segundo real.

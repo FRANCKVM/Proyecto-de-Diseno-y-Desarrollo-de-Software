@@ -1,18 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download } from "lucide-react";
 import PeriodTypeCard from "@/components/molecules/PeriodTypeCard";
-import FileUploadZone from "@/components/molecules/FileUploadZone";
 import SemaphoreRangeRow from "@/components/molecules/SemaphoreRangeRow";
 import AlertBanner from "@/components/molecules/AlertBanner";
-import KpiValue from "@/components/atoms/KpiValue";
 import { useSimulationConfigStore } from "@/store/simulationConfigStore";
 import { useSimulationControlStore } from "@/store/simulationControlStore";
 import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { startLiveSimulation } from "@/services/simulationService";
 import { ROUTES, resolveSimulationModuleRoute } from "@/utils/routes";
 import type { TipoSimulacion } from "@/types/common.types";
-import type { CsvSummary } from "@/store/simulationConfigStore";
 
 // ============================================================================
 // DATOS DE CONFIGURACION
@@ -28,21 +24,21 @@ const PERIOD_OPTIONS: Array<{
   sublabel: string;
 }> = [
   { tipo: "semanal", label: "Semanal", sublabel: "5 dias" },
-  { tipo: "colapso", label: "Colapso", sublabel: "Sin limite" },
+  { tipo: "colapso", label: "Colapso", sublabel: "30 dias" },
 ];
 
 /**
  * Dias del periodo segun el tipo seleccionado.
- * Para "colapso" devuelve null (sin limite).
+ * Para "colapso" usa 30 dias para procesar hasta un mes de envios.
  */
 const DIAS_POR_TIPO: Record<TipoSimulacion, number | null> = {
   semanal: 5,
-  colapso: null,
+  colapso: 30,
 };
 
 const K_BY_TIPO: Record<TipoSimulacion, number> = {
   semanal: 15,
-  colapso: 30,
+  colapso: 200,
 };
 
 /**
@@ -81,7 +77,7 @@ const diaSemana = (iso: string): string => {
  *
  * Distribucion de dos columnas:
  * - Izquierda (55%): Tipo de periodo + Fecha/hora + Rangos + Supuestos.
- * - Derecha (45%): Carga CSV + Resumen de datos + CTA.
+ * - Derecha (45%): CTA.
  */
 const SimulacionConfigPage = () => {
   const navigate = useNavigate();
@@ -100,12 +96,12 @@ const SimulacionConfigPage = () => {
     fechaInicio,
     horaInicio,
     rangos,
-    csvSummary,
+    kColapso,
     setTipoPeriodo,
     setFechaInicio,
     setHoraInicio,
     setRangos,
-    setCsvSummary,
+    setKColapso,
   } = useSimulationConfigStore();
 
   const { reset: resetControl } = useSimulationControlStore();
@@ -131,13 +127,12 @@ const SimulacionConfigPage = () => {
     diasPeriodo && fechaInicio
       ? formatFechaDisplay(addDays(fechaInicio, diasPeriodo))
       : "Sin limite";
-  const periodoSeleccionado = PERIOD_OPTIONS.find((o) => o.tipo === tipoPeriodo);
 
   const handleSimular = async () => {
     setStartError(null);
     setIsStarting(true);
 
-    const k = K_BY_TIPO[tipoPeriodo];
+    const k = tipoPeriodo === "colapso" ? kColapso : K_BY_TIPO[tipoPeriodo];
 
     // Resetea el reloj de simulacion al arrancar una nueva corrida.
     resetControl();
@@ -191,12 +186,7 @@ const SimulacionConfigPage = () => {
         </p>
       </header>
 
-      {/* Grid de dos columnas */}
-      <div className="grid grid-cols-[1fr_auto] gap-5 items-start max-w-[1160px]">
-        {/* ================================================================
-            COLUMNA IZQUIERDA
-            ================================================================ */}
-        <div className="space-y-5">
+      <div className="max-w-[680px] space-y-5">
           {/* ---- Tipo de periodo ---- */}
           <section className="bg-card border border-border rounded-card p-6 shadow-card">
             <h2 className="text-section-title mb-1">Tipo de periodo</h2>
@@ -261,6 +251,38 @@ const SimulacionConfigPage = () => {
             </div>
           </section>
 
+          {tipoPeriodo === "colapso" && (
+            <section className="bg-card border border-border rounded-card p-6 shadow-card">
+              <h2 className="text-section-title mb-1">Factor k</h2>
+              <p className="text-body text-text-secondary mb-4">
+                Define cuantos bloques base avanza la simulacion por ciclo.
+              </p>
+              <div className="flex items-center gap-4">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={kColapso}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (Number.isFinite(value)) {
+                      setKColapso(value);
+                    }
+                  }}
+                  className="bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary w-32"
+                />
+                <div>
+                  <p className="text-secondary text-text-tertiary leading-tight">
+                    Minutos por bloque:
+                  </p>
+                  <p className="text-button text-text-primary">
+                    {kColapso * 5} min simulados
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* ---- Rangos de semaforo ---- */}
           <section className="bg-card border border-border rounded-card p-6 shadow-card">
             <h2 className="text-section-title mb-1">Rangos de semaforo</h2>
@@ -290,92 +312,6 @@ const SimulacionConfigPage = () => {
             />
           </section>
 
-          {/* ---- Supuestos ---- */}
-          <div className="bg-warning-soft border border-warning/30 rounded-banner px-5 py-3">
-            <p className="text-button text-warning mb-1">Supuestos</p>
-            <div className="flex gap-3 text-body text-text-secondary flex-wrap">
-              <span>1 aeropuerto por ciudad</span>
-              <span className="text-border">|</span>
-              <span>Maletas estandarizadas</span>
-              <span className="text-border">|</span>
-              <span>Tiempos de carga incluidos en traslado</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ================================================================
-            COLUMNA DERECHA
-            ================================================================ */}
-        <div className="w-[480px] space-y-5">
-          {/* ---- Carga de datos ---- */}
-          <section className="bg-card border border-border rounded-card p-6 shadow-card">
-            <div className="flex items-start justify-between mb-1">
-              <h2 className="text-section-title">Carga de datos</h2>
-            </div>
-            <p className="text-body text-text-secondary mb-4">
-              Puede cargar un CSV si desea revisar o sobrescribir datos, pero no
-              es obligatorio para ejecutar la simulacion.
-            </p>
-
-            {/* Boton descargar plantilla */}
-            <button
-              type="button"
-              className="w-full flex items-center justify-center gap-2 border border-primary text-primary text-button rounded-input py-2 hover:bg-primary-soft transition-colors mb-4"
-            >
-              <Download size={14} />
-              Descargar plantilla CSV
-            </button>
-
-            <FileUploadZone
-              summary={csvSummary}
-              onFileLoaded={(s: CsvSummary) => setCsvSummary(s)}
-            />
-          </section>
-
-          {/* ---- Resumen de datos cargados ---- */}
-          {csvSummary && (
-            <section className="bg-card border border-border rounded-card p-6 shadow-card">
-              <h2 className="text-section-title mb-4">
-                Resumen de datos cargados
-              </h2>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                <SummaryKpi
-                  label="Aeropuertos"
-                  value={csvSummary.aeropuertos}
-                />
-                <SummaryKpi
-                  label="Maletas totales"
-                  value={csvSummary.maletasTotales.toLocaleString("es-PE")}
-                />
-                <SummaryKpi
-                  label="Vuelos programados"
-                  value={csvSummary.vuelosProgramados}
-                />
-                <SummaryKpi
-                  label="Periodo"
-                  value={
-                    periodoSeleccionado
-                      ? `${periodoSeleccionado.label} (${periodoSeleccionado.sublabel})`
-                      : "-"
-                  }
-                />
-                <SummaryKpi label="Envios" value={csvSummary.envios} />
-                <SummaryKpi
-                  label="Inicio"
-                  value={`${formatFechaDisplay(fechaInicio)} ${horaInicio}`}
-                />
-              </div>
-            </section>
-          )}
-
-          {/* ---- Validacion: CSV opcional ---- */}
-          {!csvSummary && (
-            <AlertBanner
-              severity="informacion"
-              mensaje="No necesita cargar un CSV para simular: se usaran los datos disponibles en backend."
-            />
-          )}
-
           {/* ---- CTAs ---- */}
           {startError && (
             <AlertBanner severity="error" mensaje={startError} />
@@ -401,33 +337,9 @@ const SimulacionConfigPage = () => {
               {isStarting ? "Iniciando..." : "Simular"}
             </button>
           </div>
-        </div>
       </div>
     </div>
   );
 };
-
-// ============================================================================
-// SUB-COMPONENTE SummaryKpi
-// ============================================================================
-
-interface SummaryKpiProps {
-  label: string;
-  value: string | number;
-}
-
-/**
- * Par label/valor compacto para el resumen de datos cargados.
- */
-const SummaryKpi = ({ label, value }: SummaryKpiProps) => (
-  <div>
-    <p className="text-secondary text-text-secondary">{label}</p>
-    <KpiValue
-      value={value}
-      size="md"
-      className="!text-[18px] !leading-[24px]"
-    />
-  </div>
-);
 
 export default SimulacionConfigPage;

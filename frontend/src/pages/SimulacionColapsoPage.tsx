@@ -1,10 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/organisms/TopBar";
 import LegendBar from "@/components/organisms/LegendBar";
 import WorldMap from "@/components/map/WorldMap";
-import AlertBanner from "@/components/molecules/AlertBanner";
-import SimulationControlPanel from "@/components/organisms/SimulationControlPanel";
 import DrawerHost from "@/components/organisms/DrawerHost";
 import { OCCUPANCY_COLAPSO } from "@/services/sources2.0/demoOccupancy.mock";
 import { useAirports } from "@/hooks/useAirports";
@@ -17,6 +15,11 @@ import {
   USE_MOCK_DATA,
 } from "@/utils/constants";
 import { resolveSimulationResultsRoute } from "@/utils/routes";
+import { useSimulationConfigStore } from "@/store/simulationConfigStore";
+import {
+  formatDuration,
+  resolveSimulationClockData,
+} from "@/utils/simulationClock";
 
 /**
  * Pantalla de simulacion al colapso.
@@ -27,14 +30,27 @@ import { resolveSimulationResultsRoute } from "@/utils/routes";
 const SimulacionColapsoPage = () => {
   const navigate = useNavigate();
   const { airports, isLoading } = useAirports();
+  const fechaInicioConfig = useSimulationConfigStore((s) => s.fechaInicio);
+  const horaInicioConfig = useSimulationConfigStore((s) => s.horaInicio);
+  const rangosSemaforo = useSimulationConfigStore((s) => s.rangos);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const {
     idSimulacion,
     tipoSimulacion,
     occupancyByIcao,
     estado,
     envios,
-    stop,
   } = useLiveSimulation({ autoStart: true, enablePolling: false });
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const backendSimMinutesPerSecond =
     estado?.scMinutos && BACKEND_SIMULATION_BLOCK_INTERVAL_MS > 0
@@ -48,6 +64,9 @@ const SimulacionColapsoPage = () => {
     backendClockMinutes: USE_MOCK_DATA
       ? undefined
       : estado?.punteroConsumoMinutos,
+    backendSimulationStart: USE_MOCK_DATA
+      ? undefined
+      : estado?.fechaHoraInicioSimulacion,
     backendSimMinutesPerSecond: USE_MOCK_DATA
       ? undefined
       : backendSimMinutesPerSecond,
@@ -59,6 +78,20 @@ const SimulacionColapsoPage = () => {
   const openFlight = useDrawerStore((s) => s.openFlight);
   const porcentajeResueltas = estado?.porcentajeResueltas ?? 0;
   const totalSolicitudes = estado?.totalSolicitudes ?? 0;
+  const {
+    elapsedRealMs,
+    elapsedSimulatedMs,
+    inicioSimulacion,
+    horaActual,
+    horaSimulacion,
+  } = resolveSimulationClockData({
+    estado,
+    fechaInicio: fechaInicioConfig,
+    horaInicio: horaInicioConfig,
+    nowMs,
+    useMockData: USE_MOCK_DATA,
+    backendBlockIntervalMs: BACKEND_SIMULATION_BLOCK_INTERVAL_MS,
+  });
 
   useEffect(() => {
     if (
@@ -79,6 +112,13 @@ const SimulacionColapsoPage = () => {
     <>
       <TopBar
         variant="colapso"
+        reloj={{
+          inicioSimulacion,
+          horaActual,
+          horaSimulacion,
+          tiempoRealTranscurrido: formatDuration(elapsedRealMs),
+          tiempoSimulacionTranscurrido: formatDuration(elapsedSimulatedMs),
+        }}
         diaSimulado={USE_MOCK_DATA ? simulatedDay : estado?.bloquesProcesados ?? 0}
         demanda={USE_MOCK_DATA ? `x ${demandFactor.toFixed(1)}` : `k=${estado?.k ?? 1}`}
         enviosTotales={USE_MOCK_DATA ? 12450 : totalSolicitudes}
@@ -93,42 +133,18 @@ const SimulacionColapsoPage = () => {
             airports={airports}
             flights={flights}
             occupancyByIcao={occupancy}
+            rangosSemaforo={rangosSemaforo}
             onAirportClick={(a) => openAirport(a.icao)}
-            onFlightClick={(id) => openFlight(id)}
+            onFlightClick={(id) => openFlight(id, { idSimulacion })}
           />
         )}
 
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-[640px] max-w-[90%]">
-          <AlertBanner
-            severity="error"
-            titulo="ALERTA CRITICA — COLAPSO DETECTADO"
-            mensaje="Se supero el umbral: 12% plazos incumplidos (limite: 10%)."
-            acciones={
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!USE_MOCK_DATA) {
-                      void stop();
-                    }
-                  }}
-                  className="bg-danger hover:bg-danger/90 text-text-inverse text-button px-4 py-2 rounded-input transition-colors"
-                >
-                  Detener
-                </button>
-                <button
-                  type="button"
-                  className="bg-card hover:bg-field text-danger border border-danger text-button px-4 py-2 rounded-input transition-colors"
-                >
-                  Continuar
-                </button>
-              </>
-            }
-          />
-        </div>
-
-        <SimulationControlPanel variant="colapso" />
-        <DrawerHost occupancyByIcao={occupancy} airports={airports} />
+        <DrawerHost
+          occupancyByIcao={occupancy}
+          airports={airports}
+          rangosSemaforo={rangosSemaforo}
+          idSimulacion={idSimulacion}
+        />
       </main>
       <LegendBar variant="colapso" />
     </>

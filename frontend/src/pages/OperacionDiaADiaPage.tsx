@@ -1,3 +1,4 @@
+import { useState } from "react";
 import TopBar from "@/components/organisms/TopBar";
 import LegendBar from "@/components/organisms/LegendBar";
 import WorldMap from "@/components/map/WorldMap";
@@ -7,6 +8,7 @@ import { useAirports } from "@/hooks/useAirports";
 import { useFlightSimulation } from "@/hooks/useFlightSimulation";
 import { useOperationData } from "@/hooks/useOperationData";
 import { useDrawerStore } from "@/store/drawerStore";
+import { getFlightByCode } from "@/services/flightService";
 import { USE_MOCK_DATA } from "@/utils/constants";
 
 /**
@@ -18,6 +20,9 @@ import { USE_MOCK_DATA } from "@/utils/constants";
 const OperacionDiaADiaPage = () => {
   const { airports, isLoading } = useAirports();
   const { estado, mapa, envios, refresh } = useOperationData();
+  const [flightQuery, setFlightQuery] = useState("");
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isSearchingFlight, setIsSearchingFlight] = useState(false);
 
   const flights = useFlightSimulation({
     baseFlightCount: 25,
@@ -37,6 +42,39 @@ const OperacionDiaADiaPage = () => {
     openShipmentForm();
   };
 
+  const handleFlightQueryChange = (value: string) => {
+    setFlightQuery(value);
+    if (searchError) {
+      setSearchError(null);
+    }
+  };
+
+  const handleFlightSearch = async () => {
+    const codigo = flightQuery.trim().toUpperCase();
+
+    if (!codigo) {
+      setSearchError("Ingresa un identificador de vuelo.");
+      return;
+    }
+
+    setIsSearchingFlight(true);
+    setSearchError(null);
+
+    try {
+      const flight = await getFlightByCode(codigo);
+
+      if (!flight) {
+        setSearchError("No se encontro ese vuelo.");
+        return;
+      }
+
+      openFlight(flight.codigo);
+      setFlightQuery(flight.codigo);
+    } finally {
+      setIsSearchingFlight(false);
+    }
+  };
+
   return (
     <>
       <TopBar
@@ -53,6 +91,15 @@ const OperacionDiaADiaPage = () => {
           cumplimiento: USE_MOCK_DATA
             ? "100%"
             : `${estado?.cumplimiento ?? 0}%`,
+        }}
+        buscador={{
+          valor: flightQuery,
+          error: searchError,
+          isLoading: isSearchingFlight,
+          onChange: handleFlightQueryChange,
+          onSubmit: () => {
+            void handleFlightSearch();
+          },
         }}
         onRegistrarEnvio={handleRegistrarEnvio}
       />

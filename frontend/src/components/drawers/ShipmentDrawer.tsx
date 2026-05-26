@@ -65,6 +65,8 @@ const ShipmentDrawer = ({ codigo }: ShipmentDrawerProps) => {
   const estadoLabel =
     shipment.estado === "en_transito"
       ? "En transito"
+      : shipment.estado === "en_escala"
+      ? "En escala"
       : shipment.estado === "entregado"
       ? "Entregado"
       : shipment.estado === "planificado"

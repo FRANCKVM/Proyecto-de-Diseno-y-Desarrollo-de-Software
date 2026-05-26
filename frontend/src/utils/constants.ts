@@ -54,7 +54,7 @@ export const DURACION_SIMULACION_SEMANAL_DIAS = 5;
  * Intervalo real entre bloques de simulacion enviados/procesados por backend.
  * Debe mantenerse alineado con SimulacionService.INTERVALO_REAL_MS.
  */
-export const BACKEND_SIMULATION_BLOCK_INTERVAL_MS = 300000;
+export const BACKEND_SIMULATION_BLOCK_INTERVAL_MS = 60000;
 
 /** Velocidades disponibles del reloj de simulacion. */
 export const VELOCIDADES_SIMULACION = [0.5, 1, 2, 4] as const;

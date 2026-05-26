@@ -62,6 +62,8 @@ const FLIGHT_DURATION_SECONDS: Record<"intra" | "inter", number> = {
   inter: 60,
 };
 
+const randomOccupancyPct = (): number => 20 + Math.round(Math.random() * 75);
+
 /**
  * Pool de ICAOs ponderado segun HUB_WEIGHT / NORMAL_WEIGHT.
  * Se construye una sola vez al cargar el modulo.
@@ -142,6 +144,7 @@ export const generateFlight = (
     fromIcao: from,
     toIcao: to,
     progress: initialProgress,
+    occupancyPct: randomOccupancyPct(),
     durationSeconds: durationFor(from, to),
   };
 };

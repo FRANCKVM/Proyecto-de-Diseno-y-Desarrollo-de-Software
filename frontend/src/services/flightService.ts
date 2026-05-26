@@ -1,9 +1,9 @@
 import {
   fetchFlightsByAirportReferenceData,
+  fetchFlightDetailReferenceData,
 } from "@/services/referenceDataService";
 import {
   cacheFlightsForAirport,
-  ensureFlightDetailCached,
   getCachedFlightByCode,
   getCachedFlightsByAirport,
   hasCachedFlightsByAirport,
@@ -27,8 +27,20 @@ import type { VueloDetalle } from "@/types/flight.types";
  * Endpoint: GET /vuelos/{codigo}
  */
 export const getFlightByCode = async (
-  codigo: string
+  codigo: string,
+  idSimulacion?: number | null
 ): Promise<VueloDetalle | null> => {
+  if (idSimulacion != null) {
+    const simulatedFlight = await fetchFlightDetailReferenceData(
+      codigo,
+      idSimulacion
+    );
+
+    if (simulatedFlight) {
+      return simulatedFlight;
+    }
+  }
+
   const cachedFlight = getCachedFlightByCode(codigo);
   if (cachedFlight) {
     return cachedFlight;
@@ -40,7 +52,7 @@ export const getFlightByCode = async (
     // Continuamos con fallback puntual por vuelo si la precarga falla.
   }
 
-  return ensureFlightDetailCached(codigo);
+  return fetchFlightDetailReferenceData(codigo);
 };
 
 /**
@@ -51,8 +63,17 @@ export const getFlightByCode = async (
  * aeropuerto figura como origen o destino.
  */
 export const listFlightsByAirport = async (
-  icao: string
+  icao: string,
+  idSimulacion?: number | null
 ): Promise<VueloDetalle[]> => {
+  if (idSimulacion != null) {
+    try {
+      return await fetchFlightsByAirportReferenceData(icao, idSimulacion);
+    } catch {
+      // Fallback al dataset real si el contexto simulado no responde.
+    }
+  }
+
   if (hasCachedFlightsByAirport(icao)) {
     return getCachedFlightsByAirport(icao);
   }

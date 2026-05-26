@@ -57,24 +57,41 @@ const ICON_BEARING_OFFSET = -45;
 const PLANE_PATH =
   "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z";
 
+const PLANE_CENTER = {
+  cx: 12,
+  cy: 12,
+  r: 3.2,
+} as const;
+
 /**
  * Construye el HTML del divIcon del avion.
  *
  * Sobre fondo claro (CartoDB Positron):
- *   - fill = color (oscuro por defecto, semaforo si se especifica)
+ *   - cuerpo = color oscuro fijo para conservar legibilidad
+ *   - centro = punto semaforo opcional segun ocupacion del vuelo
  *   - stroke = blanco como halo de definicion (1.5px)
  *
  * La rotacion del bearing se aplica en el div contenedor para no
  * deformar el viewBox del SVG.
  */
-const buildPlaneHtml = (color: string, displayBearing: number): string => `
+const buildPlaneHtml = (
+  bodyColor: string,
+  centerColor: string | null,
+  displayBearing: number
+): string => `
   <div class="tasf-flight-marker" style="transform: rotate(${displayBearing}deg)">
     <svg width="${PLANE_SIZE}" height="${PLANE_SIZE}" viewBox="0 0 24 24"
          xmlns="http://www.w3.org/2000/svg"
-         fill="${color}" stroke="#FFFFFF" stroke-width="1.5"
+         fill="${bodyColor}" stroke="#FFFFFF" stroke-width="1.5"
          stroke-linecap="round" stroke-linejoin="round"
          paint-order="stroke fill">
       <path d="${PLANE_PATH}"/>
+      ${
+        centerColor
+          ? `<circle cx="${PLANE_CENTER.cx}" cy="${PLANE_CENTER.cy}" r="${PLANE_CENTER.r}"
+               fill="${centerColor}" stroke="#FFFFFF" stroke-width="1.2" />`
+          : ""
+      }
     </svg>
   </div>
 `;
@@ -140,17 +157,18 @@ const FlightMarker = ({
     progress,
   ]);
 
-  const color = estado ? ESTADO_COLOR_HEX[estado] : COLORS.text.primary;
+  const centerColor = estado ? ESTADO_COLOR_HEX[estado] : null;
+  const bodyColor = COLORS.text.primary;
 
   const icon = useMemo(
     () =>
       L.divIcon({
-        html: buildPlaneHtml(color, displayBearing),
+        html: buildPlaneHtml(bodyColor, centerColor, displayBearing),
         className: "",
         iconSize: [PLANE_SIZE, PLANE_SIZE],
         iconAnchor: [PLANE_SIZE / 2, PLANE_SIZE / 2],
       }),
-    [color, displayBearing]
+    [bodyColor, centerColor, displayBearing]
   );
 
   return (

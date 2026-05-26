@@ -67,6 +67,15 @@ public class Cromosoma {
     }
 
     public void evaluar(Grafo grafo, SolicitudEnvio solicitud) {
+        evaluar(grafo, solicitud, -1, (vuelo, salidaMinuto) -> true);
+    }
+
+    public void evaluar(
+            Grafo grafo,
+            SolicitudEnvio solicitud,
+            int minutoInicioUtc,
+            VueloOcurrenciaChecker ocurrenciaChecker
+    ) {
         Ruta rutaCandidato = new Ruta();
         boolean valido = true;
 
@@ -87,7 +96,10 @@ public class Cromosoma {
         }
 
         Set<Aeropuerto> visitados = new HashSet<>();
-        int tiempoActualUtcMin = -1;
+        int tiempoActualUtcMin = minutoInicioUtc;
+        VueloOcurrenciaChecker checker = ocurrenciaChecker != null
+                ? ocurrenciaChecker
+                : (vuelo, salidaMinuto) -> true;
 
         for (int i = 0; i < genes.size() - 1; i++) {
             Aeropuerto desde = genes.get(i);
@@ -105,7 +117,8 @@ public class Cromosoma {
                 solicitud.getContarBolsas(),
                 tiempoActualUtcMin,
                 rutaCandidato.getTiempoTotal(),
-                solicitud.getDiasTiempoMaximo()
+                solicitud.getDiasTiempoMaximo(),
+                checker
             );
 
             if (vuelo == null) {
@@ -151,7 +164,8 @@ public class Cromosoma {
             int bolsas,
             int tiempoActualUtcMin,
             double tiempoAcumuladoDias,
-            double plazoMaximoDias
+            double plazoMaximoDias,
+            VueloOcurrenciaChecker ocurrenciaChecker
     ) {
         Vuelo mejorVuelo = null;
         double mejorIncremento = Double.MAX_VALUE;
@@ -166,6 +180,11 @@ public class Cromosoma {
             }
 
             if (!vuelo.tieneCapacidad(bolsas)) {
+                continue;
+            }
+
+            VentanaVuelo ventana = calcularVentanaVuelo(vuelo, tiempoActualUtcMin);
+            if (!ocurrenciaChecker.disponible(vuelo, ventana.salidaMinuto())) {
                 continue;
             }
 
@@ -189,30 +208,16 @@ public class Cromosoma {
     }
 
     private double calcularIncrementoDias(Vuelo vuelo, int tiempoActualUtcMin) {
-        int salida = vuelo.getSalidaUtcMin();
-        int llegada = vuelo.getLlegadaUtcMin();
-
-        while (llegada <= salida) {
-            llegada += 1440;
-        }
-
-        if (tiempoActualUtcMin == -1) {
-            return (llegada - salida) / 1440.0;
-        }
-
-        while (salida < tiempoActualUtcMin) {
-            salida += 1440;
-            llegada += 1440;
-        }
-
-        while (llegada <= salida) {
-            llegada += 1440;
-        }
-
-        return (llegada - tiempoActualUtcMin) / 1440.0;
+        VentanaVuelo ventana = calcularVentanaVuelo(vuelo, tiempoActualUtcMin);
+        int referencia = tiempoActualUtcMin >= 0 ? tiempoActualUtcMin : ventana.salidaMinuto();
+        return (ventana.llegadaMinuto() - referencia) / 1440.0;
     }
 
     private int calcularLlegadaAjustada(Vuelo vuelo, int tiempoActualUtcMin) {
+        return calcularVentanaVuelo(vuelo, tiempoActualUtcMin).llegadaMinuto();
+    }
+
+    private VentanaVuelo calcularVentanaVuelo(Vuelo vuelo, int tiempoActualUtcMin) {
         int salida = vuelo.getSalidaUtcMin();
         int llegada = vuelo.getLlegadaUtcMin();
 
@@ -221,7 +226,7 @@ public class Cromosoma {
         }
 
         if (tiempoActualUtcMin == -1) {
-            return llegada;
+            return new VentanaVuelo(salida, llegada);
         }
 
         while (salida < tiempoActualUtcMin) {
@@ -233,7 +238,10 @@ public class Cromosoma {
             llegada += 1440;
         }
 
-        return llegada;
+        return new VentanaVuelo(salida, llegada);
+    }
+
+    private record VentanaVuelo(int salidaMinuto, int llegadaMinuto) {
     }
 
     @Override

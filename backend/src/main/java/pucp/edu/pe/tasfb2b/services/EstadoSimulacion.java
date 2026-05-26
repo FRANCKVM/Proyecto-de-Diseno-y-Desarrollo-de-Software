@@ -1,10 +1,14 @@
 package pucp.edu.pe.tasfb2b.services;
 
+import java.time.LocalDateTime;
+
 public class EstadoSimulacion {
 
     private final Integer idSimulacion;
     private final boolean activa;
     private final boolean procesandoBloque;
+    private final LocalDateTime fechaHoraInicioReal;
+    private final LocalDateTime fechaHoraInicioSimulacion;
 
     private final Integer k;
     private final Integer saMinutos;
@@ -42,6 +46,8 @@ public class EstadoSimulacion {
             Integer idSimulacion,
             boolean activa,
             boolean procesandoBloque,
+            LocalDateTime fechaHoraInicioReal,
+            LocalDateTime fechaHoraInicioSimulacion,
             Integer k,
             Integer saMinutos,
             Integer scMinutos,
@@ -72,6 +78,8 @@ public class EstadoSimulacion {
         this.idSimulacion = idSimulacion;
         this.activa = activa;
         this.procesandoBloque = procesandoBloque;
+        this.fechaHoraInicioReal = fechaHoraInicioReal;
+        this.fechaHoraInicioSimulacion = fechaHoraInicioSimulacion;
         this.k = k;
         this.saMinutos = saMinutos;
         this.scMinutos = scMinutos;
@@ -110,6 +118,14 @@ public class EstadoSimulacion {
 
     public boolean isProcesandoBloque() {
         return procesandoBloque;
+    }
+
+    public LocalDateTime getFechaHoraInicioReal() {
+        return fechaHoraInicioReal;
+    }
+
+    public LocalDateTime getFechaHoraInicioSimulacion() {
+        return fechaHoraInicioSimulacion;
     }
 
     public Integer getK() {

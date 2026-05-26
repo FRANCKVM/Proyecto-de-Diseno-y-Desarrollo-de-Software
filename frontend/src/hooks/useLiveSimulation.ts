@@ -19,12 +19,12 @@ const DEFAULT_SIMULATION_K = 1;
 
 const K_BY_TIPO = {
   semanal: 15,
-  colapso: 30,
+  colapso: 200,
 } as const;
 
 const DURACION_DIAS_BY_TIPO = {
   semanal: 5,
-  colapso: null,
+  colapso: 30,
 } as const;
 
 const inferSimulationType = (
@@ -37,6 +37,10 @@ const inferSimulationType = (
 
   if (k === K_BY_TIPO.semanal) {
     return "semanal";
+  }
+
+  if (k !== null && k > 0) {
+    return "colapso";
   }
 
   return fallback;
@@ -54,6 +58,7 @@ export const useLiveSimulation = (
   const tipoPeriodo = useSimulationConfigStore((s) => s.tipoPeriodo);
   const fechaInicio = useSimulationConfigStore((s) => s.fechaInicio);
   const horaInicio = useSimulationConfigStore((s) => s.horaInicio);
+  const kColapso = useSimulationConfigStore((s) => s.kColapso);
 
   const {
     idSimulacion,
@@ -132,7 +137,10 @@ export const useLiveSimulation = (
     let cancelled = false;
     startedRef.current = true;
 
-    const k = K_BY_TIPO[tipoPeriodo] ?? DEFAULT_SIMULATION_K;
+    const k =
+      tipoPeriodo === "colapso"
+        ? kColapso
+        : K_BY_TIPO[tipoPeriodo] ?? DEFAULT_SIMULATION_K;
 
     const ensureSimulation = async () => {
       const currentState = await getCurrentLiveSimulationState();
@@ -186,6 +194,7 @@ export const useLiveSimulation = (
   }, [
     fechaInicio,
     horaInicio,
+    kColapso,
     autoStart,
     idSimulacion,
     setEstado,

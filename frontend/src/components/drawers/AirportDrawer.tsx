@@ -9,7 +9,7 @@ import { useDrawerStore } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { VueloDetalle } from "@/types/flight.types";
-import type { EstadoSemaforo } from "@/types/common.types";
+import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
 
 interface AirportDrawerProps {
   icao: string;
@@ -19,6 +19,8 @@ interface AirportDrawerProps {
    * ocupacion en demo vive en el dataset de la pagina, no en el backend.
    */
   ocupacion?: number;
+  rangosSemaforo?: RangoSemaforo;
+  idSimulacion?: number | null;
 }
 
 /**
@@ -36,6 +38,15 @@ const ESTADO_LABEL: Record<EstadoSemaforo, string> = {
   critico: "Critico",
 };
 
+const VUELO_ESTADO_LABEL: Record<string, string> = {
+  programado: "Programado",
+  en_vuelo: "En vuelo",
+  completado: "Completado",
+  cancelado: "Cancelado",
+  abordando: "Abordando",
+  aterrizando: "Aterrizando",
+};
+
 /**
  * Drawer de detalle de aeropuerto.
  * Estandar 61 + mockup 04 del Figma.
@@ -44,7 +55,12 @@ const ESTADO_LABEL: Record<EstadoSemaforo, string> = {
  * desde los servicios. Muestra estado de loading en la primera carga;
  * cuando los datos llegan, los renderiza progresivamente.
  */
-const AirportDrawer = ({ icao, ocupacion }: AirportDrawerProps) => {
+const AirportDrawer = ({
+  icao,
+  ocupacion,
+  rangosSemaforo,
+  idSimulacion,
+}: AirportDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openFlight = useDrawerStore((s) => s.openFlight);
 
@@ -56,7 +72,10 @@ const AirportDrawer = ({ icao, ocupacion }: AirportDrawerProps) => {
     let cancelled = false;
     setIsLoading(true);
 
-    Promise.all([getAirportByIcao(icao), listFlightsByAirport(icao)])
+    Promise.all([
+      getAirportByIcao(icao),
+      listFlightsByAirport(icao, idSimulacion),
+    ])
       .then(([airportData, flightsData]) => {
         if (cancelled) return;
         setAirport(airportData);
@@ -70,10 +89,12 @@ const AirportDrawer = ({ icao, ocupacion }: AirportDrawerProps) => {
     return () => {
       cancelled = true;
     };
-  }, [icao]);
+  }, [icao, idSimulacion]);
 
   const estado: EstadoSemaforo =
-    ocupacion !== undefined ? getEstadoSemaforo(ocupacion) : "normal";
+    ocupacion !== undefined
+      ? getEstadoSemaforo(ocupacion, rangosSemaforo)
+      : "normal";
 
   // Capacidad estimada para mostrar "X / Y maletas" en la barra del almacen.
   // Como el dato real viene del backend, en mock usamos la capacity del
@@ -181,7 +202,9 @@ const AirportDrawer = ({ icao, ocupacion }: AirportDrawerProps) => {
                   <button
                     type="button"
                     className="text-button text-primary hover:underline block"
-                    onClick={() => openFlight(v.codigo)}
+                    onClick={() =>
+                      openFlight(v.codigo, { idSimulacion })
+                    }
                   >
                     {v.codigo}
                   </button>
@@ -192,7 +215,7 @@ const AirportDrawer = ({ icao, ocupacion }: AirportDrawerProps) => {
                 <Tag
                   variant={v.estado === "en_vuelo" ? "primary" : "neutral"}
                 >
-                  {v.estado === "en_vuelo" ? "En vuelo" : "Programado"}
+                  {VUELO_ESTADO_LABEL[v.estado] ?? v.estado}
                 </Tag>
               </li>
             ))}

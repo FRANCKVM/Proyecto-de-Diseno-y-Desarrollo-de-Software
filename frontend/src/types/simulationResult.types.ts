@@ -5,6 +5,25 @@
 
 import type { EstadoSemaforo, TipoSimulacion } from "@/types/common.types";
 
+export interface HistorialSimulacion {
+  id: number;
+  tipo: TipoSimulacion;
+  k: number;
+  activa: boolean;
+  fechaInicio: string;
+  fechaFin: string | null;
+  rango: string;
+  totalMaletas: number;
+  cumplimiento: number | null;
+  vuelosEjecutados: number;
+  cancelaciones: number;
+  replanificaciones: number;
+  diasHastaColapso: number | null;
+  plazosIncumplidos: number | null;
+  almacenesSaturados: number | null;
+  mensajeResumen: string;
+}
+
 /**
  * Fila de la tabla "Desempeno por aeropuerto" en resultados de periodo.
  */
