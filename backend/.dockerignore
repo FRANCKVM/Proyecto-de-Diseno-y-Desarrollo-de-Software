@@ -1,0 +1,7 @@
+target
+target/
+**/target
+.m2
+.m2/
+src/main/java/**/data
+*.log

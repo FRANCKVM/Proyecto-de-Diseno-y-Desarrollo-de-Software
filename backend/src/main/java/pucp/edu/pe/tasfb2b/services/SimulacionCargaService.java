@@ -1,16 +1,14 @@
 package pucp.edu.pe.tasfb2b.services;
 
 import org.springframework.stereotype.Service;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.ResourcePatternResolver;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -27,19 +25,22 @@ public class SimulacionCargaService {
     private static final String CARPETA_ENVIOS = "data/_envios_preliminar_";
 
     private final AeropuertoRepository aeropuertoRepository;
+    private final ResourcePatternResolver resourcePatternResolver;
 
-    public SimulacionCargaService(AeropuertoRepository aeropuertoRepository) {
+    public SimulacionCargaService(
+            AeropuertoRepository aeropuertoRepository,
+            ResourcePatternResolver resourcePatternResolver
+    ) {
         this.aeropuertoRepository = aeropuertoRepository;
+        this.resourcePatternResolver = resourcePatternResolver;
     }
 
     public synchronized List<SolicitudEnvio> cargarSolicitudes(
             LocalDateTime fechaHoraInicio,
             Integer duracionDias
     ) throws IOException {
-        Path carpeta = new ClassPathResource(CARPETA_ENVIOS).getFile().toPath();
         Map<String, Aeropuerto> aeropuertosPorCodigo = cargarAeropuertosPorCodigo();
         List<SolicitudEnvio> solicitudes = cargarSolicitudesDesdeCarpeta(
-                carpeta,
                 aeropuertosPorCodigo,
                 fechaHoraInicio,
                 duracionDias
@@ -52,24 +53,22 @@ public class SimulacionCargaService {
     }
 
     private List<SolicitudEnvio> cargarSolicitudesDesdeCarpeta(
-            Path carpetaEnvios,
             Map<String, Aeropuerto> aeropuertosPorCodigo,
             LocalDateTime fechaHoraInicio,
             Integer duracionDias
     ) throws IOException {
 
         List<SolicitudEnvio> todasLasSolicitudes = new ArrayList<>();
-        List<Path> archivos = new ArrayList<>();
+        Resource[] archivos = resourcePatternResolver.getResources(
+                "classpath*:" + CARPETA_ENVIOS + "/_envios_*_.txt"
+        );
 
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(carpetaEnvios, "_envios_*_.txt")) {
-            for (Path archivo : stream) {
-                archivos.add(archivo);
-            }
-        }
+        List<Resource> recursosOrdenados = new ArrayList<>(List.of(archivos));
+        recursosOrdenados.sort(Comparator.comparing(resource -> resource.getFilename() != null
+                ? resource.getFilename()
+                : ""));
 
-        archivos.sort(Comparator.comparing(path -> path.getFileName().toString()));
-
-        for (Path archivo : archivos) {
+        for (Resource archivo : recursosOrdenados) {
             todasLasSolicitudes.addAll(cargarSolicitudesDesdeArchivo(
                     archivo,
                     aeropuertosPorCodigo,
@@ -82,7 +81,7 @@ public class SimulacionCargaService {
     }
 
     private List<SolicitudEnvio> cargarSolicitudesDesdeArchivo(
-            Path archivoEnvios,
+            Resource archivoEnvios,
             Map<String, Aeropuerto> aeropuertosPorCodigo,
             LocalDateTime fechaHoraInicio,
             Integer duracionDias
@@ -93,7 +92,11 @@ public class SimulacionCargaService {
                 ? fechaHoraInicio.plusDays(duracionDias)
                 : null;
 
-        String nombreArchivo = archivoEnvios.getFileName().toString();
+        String nombreArchivo = archivoEnvios.getFilename();
+        if (nombreArchivo == null || nombreArchivo.isBlank()) {
+            throw new IllegalArgumentException("No se pudo obtener el nombre del archivo de envios.");
+        }
+
         String[] partesNombre = nombreArchivo.split("_");
 
         if (partesNombre.length < 3) {
@@ -109,8 +112,10 @@ public class SimulacionCargaService {
             throw new IllegalArgumentException("No existe aeropuerto origen en la BD: " + codigoOrigen);
         }
 
-        try (var lineas = Files.lines(archivoEnvios, StandardCharsets.UTF_8)) {
-            Iterator<String> iterador = lineas.iterator();
+        try (var inputStream = archivoEnvios.getInputStream()) {
+            Iterator<String> iterador = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8)
+                    .lines()
+                    .iterator();
 
             while (iterador.hasNext()) {
                 String linea = iterador.next().trim();

@@ -2,7 +2,7 @@ services:
   mysql:
     image: mysql:8.4
     container_name: tasfb2b_mysql
-    restart: always
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: pdds
       MYSQL_DATABASE: tasfb2b
@@ -12,7 +12,46 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./database/scripts:/docker-entrypoint-initdb.d
+      - ./database/scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-updds", "-ppdds"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - tasfb2b_network
+
+  backend:
+    build:
+      context: ./backend
+    container_name: tasfb2b_backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/tasfb2b?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: pdds
+      SPRING_DATASOURCE_PASSWORD: pdds
+      SPRING_JPA_SHOW_SQL: "false"
+      SPRING_JPA_FORMAT_SQL: "false"
+      SPRING_SQL_INIT_MODE: always
+    ports:
+      - "8080:8080"
+    networks:
+      - tasfb2b_network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: tasfb2b_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
     networks:
       - tasfb2b_network
 

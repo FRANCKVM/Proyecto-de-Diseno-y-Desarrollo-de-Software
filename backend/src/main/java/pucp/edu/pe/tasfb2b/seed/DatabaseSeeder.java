@@ -10,9 +10,9 @@ import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
 import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 import java.util.HashMap;
 import java.util.List;
@@ -57,9 +57,7 @@ public class DatabaseSeeder implements CommandLineRunner {
 
         Map<String, Aeropuerto> aeropuertoPorCodigo = new HashMap<>();
 
-        Path path = new ClassPathResource(rutaArchivo).getFile().toPath();
-
-        List<String> lineas = Files.readAllLines(path, StandardCharsets.UTF_16);
+        List<String> lineas = leerLineasClasspath(rutaArchivo, StandardCharsets.UTF_16);
 
         String regionActual = "N/A";
 
@@ -157,9 +155,7 @@ public class DatabaseSeeder implements CommandLineRunner {
             Map<String, Aeropuerto> aeropuertoPorCodigo
     ) throws IOException {
 
-        Path path = new ClassPathResource(rutaArchivo).getFile().toPath();
-
-        List<String> lineas = Files.readAllLines(path, StandardCharsets.UTF_8);
+        List<String> lineas = leerLineasClasspath(rutaArchivo, StandardCharsets.UTF_8);
 
         int vuelosCargados = 0;
         int vuelosOmitidos = 0;
@@ -253,6 +249,12 @@ public class DatabaseSeeder implements CommandLineRunner {
             return Integer.parseInt(valor.replace("+", "").trim());
         } catch (NumberFormatException e) {
             return predeterminado;
+        }
+    }
+
+    private List<String> leerLineasClasspath(String rutaArchivo, Charset charset) throws IOException {
+        try (InputStream inputStream = new ClassPathResource(rutaArchivo).getInputStream()) {
+            return new String(inputStream.readAllBytes(), charset).lines().toList();
         }
     }
 }

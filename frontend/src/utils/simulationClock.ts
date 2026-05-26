@@ -27,6 +27,31 @@ export const parseLocalDateTime = (
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const parseBackendRealDateTime = (
+  value: string | null | undefined,
+  nowMs: number
+): Date | null => {
+  if (!value) {
+    return null;
+  }
+
+  const localDate = parseLocalDateTime(value);
+  const utcDate = parseLocalDateTime(`${value.replace(/Z$/, "")}Z`);
+
+  if (!localDate) {
+    return utcDate;
+  }
+
+  if (!utcDate) {
+    return localDate;
+  }
+
+  const localDrift = Math.abs(nowMs - localDate.getTime());
+  const utcDrift = Math.abs(nowMs - utcDate.getTime());
+
+  return utcDrift < localDrift ? utcDate : localDate;
+};
+
 export const buildLocalDateTime = (
   fecha: string | null | undefined,
   hora: string | null | undefined
@@ -81,7 +106,7 @@ export const resolveSimulationClockData = ({
 }: ResolveSimulationClockDataParams) => {
   const fechaInicioReal = useMockData
     ? null
-    : parseLocalDateTime(estado?.fechaHoraInicioReal);
+    : parseBackendRealDateTime(estado?.fechaHoraInicioReal, nowMs);
   const fechaInicioSimulacion = useMockData
     ? buildLocalDateTime(fechaInicio, horaInicio)
     : parseLocalDateTime(estado?.fechaHoraInicioSimulacion) ??
