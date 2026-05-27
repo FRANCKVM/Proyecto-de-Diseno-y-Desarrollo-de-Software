@@ -63,6 +63,7 @@ export interface BackendEstadoSimulacion {
   k: number | null;
   saMinutos: number | null;
   scMinutos: number | null;
+  intervaloRealMs: number | null;
   punteroConsumoMinutos: number | null;
   ultimoMinutoSimulacion: number | null;
   indiceSiguienteSolicitud: number;

@@ -40,7 +40,10 @@ public class SimulacionService {
     private static final Logger LOGGER = LoggerFactory.getLogger(SimulacionService.class);
 
     private static final int SA_MINUTOS = 5;// bloque en minutos debe multiplicarse por k
-    private static final long INTERVALO_REAL_MS = 60000;//tiempo de espera entre ejecucion
+    private static final int DURACION_SEMANAL_DIAS = 5;
+    private static final long INTERVALO_VERIFICACION_MS = 1000;
+    private static final long INTERVALO_REAL_SEMANAL_MS = 30000;
+    private static final long INTERVALO_REAL_COLAPSO_MS = 75000;
 
     private static final int TAMANO_POBLACION = 30;
     private static final int GENERACIONES = 60;
@@ -64,6 +67,8 @@ public class SimulacionService {
 
     private Integer kActual;
     private Integer scMinutos;
+    private Long intervaloRealActualMs;
+    private Long ultimaEjecucionBloqueRealMs;
     private Integer punteroConsumoMinutos;
     private Integer ultimoMinutoSimulacion;
 
@@ -133,6 +138,8 @@ public class SimulacionService {
 
         this.kActual = k;
         this.scMinutos = k * SA_MINUTOS;
+        this.intervaloRealActualMs = resolverIntervaloRealMs(duracionDias);
+        this.ultimaEjecucionBloqueRealMs = System.currentTimeMillis();
         this.punteroConsumoMinutos = 0;
         this.indiceSiguienteSolicitud = 0;
         this.reservasVuelosSimulados.clear();
@@ -182,6 +189,7 @@ public class SimulacionService {
                 kActual,
                 SA_MINUTOS,
                 scMinutos,
+                intervaloRealActualMs,
                 punteroConsumoMinutos,
                 ultimoMinutoSimulacion,
                 indiceSiguienteSolicitud,
@@ -253,10 +261,15 @@ public class SimulacionService {
                 .collect(Collectors.toList());
     }
 
-    @Scheduled(fixedRate = INTERVALO_REAL_MS)
+    @Scheduled(fixedRate = INTERVALO_VERIFICACION_MS)
     @Transactional
     public synchronized void procesarSiguienteBloqueProgramado() {
         if (!simulacionActiva || procesandoBloque) {
+            return;
+        }
+
+        long ahoraRealMs = System.currentTimeMillis();
+        if (!debeProcesarBloque(ahoraRealMs)) {
             return;
         }
 
@@ -264,6 +277,7 @@ public class SimulacionService {
             procesandoBloque = true;
             procesarSiguienteBloque();
         } finally {
+            ultimaEjecucionBloqueRealMs = ahoraRealMs;
             procesandoBloque = false;
         }
     }
@@ -514,6 +528,7 @@ public class SimulacionService {
                 kActual,
                 SA_MINUTOS,
                 scMinutos,
+                intervaloRealActualMs,
                 punteroConsumoMinutos,
                 ultimoMinutoSimulacion,
                 indiceSiguienteSolicitud,
@@ -528,6 +543,28 @@ public class SimulacionService {
         this.fechaHoraInicioReal = null;
         this.fechaHoraInicioSimulacion = null;
         this.simulacionActual = null;
+        this.intervaloRealActualMs = null;
+        this.ultimaEjecucionBloqueRealMs = null;
+    }
+
+    private long resolverIntervaloRealMs(Integer duracionDias) {
+        if (duracionDias != null && duracionDias == DURACION_SEMANAL_DIAS) {
+            return INTERVALO_REAL_SEMANAL_MS;
+        }
+
+        return INTERVALO_REAL_COLAPSO_MS;
+    }
+
+    private boolean debeProcesarBloque(long ahoraRealMs) {
+        if (intervaloRealActualMs == null || intervaloRealActualMs <= 0) {
+            return true;
+        }
+
+        if (ultimaEjecucionBloqueRealMs == null) {
+            return true;
+        }
+
+        return ahoraRealMs - ultimaEjecucionBloqueRealMs >= intervaloRealActualMs;
     }
 
     private void validarSimulacionSolicitada(Integer idSimulacion) {

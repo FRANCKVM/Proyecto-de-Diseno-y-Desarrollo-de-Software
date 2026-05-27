@@ -52,9 +52,12 @@ const SimulacionColapsoPage = () => {
     };
   }, []);
 
+  const backendBlockIntervalMs =
+    estado?.intervaloRealMs ?? BACKEND_SIMULATION_BLOCK_INTERVAL_MS;
+
   const backendSimMinutesPerSecond =
-    estado?.scMinutos && BACKEND_SIMULATION_BLOCK_INTERVAL_MS > 0
-      ? estado.scMinutos / (BACKEND_SIMULATION_BLOCK_INTERVAL_MS / 1000)
+    estado?.scMinutos && backendBlockIntervalMs > 0
+      ? estado.scMinutos / (backendBlockIntervalMs / 1000)
       : undefined;
 
   const flights = useFlightSimulation({
@@ -90,7 +93,7 @@ const SimulacionColapsoPage = () => {
     horaInicio: horaInicioConfig,
     nowMs,
     useMockData: USE_MOCK_DATA,
-    backendBlockIntervalMs: BACKEND_SIMULATION_BLOCK_INTERVAL_MS,
+    backendBlockIntervalMs,
   });
 
   useEffect(() => {

@@ -13,6 +13,7 @@ public class EstadoSimulacion {
     private final Integer k;
     private final Integer saMinutos;
     private final Integer scMinutos;
+    private final Long intervaloRealMs;
     private final Integer punteroConsumoMinutos;
     private final Integer ultimoMinutoSimulacion;
 
@@ -51,6 +52,7 @@ public class EstadoSimulacion {
             Integer k,
             Integer saMinutos,
             Integer scMinutos,
+            Long intervaloRealMs,
             Integer punteroConsumoMinutos,
             Integer ultimoMinutoSimulacion,
             int indiceSiguienteSolicitud,
@@ -83,6 +85,7 @@ public class EstadoSimulacion {
         this.k = k;
         this.saMinutos = saMinutos;
         this.scMinutos = scMinutos;
+        this.intervaloRealMs = intervaloRealMs;
         this.punteroConsumoMinutos = punteroConsumoMinutos;
         this.ultimoMinutoSimulacion = ultimoMinutoSimulacion;
         this.indiceSiguienteSolicitud = indiceSiguienteSolicitud;
@@ -138,6 +141,10 @@ public class EstadoSimulacion {
 
     public Integer getScMinutos() {
         return scMinutos;
+    }
+
+    public Long getIntervaloRealMs() {
+        return intervaloRealMs;
     }
 
     public Integer getPunteroConsumoMinutos() {
