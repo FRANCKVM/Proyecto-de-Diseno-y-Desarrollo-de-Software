@@ -9,6 +9,26 @@ import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { ROUTES } from "@/utils/routes";
 import type { ResultadoPeriodo } from "@/types/simulationResult.types";
 
+const formatDuration = (minutes: number) => {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  const parts: string[] = [];
+
+  if (hours > 0) {
+    parts.push(`${hours} h`);
+  }
+
+  if (remainingMinutes > 0) {
+    parts.push(`${remainingMinutes} min`);
+  }
+
+  return parts.join(" ");
+};
+
 /**
  * Pantalla de resultados de simulacion de periodo.
  * Estandar 61 + mockup 07.
@@ -53,15 +73,19 @@ const ResultadosPeriodoPage = () => {
         </p>
       </header>
 
-      {/* Banner exito */}
+      {/* Banner resultado */}
       <AlertBanner
-        severity="exito"
-        mensaje="Simulacion completada — Todas las maletas entregadas dentro del plazo comprometido"
+        severity={resultado.cumplimiento === 100 ? "exito" : "advertencia"}
+        mensaje={
+          resultado.cumplimiento === 100
+            ? "Simulacion completada - Todas las maletas entregadas dentro del plazo comprometido"
+            : `Simulacion completada - ${resultado.cumplimiento}% de cumplimiento de plazos`
+        }
         className="mb-6"
       />
 
-      {/* 5 KPIs */}
-      <section className="grid grid-cols-5 gap-4 mb-6">
+      {/* KPIs */}
+      <section className="grid grid-cols-4 gap-4 mb-6">
         <KpiCard
           dotVariant="primary"
           label="Total maletas"
@@ -77,12 +101,6 @@ const ResultadosPeriodoPage = () => {
           dotVariant="primary"
           label="Vuelos ejecutados"
           value={resultado.vuelosEjecutados}
-        />
-        <KpiCard
-          dotVariant="elevado"
-          label="Cancelaciones"
-          value={resultado.cancelaciones}
-          valueVariant="warning"
         />
         <KpiCard
           dotVariant="primary"
@@ -119,12 +137,8 @@ const ResultadosPeriodoPage = () => {
               value={`${resultado.resumen.tiempoPromedioInter} dias`}
             />
             <InfoRow
-              label="Aeropuertos en rojo"
-              value={`${resultado.resumen.aeropuertosEnRojo} (${resultado.resumen.icaosEnRojo.join(", ")})`}
-            />
-            <InfoRow
               label="Duracion simulacion"
-              value={`${resultado.resumen.duracionMinutos} min`}
+              value={formatDuration(resultado.resumen.duracionMinutos)}
             />
           </section>
 

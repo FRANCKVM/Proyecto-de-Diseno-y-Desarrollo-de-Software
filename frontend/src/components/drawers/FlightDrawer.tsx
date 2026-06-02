@@ -11,6 +11,8 @@ interface FlightDrawerProps {
   idSimulacion?: number | null;
 }
 
+const ISO_WITH_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+
 /**
  * Formatea ISO 8601 a "DD/MM/YYYY HH:mm" en horario local.
  */
@@ -22,6 +24,47 @@ const formatFecha = (iso: string): string => {
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+};
+
+const parseFlightDateMs = (iso: string): number => {
+  const normalized = ISO_WITH_TIME_ZONE.test(iso) ? iso : `${iso}Z`;
+  return new Date(normalized).getTime();
+};
+
+const formatTiempoRestante = (arrivalIso: string, nowMs: number): string => {
+  const arrivalMs = parseFlightDateMs(arrivalIso);
+
+  if (Number.isNaN(arrivalMs)) {
+    return "No disponible";
+  }
+
+  const diffMinutes = Math.max(
+    0,
+    Math.ceil((arrivalMs - nowMs) / 60_000)
+  );
+
+  if (diffMinutes === 0) {
+    return "Llegando o completado";
+  }
+
+  const days = Math.floor(diffMinutes / (24 * 60));
+  const hours = Math.floor((diffMinutes % (24 * 60)) / 60);
+  const minutes = diffMinutes % 60;
+  const parts: string[] = [];
+
+  if (days > 0) {
+    parts.push(`${days} dia${days === 1 ? "" : "s"}`);
+  }
+
+  if (hours > 0) {
+    parts.push(`${hours} h`);
+  }
+
+  if (minutes > 0 || parts.length === 0) {
+    parts.push(`${minutes} min`);
+  }
+
+  return parts.join(" ");
 };
 
 /**
@@ -39,6 +82,17 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
   const [flight, setFlight] = useState<VueloDetalle | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,7 +167,6 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
               : "Intracontinental"
           }
         />
-        <InfoRow label="Capacidad" value={`${flight.capacidad} maletas`} />
         <InfoRow
           label="Ocupacion"
           value={`${flight.ocupacion} / ${flight.capacidad} (${ocupacionPct}%)`}
@@ -122,6 +175,10 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
         <InfoRow
           label="Fecha llegada est."
           value={formatFecha(flight.fechaLlegadaEstimada)}
+        />
+        <InfoRow
+          label="Tiempo restante"
+          value={formatTiempoRestante(flight.fechaLlegadaEstimada, nowMs)}
         />
       </section>
 

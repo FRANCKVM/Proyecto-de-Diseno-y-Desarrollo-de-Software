@@ -102,7 +102,8 @@ export const useLiveSimulation = (
       if (
         cancelled ||
         !currentState ||
-        currentState.idSimulacion === null
+        currentState.idSimulacion === null ||
+        !currentState.activa
       ) {
         return;
       }

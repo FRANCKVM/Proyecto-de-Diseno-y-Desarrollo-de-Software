@@ -57,11 +57,12 @@ const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
 /**
- * Centro inicial: [20, 0] permite ver Sudamerica, Europa y Asia
- * en una sola vista a zoom 2.
+ * Centro inicial: [20, 0] permite ver Sudamerica, Europa y Asia.
+ * Zoom 3 equivale a arrancar con un click de acercamiento sobre el
+ * encuadre mundial base.
  */
 const INITIAL_CENTER: [number, number] = [20, 0];
-const INITIAL_ZOOM = 2;
+const INITIAL_ZOOM = 3;
 
 /**
  * Mapa mundial operativo del sistema Tasf.B2B.
@@ -156,7 +157,7 @@ const WorldMap = ({
         return (
           <FlightMarker
             key={f.id}
-            flightId={f.code ?? f.id}
+            flightId={f.id}
             fromAirport={from}
             toAirport={to}
             progress={f.progress}

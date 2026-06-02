@@ -47,6 +47,21 @@ const VUELO_ESTADO_LABEL: Record<string, string> = {
   aterrizando: "Aterrizando",
 };
 
+const formatArrivalTime = (iso: string): string => {
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return "No disponible";
+  }
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day}/${month} ${hour}:${minute}`;
+};
+
 /**
  * Drawer de detalle de aeropuerto.
  * Estandar 61 + mockup 04 del Figma.
@@ -103,6 +118,7 @@ const AirportDrawer = ({
   const ocupadas = ocupacion !== undefined
     ? Math.round((ocupacion / 100) * capacity)
     : 0;
+  const activeFlights = flights.filter((flight) => flight.estado === "en_vuelo");
 
   if (isLoading || !airport) {
     return (
@@ -185,15 +201,15 @@ const AirportDrawer = ({
       {/* Vuelos conectados */}
       <section>
         <h3 className="text-section-title mb-3">
-          Vuelos conectados{flights.length > 0 && ` (${flights.length})`}
+          Vuelos conectados{activeFlights.length > 0 && ` (${activeFlights.length})`}
         </h3>
-        {flights.length === 0 ? (
+        {activeFlights.length === 0 ? (
           <p className="text-body text-text-tertiary">
-            No hay vuelos asociados a este aeropuerto en el periodo simulado.
+            No hay vuelos en curso asociados a este aeropuerto.
           </p>
         ) : (
           <ul className="space-y-2">
-            {flights.map((v) => (
+            {activeFlights.map((v) => (
               <li
                 key={v.codigo}
                 className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
@@ -210,6 +226,9 @@ const AirportDrawer = ({
                   </button>
                   <span className="text-secondary text-text-secondary">
                     {v.origenIcao} &gt; {v.destinoIcao}
+                  </span>
+                  <span className="text-secondary text-text-tertiary block">
+                    Llegada: {formatArrivalTime(v.fechaLlegadaEstimada)}
                   </span>
                 </div>
                 <Tag

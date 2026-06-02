@@ -35,6 +35,11 @@ public class SeguimientoService {
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     private static final Pattern VUELO_TB_PATTERN = Pattern.compile("^TB-(\\d+)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern VUELO_SIM_PATTERN = Pattern.compile("vuelo-(\\d+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern VUELO_FLIGHT_PATTERN = Pattern.compile("flight-(\\d+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern VUELO_OCURRENCIA_PATTERN = Pattern.compile(
+            "shipment-(\\d+)-flight-(\\d+)-(\\d+)-(\\d+)$",
+            Pattern.CASE_INSENSITIVE
+    );
     private static final Pattern ENVIO_PATTERN = Pattern.compile("(\\d+)$");
     private static final int TAMANO_BLOQUE_PAQUETES = 20;
     private static final int MINUTOS_DIA = 24 * 60;
@@ -74,18 +79,17 @@ public class SeguimientoService {
                 solicitudEnvioRepository.findByVueloId(idVuelo),
                 idSimulacion
         );
+        Integer salidaOcurrencia = parsearSalidaOcurrenciaVuelo(codigo);
 
-        return construirVueloDetalle(vuelo, idSimulacion, enviosAsociados);
+        return construirVueloDetalle(vuelo, idSimulacion, enviosAsociados, salidaOcurrencia);
     }
 
     private VueloDetalleResponse construirVueloDetalle(
             Vuelo vuelo,
             Integer idSimulacion,
-            List<SolicitudEnvio> enviosAsociados
+            List<SolicitudEnvio> enviosAsociados,
+            Integer salidaOcurrencia
     ) {
-        List<VueloDetalleResponse.EnvioEnVueloResponse> envios = enviosAsociados.stream()
-                .map(this::mapearEnvioEnVuelo)
-                .toList();
         Integer minutoReferencia = obtenerMinutoReferenciaVuelo(enviosAsociados);
         boolean contextoFinalizado = contextoFinalizadoVuelo(enviosAsociados);
         LocalDateTime fechaInicioSimulacion = obtenerFechaInicioSimulacion(idSimulacion);
@@ -94,6 +98,16 @@ public class SeguimientoService {
                 fechaInicioSimulacion,
                 enviosAsociados
         );
+        List<VueloDetalleResponse.EnvioEnVueloResponse> envios = filtrarEnviosPorOcurrenciaVuelo(
+                vuelo,
+                enviosAsociados,
+                idSimulacion,
+                fechaInicioSimulacion,
+                minutoReferenciaFechas,
+                salidaOcurrencia
+        ).stream()
+                .map(this::mapearEnvioEnVuelo)
+                .toList();
 
         return new VueloDetalleResponse(
                 formatearCodigoVuelo(vuelo.getIdVuelo()),
@@ -132,7 +146,8 @@ public class SeguimientoService {
                     .map(vuelo -> construirVueloDetalle(
                             vuelo,
                             idSimulacion,
-                            enviosPorVuelo.getOrDefault(vuelo.getIdVuelo(), List.of())
+                            enviosPorVuelo.getOrDefault(vuelo.getIdVuelo(), List.of()),
+                            null
                     ))
                     .toList();
         }
@@ -147,7 +162,8 @@ public class SeguimientoService {
                 .map(vuelo -> construirVueloDetalle(
                         vuelo,
                         null,
-                        enviosPorVuelo.getOrDefault(vuelo.getIdVuelo(), List.of())
+                        enviosPorVuelo.getOrDefault(vuelo.getIdVuelo(), List.of()),
+                        null
                 ))
                 .toList();
     }
@@ -614,6 +630,164 @@ public class SeguimientoService {
                 .toList();
     }
 
+    private List<SolicitudEnvio> filtrarEnviosPorOcurrenciaVuelo(
+            Vuelo vuelo,
+            List<SolicitudEnvio> envios,
+            Integer idSimulacion,
+            LocalDateTime fechaInicioSimulacion,
+            Integer minutoReferencia,
+            Integer salidaOcurrencia
+    ) {
+        if (vuelo == null || vuelo.getIdVuelo() == null || envios == null || envios.isEmpty()) {
+            return List.of();
+        }
+
+        if (salidaOcurrencia != null) {
+            return envios.stream()
+                    .filter(envio -> envioUsaVueloEnSalidaOcurrencia(
+                            envio,
+                            vuelo.getIdVuelo(),
+                            salidaOcurrencia,
+                            idSimulacion,
+                            fechaInicioSimulacion
+                    ))
+                    .toList();
+        }
+
+        if (idSimulacion != null) {
+            int minutoActual = minutoReferencia != null && minutoReferencia != Integer.MAX_VALUE
+                    ? minutoReferencia
+                    : -1;
+
+            return envios.stream()
+                    .filter(envio -> envioUsaVueloEnMinutoSimulado(
+                            envio,
+                            vuelo.getIdVuelo(),
+                            minutoActual,
+                            fechaInicioSimulacion
+                    ))
+                    .toList();
+        }
+
+        LocalDateTime ahoraUtc = LocalDateTime.now(ZoneOffset.UTC);
+        return envios.stream()
+                .filter(envio -> envioUsaVueloEnFechaHoraOperacion(envio, vuelo.getIdVuelo(), ahoraUtc))
+                .toList();
+    }
+
+    private boolean envioUsaVueloEnFechaHoraOperacion(
+            SolicitudEnvio envio,
+            Integer idVuelo,
+            LocalDateTime fechaHoraUtc
+    ) {
+        Ruta ruta = envio.getRuta();
+        if (ruta == null || ruta.getVuelos() == null || fechaHoraUtc == null) {
+            return false;
+        }
+
+        LocalDate fechaBase = envio.getFecha() != null ? envio.getFecha() : LocalDate.now(ZoneOffset.UTC);
+        int minutoReferencia = envio.getHora() != null
+                ? envio.getHora().getHour() * 60 + envio.getHora().getMinute()
+                : 0;
+
+        for (Vuelo vueloRuta : ruta.getVuelos()) {
+            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vueloRuta, minutoReferencia);
+            LocalDateTime salida = fechaBase.atStartOfDay().plusMinutes(ventana.salidaMinuto());
+            LocalDateTime llegada = fechaBase.atStartOfDay().plusMinutes(ventana.llegadaMinuto());
+
+            if (Objects.equals(vueloRuta.getIdVuelo(), idVuelo)
+                    && !fechaHoraUtc.isBefore(salida)
+                    && fechaHoraUtc.isBefore(llegada)) {
+                return true;
+            }
+
+            minutoReferencia = ventana.llegadaMinuto();
+        }
+
+        return false;
+    }
+
+    private boolean envioUsaVueloEnMinutoSimulado(
+            SolicitudEnvio envio,
+            Integer idVuelo,
+            int minutoActual,
+            LocalDateTime fechaInicioSimulacion
+    ) {
+        Ruta ruta = envio.getRuta();
+        if (ruta == null || ruta.getVuelos() == null || minutoActual < 0) {
+            return false;
+        }
+
+        int minutoReferencia = fechaInicioSimulacion != null
+                ? calcularMinutoDesdeInicioSimulacion(envio, fechaInicioSimulacion)
+                : 0;
+
+        for (Vuelo vueloRuta : ruta.getVuelos()) {
+            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vueloRuta, minutoReferencia);
+
+            if (Objects.equals(vueloRuta.getIdVuelo(), idVuelo)
+                    && minutoActual >= ventana.salidaMinuto()
+                    && minutoActual < ventana.llegadaMinuto()) {
+                return true;
+            }
+
+            minutoReferencia = ventana.llegadaMinuto();
+        }
+
+        return false;
+    }
+
+    private boolean envioUsaVueloEnSalidaOcurrencia(
+            SolicitudEnvio envio,
+            Integer idVuelo,
+            int salidaOcurrencia,
+            Integer idSimulacion,
+            LocalDateTime fechaInicioSimulacion
+    ) {
+        Ruta ruta = envio.getRuta();
+        if (ruta == null || ruta.getVuelos() == null) {
+            return false;
+        }
+
+        int minutoReferencia = idSimulacion != null && fechaInicioSimulacion != null
+                ? calcularMinutoDesdeInicioSimulacion(envio, fechaInicioSimulacion)
+                : 0;
+
+        for (Vuelo vueloRuta : ruta.getVuelos()) {
+            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vueloRuta, minutoReferencia);
+
+            if (Objects.equals(vueloRuta.getIdVuelo(), idVuelo)
+                    && ventana.salidaMinuto() == salidaOcurrencia) {
+                return true;
+            }
+
+            minutoReferencia = ventana.llegadaMinuto();
+        }
+
+        return false;
+    }
+
+    private VentanaVueloSimulada calcularVentanaRutaVuelo(Vuelo vuelo, int minutoReferencia) {
+        int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
+        int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
+
+        while (llegadaBase <= salidaBase) {
+            llegadaBase += MINUTOS_DIA;
+        }
+
+        int minuto = Math.max(0, minutoReferencia);
+        int diaReferencia = Math.floorDiv(minuto, MINUTOS_DIA);
+        int salida = salidaBase + diaReferencia * MINUTOS_DIA;
+        int llegada = llegadaBase + diaReferencia * MINUTOS_DIA;
+
+        while (salida < minuto) {
+            salida += MINUTOS_DIA;
+            llegada += MINUTOS_DIA;
+        }
+
+        return new VentanaVueloSimulada(salida, llegada);
+    }
+
     private Vuelo obtenerVueloDesdeContextoSimulado(Integer idSimulacion, Integer idVuelo) {
         return simulacionService.obtenerVueloSimulado(idSimulacion, idVuelo);
     }
@@ -633,11 +807,29 @@ public class SeguimientoService {
             return Integer.parseInt(simMatcher.group(1));
         }
 
+        Matcher flightMatcher = VUELO_FLIGHT_PATTERN.matcher(codigo.trim());
+        if (flightMatcher.find()) {
+            return Integer.parseInt(flightMatcher.group(1));
+        }
+
         try {
             return Integer.parseInt(codigo.trim());
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Formato de codigo de vuelo invalido: " + codigo + ".");
         }
+    }
+
+    private Integer parsearSalidaOcurrenciaVuelo(String codigo) {
+        if (codigo == null || codigo.isBlank()) {
+            return null;
+        }
+
+        Matcher matcher = VUELO_OCURRENCIA_PATTERN.matcher(codigo.trim());
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return Integer.parseInt(matcher.group(4));
     }
 
     private Integer parsearIdEnvio(String codigo) {

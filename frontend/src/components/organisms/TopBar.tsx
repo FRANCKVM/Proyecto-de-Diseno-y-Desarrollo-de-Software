@@ -26,6 +26,27 @@ const KpiInline = ({ label, value, valueClass }: KpiInlineProps) => (
   </div>
 );
 
+const OperationDate = ({ value }: { value: string }) => {
+  const [datePart, timePart] = value.split(" | ");
+
+  return (
+    <div className="flex items-center gap-2 rounded-input border border-primary/20 bg-primary-soft/60 px-3 py-1.5">
+      <span className="text-label-sm text-primary leading-none">
+        Fecha actual
+      </span>
+      <span className="h-4 w-px bg-primary/25" aria-hidden />
+      <span className="text-button text-text-primary leading-none">
+        {datePart}
+      </span>
+      {timePart ? (
+        <span className="rounded-full bg-card px-2 py-0.5 text-label-sm text-primary leading-none">
+          {timePart}
+        </span>
+      ) : null}
+    </div>
+  );
+};
+
 /**
  * Badge de modo/escenario (con dot opcional).
  */
@@ -232,7 +253,7 @@ const TopBar = (props: TopBarProps) => {
       return (
         <header className={baseClass}>
           <ModoBadge variant="dia-a-dia" texto="Tiempo real" />
-          <KpiInline label="Fecha actual:" value={props.fechaActual} />
+          <OperationDate value={props.fechaActual} />
           <div className="flex items-center gap-5 ml-auto mr-4">
             <KpiInline label="Envios hoy:" value={props.kpis.enviosHoy} />
             <KpiInline

@@ -9,6 +9,7 @@ import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
+import pucp.edu.pe.tasfb2b.entities.Vuelo;
 import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
 
@@ -20,6 +21,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 @Service
 @Transactional(readOnly = true)
@@ -49,16 +51,16 @@ public class ResultadosSimulacionService {
             Simulacion simulacion,
             List<SolicitudEnvio> envios
     ) {
-        Map<String, AeropuertoStats> statsPorAeropuerto = construirStatsPorAeropuerto(envios);
+        Map<String, AeropuertoStats> statsPorAeropuerto = construirStatsPorAeropuerto(simulacion, envios);
         List<ResultadoPeriodoResponse.DesempenoAeropuertoResponse> desempeno = statsPorAeropuerto.values().stream()
                 .map(this::mapearDesempenoAeropuerto)
                 .toList();
 
         int totalMaletas = envios.stream().mapToInt(envio -> valor(envio.getContarBolsas())).sum();
-        int totalResueltas = (int) envios.stream()
-                .filter(envio -> envio.getRuta() != null)
+        int totalDentroDePlazo = (int) envios.stream()
+                .filter(this::cumplePlazoComprometido)
                 .count();
-        int cumplimiento = calcularPorcentaje(totalResueltas, envios.size());
+        int cumplimiento = calcularPorcentaje(totalDentroDePlazo, envios.size());
         int vuelosEjecutados = envios.stream()
                 .map(SolicitudEnvio::getRuta)
                 .filter(ruta -> ruta != null && ruta.getVuelos() != null)
@@ -252,12 +254,21 @@ public class ResultadosSimulacionService {
         );
     }
 
-    private Map<String, AeropuertoStats> construirStatsPorAeropuerto(List<SolicitudEnvio> envios) {
+    private Map<String, AeropuertoStats> construirStatsPorAeropuerto(
+            Simulacion simulacion,
+            List<SolicitudEnvio> envios
+    ) {
         Map<String, AeropuertoStats> stats = new LinkedHashMap<>();
 
         for (SolicitudEnvio envio : envios) {
             registrarAeropuerto(stats, envio.getOrigen(), true, valor(envio.getContarBolsas()));
             registrarAeropuerto(stats, envio.getDestino(), false, valor(envio.getContarBolsas()));
+            registrarOcupacionAlmacen(stats, simulacion, envio);
+        }
+
+        long horizonteMinutos = calcularHorizonteOcupacion(stats);
+        for (AeropuertoStats statsAeropuerto : stats.values()) {
+            calcularOcupacionAlmacen(statsAeropuerto, horizonteMinutos);
         }
 
         return stats;
@@ -283,13 +294,140 @@ public class ResultadosSimulacionService {
         } else {
             actual.recibidas += maletas;
         }
+    }
 
-        double ocupacion = aeropuerto.getCapacidad() != null && aeropuerto.getCapacidad() > 0
-                ? Math.min(100.0, (Math.max(actual.enviadas, actual.recibidas) * 100.0) / aeropuerto.getCapacidad())
-                : 0.0;
+    private void registrarOcupacionAlmacen(
+            Map<String, AeropuertoStats> stats,
+            Simulacion simulacion,
+            SolicitudEnvio envio
+    ) {
+        if (simulacion == null || envio == null || envio.getRuta() == null || envio.getRuta().getVuelos() == null) {
+            return;
+        }
 
-        actual.ocupacionPromedio = Math.max(actual.ocupacionPromedio, ocupacion);
-        actual.ocupacionMaxima = Math.max(actual.ocupacionMaxima, ocupacion);
+        List<VentanaVuelo> ventanas = calcularVentanasRuta(
+                envio.getRuta(),
+                calcularMinutoSimulacion(simulacion, envio)
+        );
+
+        if (ventanas.isEmpty()) {
+            return;
+        }
+
+        int maletas = valor(envio.getContarBolsas());
+        registrarReservaAlmacen(stats, envio.getOrigen(), calcularMinutoSimulacion(simulacion, envio), ventanas.getFirst().salidaMinuto(), maletas);
+
+        for (int i = 0; i < ventanas.size() - 1; i++) {
+            VentanaVuelo llegada = ventanas.get(i);
+            VentanaVuelo siguienteSalida = ventanas.get(i + 1);
+            registrarReservaAlmacen(stats, llegada.vuelo().getHasta(), llegada.llegadaMinuto(), siguienteSalida.salidaMinuto(), maletas);
+        }
+    }
+
+    private List<VentanaVuelo> calcularVentanasRuta(Ruta ruta, int minutoInicio) {
+        List<VentanaVuelo> ventanas = new ArrayList<>();
+        int minutoReferencia = Math.max(0, minutoInicio);
+
+        for (Vuelo vuelo : ruta.getVuelos()) {
+            int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
+            int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
+
+            while (llegadaBase <= salidaBase) {
+                llegadaBase += 24 * 60;
+            }
+
+            int diaReferencia = Math.floorDiv(minutoReferencia, 24 * 60);
+            int salida = salidaBase + diaReferencia * 24 * 60;
+            int llegada = llegadaBase + diaReferencia * 24 * 60;
+
+            while (salida < minutoReferencia) {
+                salida += 24 * 60;
+                llegada += 24 * 60;
+            }
+
+            ventanas.add(new VentanaVuelo(vuelo, salida, llegada));
+            minutoReferencia = llegada;
+        }
+
+        return ventanas;
+    }
+
+    private int calcularMinutoSimulacion(Simulacion simulacion, SolicitudEnvio envio) {
+        LocalDateTime inicio = simulacion.getFechaInicio();
+        LocalDateTime registro = envio.getFechaHoraRegistro();
+
+        if (inicio == null || registro == null) {
+            return 0;
+        }
+
+        return Math.max(0, (int) Duration.between(inicio, registro).toMinutes());
+    }
+
+    private void registrarReservaAlmacen(
+            Map<String, AeropuertoStats> stats,
+            Aeropuerto aeropuerto,
+            int inicioMinuto,
+            int finMinuto,
+            int maletas
+    ) {
+        if (aeropuerto == null || maletas <= 0 || finMinuto <= inicioMinuto) {
+            return;
+        }
+
+        AeropuertoStats actual = stats.computeIfAbsent(
+                aeropuerto.getCodigo(),
+                codigo -> new AeropuertoStats(aeropuerto)
+        );
+        actual.eventosOcupacion.add(new EventoOcupacion(inicioMinuto, maletas));
+        actual.eventosOcupacion.add(new EventoOcupacion(finMinuto, -maletas));
+    }
+
+    private long calcularHorizonteOcupacion(Map<String, AeropuertoStats> stats) {
+        return stats.values().stream()
+                .flatMap(statsAeropuerto -> statsAeropuerto.eventosOcupacion.stream())
+                .mapToInt(EventoOcupacion::minuto)
+                .max()
+                .stream()
+                .mapToLong(Integer::longValue)
+                .max()
+                .orElse(1L);
+    }
+
+    private void calcularOcupacionAlmacen(AeropuertoStats stats, long horizonteMinutos) {
+        Integer capacidad = stats.aeropuerto.getCapacidad();
+        if (capacidad == null || capacidad <= 0 || stats.eventosOcupacion.isEmpty()) {
+            stats.ocupacionPromedio = 0.0;
+            stats.ocupacionMaxima = 0.0;
+            return;
+        }
+
+        Map<Integer, Integer> eventosPorMinuto = new TreeMap<>();
+        for (EventoOcupacion evento : stats.eventosOcupacion) {
+            eventosPorMinuto.merge(
+                    Math.max(0, evento.minuto()),
+                    evento.deltaMaletas(),
+                    Integer::sum
+            );
+        }
+
+        long areaOcupada = 0;
+        int ocupacionActual = 0;
+        int ocupacionMaxima = 0;
+        int minutoAnterior = 0;
+
+        for (Map.Entry<Integer, Integer> evento : eventosPorMinuto.entrySet()) {
+            int minutoEvento = evento.getKey();
+            if (minutoEvento > minutoAnterior) {
+                areaOcupada += (long) ocupacionActual * (minutoEvento - minutoAnterior);
+                minutoAnterior = minutoEvento;
+            }
+
+            ocupacionActual = Math.max(0, ocupacionActual + evento.getValue());
+            ocupacionMaxima = Math.max(ocupacionMaxima, ocupacionActual);
+        }
+
+        stats.ocupacionPromedio = Math.min(100.0, (areaOcupada * 100.0) / (capacidad * Math.max(1L, horizonteMinutos)));
+        stats.ocupacionMaxima = Math.min(100.0, (ocupacionMaxima * 100.0) / capacidad);
     }
 
     private ResultadoPeriodoResponse.DesempenoAeropuertoResponse mapearDesempenoAeropuerto(AeropuertoStats stats) {
@@ -387,6 +525,19 @@ public class ResultadosSimulacionService {
         return (int) Math.round((numerador * 100.0) / denominador);
     }
 
+    private boolean cumplePlazoComprometido(SolicitudEnvio envio) {
+        if (envio == null || envio.getRuta() == null) {
+            return false;
+        }
+
+        Double tiempoTotal = envio.getRuta().getTiempoTotal();
+        Double plazoMaximo = envio.getDiasTiempoMaximo();
+
+        return tiempoTotal != null
+                && plazoMaximo != null
+                && tiempoTotal <= plazoMaximo;
+    }
+
     private int valor(Integer numero) {
         return numero != null ? numero : 0;
     }
@@ -401,9 +552,23 @@ public class ResultadosSimulacionService {
         private int enviadas;
         private double ocupacionPromedio;
         private double ocupacionMaxima;
+        private final List<EventoOcupacion> eventosOcupacion = new ArrayList<>();
 
         private AeropuertoStats(Aeropuerto aeropuerto) {
             this.aeropuerto = aeropuerto;
         }
+    }
+
+    private record VentanaVuelo(
+            Vuelo vuelo,
+            int salidaMinuto,
+            int llegadaMinuto
+    ) {
+    }
+
+    private record EventoOcupacion(
+            int minuto,
+            int deltaMaletas
+    ) {
     }
 }

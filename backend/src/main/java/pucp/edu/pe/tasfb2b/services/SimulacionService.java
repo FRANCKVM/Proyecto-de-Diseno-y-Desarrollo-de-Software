@@ -2,6 +2,7 @@ package pucp.edu.pe.tasfb2b.services;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -107,6 +108,19 @@ public class SimulacionService {
         this.vueloRepository = vueloRepository;
         this.vueloCancelacionService = vueloCancelacionService;
         this.objectMapper = objectMapper;
+    }
+
+    @PostConstruct
+    public void cerrarSimulacionesActivasHuerfanas() {
+        LocalDateTime ahora = LocalDateTime.now();
+
+        for (Simulacion simulacion : simulacionRepository.findByActivaTrue()) {
+            simulacion.setActiva(false);
+            if (simulacion.getFechaFin() == null) {
+                simulacion.setFechaFin(ahora);
+            }
+            simulacionRepository.save(simulacion);
+        }
     }
 
     public synchronized EstadoSimulacion iniciarSimulacion(

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import KpiCard from "@/components/molecules/KpiCard";
 import { listSimulationHistory } from "@/services/simulationService";
+import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { ROUTES } from "@/utils/routes";
 import type { HistorialSimulacion } from "@/types/simulationResult.types";
 
@@ -35,6 +36,10 @@ const DashboardPage = () => {
   const [simulaciones, setSimulaciones] = useState<HistorialSimulacion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isRunning = useLiveSimulationStore((s) => s.isRunning);
+  const runningSimulationId = useLiveSimulationStore((s) => s.idSimulacion);
+
+  const hasRunningSimulation = isRunning && runningSimulationId !== null;
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +80,11 @@ const DashboardPage = () => {
 
   const resumen = useMemo(() => {
     const total = simulaciones.length;
-    const activas = simulaciones.filter((simulacion) => simulacion.activa).length;
+    const activas = hasRunningSimulation
+      ? simulaciones.filter(
+          (simulacion) => simulacion.id === runningSimulationId
+        ).length
+      : 0;
     const semanales = simulaciones.filter(
       (simulacion) => simulacion.tipo === "semanal"
     ).length;
@@ -90,7 +99,7 @@ const DashboardPage = () => {
       semanales,
       colapso,
     };
-  }, [simulaciones]);
+  }, [hasRunningSimulation, runningSimulationId, simulaciones]);
 
   return (
     <div className="p-8 max-w-ref-screen">
@@ -169,6 +178,8 @@ const DashboardPage = () => {
                 simulacion.tipo === "colapso"
                   ? ROUTES.SIMULACION_RESULTADOS_COLAPSO(simulacion.id)
                   : ROUTES.SIMULACION_RESULTADOS(simulacion.id);
+              const isActiveNow =
+                hasRunningSimulation && simulacion.id === runningSimulationId;
 
               return (
                 <article
@@ -180,10 +191,10 @@ const DashboardPage = () => {
                       <div className="flex items-center gap-3 mb-2">
                         <span
                           className={`inline-flex items-center rounded-full px-3 py-1 text-secondary font-medium ${getStatusClasses(
-                            simulacion.activa
+                            isActiveNow
                           )}`}
                         >
-                          {simulacion.activa ? "Activa" : "Finalizada"}
+                          {isActiveNow ? "Activa" : "Finalizada"}
                         </span>
                         <span className="text-secondary text-text-secondary uppercase tracking-wide">
                           {simulacion.tipo === "colapso"
