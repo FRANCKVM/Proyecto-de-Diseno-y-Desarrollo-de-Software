@@ -75,7 +75,7 @@ const RouteLine = ({
       positions={positions}
       pathOptions={{
         color,
-        weight: 2,
+        weight: 1,
         opacity: 0.7,
         dashArray: "6 8",
       }}

@@ -85,6 +85,9 @@ const SimulacionColapsoPage = () => {
   const focusedAirportIcao = useDrawerStore((s) => s.focusedAirportIcao);
   const focusedFlightId = useDrawerStore((s) => s.focusedFlightId);
   const warehouseRegionFilter = useDrawerStore((s) => s.warehouseRegionFilter);
+  const warehouseSemaphoreFilter = useDrawerStore(
+    (s) => s.warehouseSemaphoreFilter
+  );
   const activeFlightRegionFilter = useDrawerStore(
     (s) => s.activeFlightRegionFilter
   );
@@ -157,6 +160,7 @@ const SimulacionColapsoPage = () => {
             focusedAirportIcao={focusedAirportIcao}
             focusedFlightId={focusedFlightId}
             warehouseRegionFilter={warehouseRegionFilter}
+            warehouseSemaphoreFilter={warehouseSemaphoreFilter}
             activeFlightRegionFilter={activeFlightRegionFilter}
             activeFlightSemaphoreFilter={activeFlightSemaphoreFilter}
             activeFlightOnlyId={activeFlightOnlyId}

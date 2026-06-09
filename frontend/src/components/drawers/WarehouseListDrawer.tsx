@@ -2,7 +2,10 @@ import { useState } from "react";
 import { Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import Tag from "@/components/atoms/Tag";
-import { useDrawerStore } from "@/store/drawerStore";
+import {
+  useDrawerStore,
+  type WarehouseSemaphoreFilter,
+} from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
@@ -20,8 +23,6 @@ type WarehouseSortMode =
   | "ocupacion"
   | "llegada-proxima"
   | "salida-proxima";
-
-type OccupancyFilter = "todos" | "vacios" | EstadoSemaforo;
 
 const TAG_VARIANT_BY_ESTADO: Record<EstadoSemaforo, "normal" | "elevado" | "critico"> = {
   normal: "normal",
@@ -113,9 +114,12 @@ const WarehouseListDrawer = ({
   const openWarehouseAirport = useDrawerStore((s) => s.openWarehouseAirport);
   const selectedRegion = useDrawerStore((s) => s.warehouseRegionFilter);
   const setSelectedRegion = useDrawerStore((s) => s.setWarehouseRegionFilter);
+  const occupancyFilter = useDrawerStore((s) => s.warehouseSemaphoreFilter);
+  const setOccupancyFilter = useDrawerStore(
+    (s) => s.setWarehouseSemaphoreFilter
+  );
   const [searchCode, setSearchCode] = useState("");
   const [sortMode, setSortMode] = useState<WarehouseSortMode>("ocupacion");
-  const [occupancyFilter, setOccupancyFilter] = useState<OccupancyFilter>("todos");
   const currentReferenceMinute = referenceMinute ?? getCurrentUtcMinute();
 
   const regionOptions = Array.from(
@@ -264,7 +268,9 @@ const WarehouseListDrawer = ({
             id="warehouse-occupancy-filter"
             value={occupancyFilter}
             onChange={(event) =>
-              setOccupancyFilter(event.target.value as OccupancyFilter)
+              setOccupancyFilter(
+                event.target.value as WarehouseSemaphoreFilter
+              )
             }
             className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
           >

@@ -26,6 +26,7 @@ export interface MapFlight {
 }
 
 type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
+type WarehouseSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 
 interface WorldMapProps {
   airports: AirportWithCoords[];
@@ -36,6 +37,7 @@ interface WorldMapProps {
   focusedAirportIcao?: string | null;
   focusedFlightId?: string | null;
   warehouseRegionFilter?: string;
+  warehouseSemaphoreFilter?: WarehouseSemaphoreFilter;
   activeFlightRegionFilter?: string;
   activeFlightSemaphoreFilter?: ActiveFlightSemaphoreFilter;
   activeFlightOnlyId?: string | null;
@@ -146,6 +148,7 @@ const WorldMap = ({
   focusedAirportIcao,
   focusedFlightId,
   warehouseRegionFilter = "todos",
+  warehouseSemaphoreFilter = "todos",
   activeFlightRegionFilter = "todos",
   activeFlightSemaphoreFilter = "todos",
   activeFlightOnlyId,
@@ -190,12 +193,38 @@ const WorldMap = ({
       }
 
       return warehouseRegionFilter === "todos"
-        ? airports
-        : airports.filter(
-            (airport) => airport.region?.trim() === warehouseRegionFilter
-          );
+        ? airports.filter((airport) => {
+            const occupancy = occupancyByIcao[airport.icao] ?? 0;
+            const estado = getEstadoSemaforo(occupancy, rangosSemaforo);
+            return (
+              warehouseSemaphoreFilter === "todos" ||
+              (warehouseSemaphoreFilter === "vacios"
+                ? occupancy === 0
+                : occupancy > 0 && estado === warehouseSemaphoreFilter)
+            );
+          })
+        : airports.filter((airport) => {
+            const occupancy = occupancyByIcao[airport.icao] ?? 0;
+            const estado = getEstadoSemaforo(occupancy, rangosSemaforo);
+            const matchesRegion =
+              airport.region?.trim() === warehouseRegionFilter;
+            const matchesSemaphore =
+              warehouseSemaphoreFilter === "todos" ||
+              (warehouseSemaphoreFilter === "vacios"
+                ? occupancy === 0
+                : occupancy > 0 && estado === warehouseSemaphoreFilter);
+
+            return matchesRegion && matchesSemaphore;
+          });
     },
-    [airports, shipmentRouteSegments, warehouseRegionFilter]
+    [
+      airports,
+      shipmentRouteSegments,
+      warehouseRegionFilter,
+      warehouseSemaphoreFilter,
+      occupancyByIcao,
+      rangosSemaforo,
+    ]
   );
   const visibleAirportIcaos = useMemo(
     () => new Set(visibleAirports.map((airport) => airport.icao)),

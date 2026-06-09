@@ -3,6 +3,7 @@ import type { EstadoSemaforo } from "@/types/common.types";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 
 export type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
+export type WarehouseSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 
 /**
  * Tipos discriminados de drawer abierto.
@@ -25,11 +26,13 @@ interface DrawerState {
   focusedAirportIcao: string | null;
   focusedFlightId: string | null;
   warehouseRegionFilter: string;
+  warehouseSemaphoreFilter: WarehouseSemaphoreFilter;
   activeFlightRegionFilter: string;
   activeFlightSemaphoreFilter: ActiveFlightSemaphoreFilter;
   activeFlightOnlyId: string | null;
   shipmentRouteSegments: ShipmentRouteSegment[];
   setWarehouseRegionFilter: (region: string) => void;
+  setWarehouseSemaphoreFilter: (filter: WarehouseSemaphoreFilter) => void;
   setActiveFlightRegionFilter: (region: string) => void;
   setActiveFlightSemaphoreFilter: (filter: ActiveFlightSemaphoreFilter) => void;
   openWarehouseList: () => void;
@@ -66,11 +69,14 @@ export const useDrawerStore = create<DrawerState>((set) => ({
   focusedAirportIcao: null,
   focusedFlightId: null,
   warehouseRegionFilter: "todos",
+  warehouseSemaphoreFilter: "todos",
   activeFlightRegionFilter: "todos",
   activeFlightSemaphoreFilter: "todos",
   activeFlightOnlyId: null,
   shipmentRouteSegments: [],
   setWarehouseRegionFilter: (region) => set({ warehouseRegionFilter: region }),
+  setWarehouseSemaphoreFilter: (filter) =>
+    set({ warehouseSemaphoreFilter: filter }),
   setActiveFlightRegionFilter: (region) =>
     set({ activeFlightRegionFilter: region, activeFlightOnlyId: null }),
   setActiveFlightSemaphoreFilter: (filter) =>
@@ -79,6 +85,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
     set({
       selection: { type: "warehouse-list" },
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -89,6 +96,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       selection: { type: "warehouse-airport", icao },
       focusedAirportIcao: icao,
       focusedFlightId: null,
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -100,6 +108,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedAirportIcao: null,
       focusedFlightId: null,
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -111,6 +120,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedAirportIcao: null,
       focusedFlightId: null,
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -122,6 +132,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedAirportIcao: icao,
       focusedFlightId: null,
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -137,6 +148,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedAirportIcao: null,
       focusedFlightId: codigo,
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightOnlyId: options?.showOnlyOnMap ? codigo : null,
       shipmentRouteSegments: [],
     }),
@@ -145,6 +157,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       selection: { type: "shipment", codigo },
       focusedAirportIcao: options?.focusedAirportIcao ?? null,
       focusedFlightId: options?.focusedFlightId ?? null,
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -156,6 +169,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedAirportIcao: null,
       focusedFlightId: null,
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
@@ -167,6 +181,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedAirportIcao: null,
       focusedFlightId: null,
       warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
       activeFlightSemaphoreFilter: "todos",
       activeFlightOnlyId: null,
