@@ -388,7 +388,7 @@ public class ResultadosSimulacionService {
                 .mapToInt(EventoOcupacion::minuto)
                 .max()
                 .stream()
-                .mapToLong(Integer::longValue)
+                .asLongStream()
                 .max()
                 .orElse(1L);
     }

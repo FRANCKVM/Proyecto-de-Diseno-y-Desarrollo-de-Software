@@ -1,9 +1,12 @@
-import { useMemo } from "react";
-import { MapContainer as LeafletMap, TileLayer } from "react-leaflet";
+import { useEffect, useMemo } from "react";
+import { MapContainer as LeafletMap, TileLayer, useMap } from "react-leaflet";
+import L from "leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
-import type { RangoSemaforo } from "@/types/common.types";
+import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
+import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
+import { COLORS } from "@/styles/theme";
 import AirportMarker from "@/components/map/AirportMarker";
 import FlightMarker from "@/components/map/FlightMarker";
 import RouteLine from "@/components/map/RouteLine";
@@ -22,12 +25,21 @@ export interface MapFlight {
   occupancyPct?: number;
 }
 
+type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
+
 interface WorldMapProps {
   airports: AirportWithCoords[];
   flights?: MapFlight[];
   /** Mapa de ICAO -> porcentaje de ocupacion 0-100. */
   occupancyByIcao?: Record<string, number>;
   rangosSemaforo?: RangoSemaforo;
+  focusedAirportIcao?: string | null;
+  focusedFlightId?: string | null;
+  warehouseRegionFilter?: string;
+  activeFlightRegionFilter?: string;
+  activeFlightSemaphoreFilter?: ActiveFlightSemaphoreFilter;
+  activeFlightOnlyId?: string | null;
+  shipmentRouteSegments?: ShipmentRouteSegment[];
   onAirportClick?: (airport: AirportWithCoords) => void;
   onFlightClick?: (flightId: string) => void;
 }
@@ -63,6 +75,53 @@ const TILE_ATTRIBUTION =
  */
 const INITIAL_CENTER: [number, number] = [20, 0];
 const INITIAL_ZOOM = 3;
+const REF_ZOOM = 0;
+
+interface FocusedMapFlight {
+  id: string;
+  flight: MapFlight;
+  from: AirportWithCoords;
+  to: AirportWithCoords;
+}
+
+const MapFocusController = ({
+  airport,
+  flight,
+}: {
+  airport?: AirportWithCoords;
+  flight?: FocusedMapFlight;
+}) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (flight) {
+      const fromPx = map.project([flight.from.lat, flight.from.lng], REF_ZOOM);
+      const toPx = map.project([flight.to.lat, flight.to.lng], REF_ZOOM);
+      const midPx = L.point(
+        fromPx.x + (toPx.x - fromPx.x) * flight.flight.progress,
+        fromPx.y + (toPx.y - fromPx.y) * flight.flight.progress
+      );
+      const position = map.unproject(midPx, REF_ZOOM);
+
+      map.flyTo([position.lat, position.lng], Math.max(map.getZoom(), 5), {
+        animate: true,
+        duration: 0.7,
+      });
+      return;
+    }
+
+    if (!airport) {
+      return;
+    }
+
+    map.flyTo([airport.lat, airport.lng], Math.max(map.getZoom(), 5), {
+      animate: true,
+      duration: 0.8,
+    });
+  }, [airport, flight?.id, map]);
+
+  return null;
+};
 
 /**
  * Mapa mundial operativo del sistema Tasf.B2B.
@@ -84,6 +143,13 @@ const WorldMap = ({
   flights = [],
   occupancyByIcao = {},
   rangosSemaforo,
+  focusedAirportIcao,
+  focusedFlightId,
+  warehouseRegionFilter = "todos",
+  activeFlightRegionFilter = "todos",
+  activeFlightSemaphoreFilter = "todos",
+  activeFlightOnlyId,
+  shipmentRouteSegments = [],
   onAirportClick,
   onFlightClick,
 }: WorldMapProps) => {
@@ -93,6 +159,93 @@ const WorldMap = ({
     () => new Map(airports.map((a) => [a.icao, a])),
     [airports]
   );
+  const focusedAirport = focusedAirportIcao
+    ? airportsByIcao.get(focusedAirportIcao)
+    : undefined;
+  const focusedFlight = focusedFlightId
+    ? flights
+        .map((flight) => {
+          const from = airportsByIcao.get(flight.fromIcao);
+          const to = airportsByIcao.get(flight.toIcao);
+          return from && to ? { id: flight.id, flight, from, to } : null;
+        })
+        .find((entry): entry is FocusedMapFlight =>
+          Boolean(
+            entry &&
+              (entry.flight.id === focusedFlightId ||
+                entry.flight.code === focusedFlightId)
+          )
+        )
+    : undefined;
+  const visibleAirports = useMemo(
+    () => {
+      if (shipmentRouteSegments.length > 0) {
+        const routeIcaos = new Set(
+          shipmentRouteSegments.flatMap((segment) => [
+            segment.fromIcao,
+            segment.toIcao,
+          ])
+        );
+        return airports.filter((airport) => routeIcaos.has(airport.icao));
+      }
+
+      return warehouseRegionFilter === "todos"
+        ? airports
+        : airports.filter(
+            (airport) => airport.region?.trim() === warehouseRegionFilter
+          );
+    },
+    [airports, shipmentRouteSegments, warehouseRegionFilter]
+  );
+  const visibleAirportIcaos = useMemo(
+    () => new Set(visibleAirports.map((airport) => airport.icao)),
+    [visibleAirports]
+  );
+  const warehouseFilteredFlights =
+    shipmentRouteSegments.length > 0
+      ? []
+      : warehouseRegionFilter === "todos"
+      ? flights
+      : flights.filter(
+          (flight) =>
+            (visibleAirportIcaos.has(flight.fromIcao) &&
+              visibleAirportIcaos.has(flight.toIcao)) ||
+            (focusedFlightId !== null &&
+              focusedFlightId !== undefined &&
+              (flight.id === focusedFlightId || flight.code === focusedFlightId))
+        );
+  const activeFilterBaseFlights = activeFlightOnlyId
+    ? flights.filter(
+        (flight) =>
+          flight.id === activeFlightOnlyId || flight.code === activeFlightOnlyId
+      )
+    : warehouseFilteredFlights;
+  const visibleFlights = activeFilterBaseFlights.filter((flight) => {
+    if (activeFlightOnlyId) {
+      return true;
+    }
+
+    const from = airportsByIcao.get(flight.fromIcao);
+    const to = airportsByIcao.get(flight.toIcao);
+    const occupancy = flight.occupancyPct;
+    const estado =
+      occupancy !== undefined
+        ? getEstadoSemaforo(occupancy, rangosSemaforo)
+        : null;
+    const matchesRegion =
+      activeFlightRegionFilter === "todos" ||
+      from?.region?.trim() === activeFlightRegionFilter ||
+      to?.region?.trim() === activeFlightRegionFilter;
+    const matchesSemaphore =
+      activeFlightSemaphoreFilter === "todos" ||
+      (activeFlightSemaphoreFilter === "vacios"
+        ? occupancy === 0
+        : occupancy !== undefined &&
+          occupancy > 0 &&
+          estado === activeFlightSemaphoreFilter);
+
+    return matchesRegion && matchesSemaphore;
+  });
 
   return (
     <LeafletMap
@@ -111,9 +264,26 @@ const WorldMap = ({
         attribution={TILE_ATTRIBUTION}
         detectRetina
       />
+      <MapFocusController airport={focusedAirport} flight={focusedFlight} />
 
       {/* Capa 1: rutas (al fondo) */}
-      {flights.map((f) => {
+      {shipmentRouteSegments.map((segment, index) => {
+        const from = airportsByIcao.get(segment.fromIcao);
+        const to = airportsByIcao.get(segment.toIcao);
+        if (!from || !to) return null;
+        return (
+          <RouteLine
+            key={`shipment-route-${segment.fromIcao}-${segment.toIcao}-${index}`}
+            from={from}
+            to={to}
+            progress={1}
+            full
+            color={COLORS.primary.base}
+          />
+        );
+      })}
+
+      {visibleFlights.map((f) => {
         const from = airportsByIcao.get(f.fromIcao);
         const to = airportsByIcao.get(f.toIcao);
         if (!from || !to) return null;
@@ -128,7 +298,7 @@ const WorldMap = ({
       })}
 
       {/* Capa 2: aeropuertos */}
-      {airports.map((a) => {
+      {visibleAirports.map((a) => {
         const ocupacion = occupancyByIcao[a.icao];
         const estado =
           ocupacion !== undefined
@@ -140,16 +310,21 @@ const WorldMap = ({
             airport={a}
             estado={estado}
             ocupacion={ocupacion}
+            selected={a.icao === focusedAirportIcao}
             onClick={onAirportClick}
           />
         );
       })}
 
       {/* Capa 3: aviones (encima de todo) */}
-      {flights.map((f) => {
+      {visibleFlights.map((f) => {
         const from = airportsByIcao.get(f.fromIcao);
         const to = airportsByIcao.get(f.toIcao);
         if (!from || !to) return null;
+        const selected =
+          focusedFlightId !== null &&
+          focusedFlightId !== undefined &&
+          (f.id === focusedFlightId || f.code === focusedFlightId);
         const flightEstado =
           f.occupancyPct !== undefined
             ? getEstadoSemaforo(f.occupancyPct, rangosSemaforo)
@@ -162,6 +337,7 @@ const WorldMap = ({
             toAirport={to}
             progress={f.progress}
             estado={flightEstado}
+            selected={selected}
             onClick={onFlightClick}
           />
         );

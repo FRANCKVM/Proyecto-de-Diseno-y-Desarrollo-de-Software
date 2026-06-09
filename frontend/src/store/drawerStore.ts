@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import type { EstadoSemaforo } from "@/types/common.types";
+import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
+
+export type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 
 /**
  * Tipos discriminados de drawer abierto.
@@ -7,6 +11,10 @@ import { create } from "zustand";
  */
 export type DrawerSelection =
   | null
+  | { type: "warehouse-list" }
+  | { type: "warehouse-airport"; icao: string }
+  | { type: "shipments-panel" }
+  | { type: "active-flights-panel" }
   | { type: "airport"; icao: string }
   | { type: "flight"; codigo: string; idSimulacion?: number | null }
   | { type: "shipment"; codigo: string }
@@ -14,12 +22,33 @@ export type DrawerSelection =
 
 interface DrawerState {
   selection: DrawerSelection;
+  focusedAirportIcao: string | null;
+  focusedFlightId: string | null;
+  warehouseRegionFilter: string;
+  activeFlightRegionFilter: string;
+  activeFlightSemaphoreFilter: ActiveFlightSemaphoreFilter;
+  activeFlightOnlyId: string | null;
+  shipmentRouteSegments: ShipmentRouteSegment[];
+  setWarehouseRegionFilter: (region: string) => void;
+  setActiveFlightRegionFilter: (region: string) => void;
+  setActiveFlightSemaphoreFilter: (filter: ActiveFlightSemaphoreFilter) => void;
+  openWarehouseList: () => void;
+  openWarehouseAirport: (icao: string) => void;
+  openShipmentsPanel: () => void;
+  openActiveFlightsPanel: () => void;
   openAirport: (icao: string) => void;
   openFlight: (
     codigo: string,
-    options?: { idSimulacion?: number | null }
+    options?: { idSimulacion?: number | null; showOnlyOnMap?: boolean }
   ) => void;
-  openShipment: (codigo: string) => void;
+  openShipment: (
+    codigo: string,
+    options?: {
+      focusedAirportIcao?: string | null;
+      focusedFlightId?: string | null;
+      shipmentRouteSegments?: ShipmentRouteSegment[];
+    }
+  ) => void;
   openShipmentForm: () => void;
   close: () => void;
 }
@@ -34,7 +63,70 @@ interface DrawerState {
  */
 export const useDrawerStore = create<DrawerState>((set) => ({
   selection: null,
-  openAirport: (icao) => set({ selection: { type: "airport", icao } }),
+  focusedAirportIcao: null,
+  focusedFlightId: null,
+  warehouseRegionFilter: "todos",
+  activeFlightRegionFilter: "todos",
+  activeFlightSemaphoreFilter: "todos",
+  activeFlightOnlyId: null,
+  shipmentRouteSegments: [],
+  setWarehouseRegionFilter: (region) => set({ warehouseRegionFilter: region }),
+  setActiveFlightRegionFilter: (region) =>
+    set({ activeFlightRegionFilter: region, activeFlightOnlyId: null }),
+  setActiveFlightSemaphoreFilter: (filter) =>
+    set({ activeFlightSemaphoreFilter: filter, activeFlightOnlyId: null }),
+  openWarehouseList: () =>
+    set({
+      selection: { type: "warehouse-list" },
+      warehouseRegionFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
+  openWarehouseAirport: (icao) =>
+    set({
+      selection: { type: "warehouse-airport", icao },
+      focusedAirportIcao: icao,
+      focusedFlightId: null,
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
+  openShipmentsPanel: () =>
+    set({
+      selection: { type: "shipments-panel" },
+      focusedAirportIcao: null,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
+  openActiveFlightsPanel: () =>
+    set({
+      selection: { type: "active-flights-panel" },
+      focusedAirportIcao: null,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
+  openAirport: (icao) =>
+    set({
+      selection: { type: "airport", icao },
+      focusedAirportIcao: icao,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
   openFlight: (codigo, options) =>
     set({
       selection: {
@@ -42,8 +134,42 @@ export const useDrawerStore = create<DrawerState>((set) => ({
         codigo,
         idSimulacion: options?.idSimulacion ?? null,
       },
+      focusedAirportIcao: null,
+      focusedFlightId: codigo,
+      warehouseRegionFilter: "todos",
+      activeFlightOnlyId: options?.showOnlyOnMap ? codigo : null,
+      shipmentRouteSegments: [],
     }),
-  openShipment: (codigo) => set({ selection: { type: "shipment", codigo } }),
-  openShipmentForm: () => set({ selection: { type: "shipment-form" } }),
-  close: () => set({ selection: null }),
+  openShipment: (codigo, options) =>
+    set({
+      selection: { type: "shipment", codigo },
+      focusedAirportIcao: options?.focusedAirportIcao ?? null,
+      focusedFlightId: options?.focusedFlightId ?? null,
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: options?.shipmentRouteSegments ?? [],
+    }),
+  openShipmentForm: () =>
+    set({
+      selection: { type: "shipment-form" },
+      focusedAirportIcao: null,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
+  close: () =>
+    set({
+      selection: null,
+      focusedAirportIcao: null,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: "todos",
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
 }));

@@ -3,7 +3,12 @@ import AirportDrawer from "@/components/drawers/AirportDrawer";
 import FlightDrawer from "@/components/drawers/FlightDrawer";
 import ShipmentDrawer from "@/components/drawers/ShipmentDrawer";
 import ShipmentFormDrawer from "@/components/drawers/ShipmentFormDrawer";
+import ShipmentOverviewDrawer from "@/components/drawers/ShipmentOverviewDrawer";
+import WarehouseListDrawer from "@/components/drawers/WarehouseListDrawer";
+import ActiveFlightsDrawer from "@/components/drawers/ActiveFlightsDrawer";
+import type { MapFlight } from "@/components/map/WorldMap";
 import type { AirportWithCoords } from "@/types/airport.types";
+import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { RangoSemaforo } from "@/types/common.types";
 
 interface DrawerHostProps {
@@ -15,6 +20,9 @@ interface DrawerHostProps {
   airports?: AirportWithCoords[];
   rangosSemaforo?: RangoSemaforo;
   idSimulacion?: number | null;
+  shipments?: BackendSolicitudEnvio[];
+  activeFlights?: MapFlight[];
+  referenceMinute?: number | null;
   onShipmentCreated?: () => Promise<void> | void;
 }
 
@@ -36,6 +44,9 @@ const DrawerHost = ({
   airports = [],
   rangosSemaforo,
   idSimulacion,
+  shipments = [],
+  activeFlights = [],
+  referenceMinute,
   onShipmentCreated,
 }: DrawerHostProps) => {
   const selection = useDrawerStore((s) => s.selection);
@@ -43,6 +54,48 @@ const DrawerHost = ({
   if (!selection) return null;
 
   switch (selection.type) {
+    case "warehouse-list":
+      return (
+        <WarehouseListDrawer
+          key="warehouse-list"
+          airports={airports}
+          occupancyByIcao={occupancyByIcao}
+          rangosSemaforo={rangosSemaforo}
+          shipments={shipments}
+          referenceMinute={referenceMinute}
+        />
+      );
+    case "warehouse-airport":
+      return (
+        <AirportDrawer
+          key={`warehouse-airport-${selection.icao}`}
+          icao={selection.icao}
+          ocupacion={occupancyByIcao?.[selection.icao]}
+          rangosSemaforo={rangosSemaforo}
+          idSimulacion={idSimulacion}
+          shipments={shipments}
+          showFlights={false}
+          referenceMinute={referenceMinute}
+        />
+      );
+    case "shipments-panel":
+      return (
+        <ShipmentOverviewDrawer
+          key="shipments-panel"
+          shipments={shipments}
+          referenceMinute={referenceMinute}
+        />
+      );
+    case "active-flights-panel":
+      return (
+        <ActiveFlightsDrawer
+          key="active-flights-panel"
+          flights={activeFlights}
+          airports={airports}
+          rangosSemaforo={rangosSemaforo}
+          idSimulacion={idSimulacion}
+        />
+      );
     case "airport":
       return (
         <AirportDrawer
@@ -51,6 +104,9 @@ const DrawerHost = ({
           ocupacion={occupancyByIcao?.[selection.icao]}
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
+          shipments={shipments}
+          showFlights
+          referenceMinute={referenceMinute}
         />
       );
     case "flight":
@@ -59,6 +115,8 @@ const DrawerHost = ({
           key={`flight-${selection.codigo}-${selection.idSimulacion ?? "real"}`}
           codigo={selection.codigo}
           idSimulacion={selection.idSimulacion}
+          shipments={shipments}
+          referenceMinute={referenceMinute}
         />
       );
     case "shipment":
@@ -73,6 +131,7 @@ const DrawerHost = ({
         <ShipmentFormDrawer
           key="shipment-form"
           airports={airports}
+          occupancyByIcao={occupancyByIcao}
           onCreated={onShipmentCreated}
         />
       );

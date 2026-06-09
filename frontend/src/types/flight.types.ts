@@ -11,9 +11,7 @@ export type TipoVuelo = "intracontinental" | "intercontinental";
 /** Estado puntual de un vuelo en el ciclo operativo. */
 export type EstadoVuelo =
   | "programado"
-  | "abordando"
   | "en_vuelo"
-  | "aterrizando"
   | "completado"
   | "cancelado";
 

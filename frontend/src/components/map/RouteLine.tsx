@@ -9,6 +9,8 @@ interface RouteLineProps {
   to: AirportWithCoords;
   /** Avance del vuelo entre 0 y 1. */
   progress: number;
+  /** Dibuja el segmento completo, util para rutas de envios. */
+  full?: boolean;
   /**
    * Color del trazo. Por defecto gris secundario del estandar,
    * que se distingue claramente sobre el fondo claro de CartoDB
@@ -29,11 +31,19 @@ const RouteLine = ({
   from,
   to,
   progress,
+  full = false,
   color = COLORS.text.secondary,
 }: RouteLineProps) => {
   const map = useMap();
 
   const positions = useMemo(() => {
+    if (full) {
+      return [
+        [from.lat, from.lng],
+        [to.lat, to.lng],
+      ] as [number, number][];
+    }
+
     if (progress <= 0 || progress >= 1) {
       return null;
     }
@@ -54,7 +64,7 @@ const RouteLine = ({
       [currentPosition.lat, currentPosition.lng],
       [to.lat, to.lng],
     ] as [number, number][];
-  }, [from.lat, from.lng, map, progress, to.lat, to.lng]);
+  }, [from.lat, from.lng, full, map, progress, to.lat, to.lng]);
 
   if (!positions) {
     return null;

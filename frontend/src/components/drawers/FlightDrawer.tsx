@@ -4,11 +4,18 @@ import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
 import { getFlightByCode } from "@/services/flightService";
 import { useDrawerStore } from "@/store/drawerStore";
+import {
+  buildShipmentRouteSegments,
+  resolveShipmentFocusTarget,
+} from "@/utils/shipmentFocus";
+import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { VueloDetalle } from "@/types/flight.types";
 
 interface FlightDrawerProps {
   codigo: string;
   idSimulacion?: number | null;
+  shipments?: BackendSolicitudEnvio[];
+  referenceMinute?: number | null;
 }
 
 const ISO_WITH_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
@@ -29,6 +36,11 @@ const formatFecha = (iso: string): string => {
 const parseFlightDateMs = (iso: string): number => {
   const normalized = ISO_WITH_TIME_ZONE.test(iso) ? iso : `${iso}Z`;
   return new Date(normalized).getTime();
+};
+
+const parseShipmentCodeId = (codigo: string): number | null => {
+  const match = codigo.match(/\d+/);
+  return match ? Number(match[0]) : null;
 };
 
 const formatTiempoRestante = (arrivalIso: string, nowMs: number): string => {
@@ -67,6 +79,12 @@ const formatTiempoRestante = (arrivalIso: string, nowMs: number): string => {
   return parts.join(" ");
 };
 
+const formatPercent = (value: number): string =>
+  `${value.toLocaleString("es-PE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
+
 /**
  * Drawer de detalle de vuelo.
  * Estandar 61 + mockup 05 del Figma.
@@ -75,7 +93,12 @@ const formatTiempoRestante = (arrivalIso: string, nowMs: number): string => {
  * envios transportados. Los envios son clickeables y abren el
  * ShipmentDrawer correspondiente.
  */
-const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
+const FlightDrawer = ({
+  codigo,
+  idSimulacion,
+  shipments = [],
+  referenceMinute,
+}: FlightDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
 
@@ -136,7 +159,8 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
     );
   }
 
-  const ocupacionPct = Math.round((flight.ocupacion / flight.capacidad) * 100);
+  const ocupacionPct =
+    flight.capacidad > 0 ? (flight.ocupacion / flight.capacidad) * 100 : 0;
   const estadoLabel =
     flight.estado === "en_vuelo"
       ? "En vuelo"
@@ -144,7 +168,25 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
       ? "Programado"
       : flight.estado === "completado"
       ? "Completado"
+      : flight.estado === "cancelado"
+      ? "Cancelado"
       : flight.estado;
+  const openShipmentFromFlight = (shipmentCode: string) => {
+    const shipmentId = parseShipmentCodeId(shipmentCode);
+    const shipment = shipments.find(
+      (candidate) => candidate.idEnvio === shipmentId
+    );
+
+    if (!shipment) {
+      openShipment(shipmentCode);
+      return;
+    }
+
+    openShipment(shipmentCode, {
+      ...resolveShipmentFocusTarget(shipment, referenceMinute),
+      shipmentRouteSegments: buildShipmentRouteSegments(shipment),
+    });
+  };
 
   return (
     <DrawerBase eyebrow="Vuelo" title={flight.codigo} onClose={close}>
@@ -169,7 +211,7 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
         />
         <InfoRow
           label="Ocupacion"
-          value={`${flight.ocupacion} / ${flight.capacidad} (${ocupacionPct}%)`}
+          value={`${flight.ocupacion} / ${flight.capacidad} (${formatPercent(ocupacionPct)})`}
         />
         <InfoRow label="Fecha salida" value={formatFecha(flight.fechaSalida)} />
         <InfoRow
@@ -233,7 +275,7 @@ const FlightDrawer = ({ codigo, idSimulacion }: FlightDrawerProps) => {
                   <button
                     type="button"
                     className="text-button text-primary hover:underline block"
-                    onClick={() => openShipment(e.codigo)}
+                    onClick={() => openShipmentFromFlight(e.codigo)}
                   >
                     {e.codigo}
                   </button>

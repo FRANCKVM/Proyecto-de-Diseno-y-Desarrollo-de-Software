@@ -159,6 +159,20 @@ const OperacionDiaADiaPage = () => {
   const openAirport = useDrawerStore((s) => s.openAirport);
   const openFlight = useDrawerStore((s) => s.openFlight);
   const openShipmentForm = useDrawerStore((s) => s.openShipmentForm);
+  const openWarehouseList = useDrawerStore((s) => s.openWarehouseList);
+  const openShipmentsPanel = useDrawerStore((s) => s.openShipmentsPanel);
+  const openActiveFlightsPanel = useDrawerStore((s) => s.openActiveFlightsPanel);
+  const focusedAirportIcao = useDrawerStore((s) => s.focusedAirportIcao);
+  const focusedFlightId = useDrawerStore((s) => s.focusedFlightId);
+  const warehouseRegionFilter = useDrawerStore((s) => s.warehouseRegionFilter);
+  const activeFlightRegionFilter = useDrawerStore(
+    (s) => s.activeFlightRegionFilter
+  );
+  const activeFlightSemaphoreFilter = useDrawerStore(
+    (s) => s.activeFlightSemaphoreFilter
+  );
+  const activeFlightOnlyId = useDrawerStore((s) => s.activeFlightOnlyId);
+  const shipmentRouteSegments = useDrawerStore((s) => s.shipmentRouteSegments);
 
   const handleRegistrarEnvio = () => {
     openShipmentForm();
@@ -219,6 +233,9 @@ const OperacionDiaADiaPage = () => {
             void handleFlightSearch();
           },
         }}
+        onOpenWarehouses={openWarehouseList}
+        onOpenShipments={openShipmentsPanel}
+        onOpenActiveFlights={openActiveFlightsPanel}
         onRegistrarEnvio={handleRegistrarEnvio}
       />
       <main className="flex-1 min-h-0 bg-map-bg relative">
@@ -227,6 +244,13 @@ const OperacionDiaADiaPage = () => {
             airports={airports}
             flights={flights}
             occupancyByIcao={occupancy}
+            focusedAirportIcao={focusedAirportIcao}
+            focusedFlightId={focusedFlightId}
+            warehouseRegionFilter={warehouseRegionFilter}
+            activeFlightRegionFilter={activeFlightRegionFilter}
+            activeFlightSemaphoreFilter={activeFlightSemaphoreFilter}
+            activeFlightOnlyId={activeFlightOnlyId}
+            shipmentRouteSegments={shipmentRouteSegments}
             onAirportClick={(a) => openAirport(a.icao)}
             onFlightClick={(id) => openFlight(id)}
           />
@@ -234,6 +258,8 @@ const OperacionDiaADiaPage = () => {
         <DrawerHost
           occupancyByIcao={occupancy}
           airports={airports}
+          shipments={envios}
+          activeFlights={flights}
           onShipmentCreated={refresh}
         />
       </main>

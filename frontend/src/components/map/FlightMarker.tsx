@@ -18,6 +18,7 @@ interface FlightMarkerProps {
    * defecto sobre el mapa claro de CartoDB Positron.
    */
   estado?: EstadoSemaforo;
+  selected?: boolean;
   onClick?: (flightId: string) => void;
 }
 
@@ -77,10 +78,17 @@ const PLANE_CENTER = {
 const buildPlaneHtml = (
   bodyColor: string,
   centerColor: string | null,
-  displayBearing: number
+  displayBearing: number,
+  selected = false
 ): string => `
-  <div class="tasf-flight-marker" style="transform: rotate(${displayBearing}deg)">
+  <div class="tasf-flight-marker" style="position:relative; transform: rotate(${displayBearing}deg) ${selected ? "scale(1.2)" : ""}">
+    ${
+      selected
+        ? `<div style="position:absolute; inset:-9px; border:3px solid ${COLORS.primary.base}; border-radius:999px; background:${COLORS.primary.soft}; opacity:0.9;"></div>`
+        : ""
+    }
     <svg width="${PLANE_SIZE}" height="${PLANE_SIZE}" viewBox="0 0 24 24"
+         style="position:relative; z-index:1;"
          xmlns="http://www.w3.org/2000/svg"
          fill="${bodyColor}" stroke="#FFFFFF" stroke-width="1.5"
          stroke-linecap="round" stroke-linejoin="round"
@@ -113,6 +121,7 @@ const FlightMarker = ({
   toAirport,
   progress,
   estado,
+  selected = false,
   onClick,
 }: FlightMarkerProps) => {
   const map = useMap();
@@ -163,18 +172,19 @@ const FlightMarker = ({
   const icon = useMemo(
     () =>
       L.divIcon({
-        html: buildPlaneHtml(bodyColor, centerColor, displayBearing),
+        html: buildPlaneHtml(bodyColor, centerColor, displayBearing, selected),
         className: "",
         iconSize: [PLANE_SIZE, PLANE_SIZE],
         iconAnchor: [PLANE_SIZE / 2, PLANE_SIZE / 2],
       }),
-    [bodyColor, centerColor, displayBearing]
+    [bodyColor, centerColor, displayBearing, selected]
   );
 
   return (
     <Marker
       position={position}
       icon={icon}
+      zIndexOffset={selected ? 1200 : 0}
       eventHandlers={{
         click: () => onClick?.(flightId),
       }}

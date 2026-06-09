@@ -260,6 +260,7 @@ public class OperacionesService {
 
     private SolicitudEnvio procesarSolicitudReal(SolicitudEnvio solicitud) {
         validarSolicitud(solicitud);
+        validarCapacidadOrigen(solicitud);
 
         solicitud.setEstado(EstadoEnvio.INGRESADO);
         solicitud.setSimulacion(null);
@@ -518,6 +519,21 @@ public class OperacionesService {
 
         if (solicitud.getDiasTiempoMaximo() == null || solicitud.getDiasTiempoMaximo() <= 0) {
             throw new IllegalArgumentException("Cada solicitud debe tener un plazo maximo mayor que 0.");
+        }
+    }
+
+    private void validarCapacidadOrigen(SolicitudEnvio solicitud) {
+        Aeropuerto origen = solicitud.getOrigen();
+        int disponibles = origen.getCapacidad() != null ? origen.getCapacidad() : 0;
+        int solicitadas = solicitud.getContarBolsas() != null ? solicitud.getContarBolsas() : 0;
+
+        if (disponibles < solicitadas) {
+            throw new IllegalArgumentException(
+                    "El almacen origen " + origen.getCodigo()
+                            + " solo tiene " + disponibles
+                            + " maletas disponibles. No se puede registrar un envio de "
+                            + solicitadas + " maletas."
+            );
         }
     }
 

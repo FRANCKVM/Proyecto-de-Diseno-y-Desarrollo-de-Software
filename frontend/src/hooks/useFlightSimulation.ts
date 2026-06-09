@@ -93,12 +93,27 @@ const calculateOccupancyPct = (
   return Math.min(100, (used * 100) / totalCapacity);
 };
 
+interface ActiveFlightAggregate {
+  idVuelo: number;
+  departure: number;
+  segmentIndex: number;
+  fromIcao: string;
+  toIcao: string;
+  progress: number;
+  durationMinutes: number;
+  capacity?: number | null;
+  reportedUsedCapacity?: number | null;
+  activeBags: number;
+  firstShipmentId: number | null;
+  firstShipmentIndex: number;
+}
+
 const buildFlightsFromShipments = (
   shipments: BackendSolicitudEnvio[],
   currentMinute: number,
   simulationStartMs: number | null
 ): AnimatedFlight[] => {
-  const flights: AnimatedFlight[] = [];
+  const activeFlightsByOccurrence = new Map<string, ActiveFlightAggregate>();
 
   shipments.forEach((shipment, shipmentIndex) => {
     const routeFlights = shipment.ruta?.vuelos ?? [];
@@ -121,25 +136,53 @@ const buildFlightsFromShipments = (
       const progress = clampProgress(
         (currentMinute - departure) / durationMinutes
       );
+      const occurrenceKey = `${flight.idVuelo}-${departure}`;
+      const existing = activeFlightsByOccurrence.get(occurrenceKey);
 
-      flights.push({
-        id: `shipment-${shipment.idEnvio ?? shipmentIndex}-flight-${
-          flight.idVuelo
-        }-${segmentIndex}-${departure}`,
-        code: String(flight.idVuelo),
+      if (existing) {
+        existing.activeBags += shipment.contarBolsas ?? 0;
+        existing.reportedUsedCapacity = Math.max(
+          existing.reportedUsedCapacity ?? 0,
+          flight.capacidadUsada ?? 0
+        );
+        return;
+      }
+
+      activeFlightsByOccurrence.set(occurrenceKey, {
+        idVuelo: flight.idVuelo,
+        departure,
+        segmentIndex,
         fromIcao: flight.desde.codigo,
         toIcao: flight.hasta.codigo,
         progress,
-        occupancyPct: calculateOccupancyPct(
-          flight.capacidadUsada,
-          flight.capacidad
-        ),
-        durationSeconds: durationMinutes * 60,
+        durationMinutes,
+        capacity: flight.capacidad,
+        reportedUsedCapacity: flight.capacidadUsada,
+        activeBags: shipment.contarBolsas ?? 0,
+        firstShipmentId: shipment.idEnvio,
+        firstShipmentIndex: shipmentIndex,
       });
     });
   });
 
-  return flights;
+  return Array.from(activeFlightsByOccurrence.values()).map((flight) => {
+    const usedCapacity =
+      flight.activeBags > 0
+        ? flight.activeBags
+        : (flight.reportedUsedCapacity ?? 0);
+
+    return {
+      id: `shipment-${flight.firstShipmentId ?? flight.firstShipmentIndex}-flight-${
+        flight.idVuelo
+      }-${flight.segmentIndex}-${flight.departure}`,
+      code: String(flight.idVuelo),
+      fromIcao: flight.fromIcao,
+      toIcao: flight.toIcao,
+      progress: flight.progress,
+      occupancyPct: calculateOccupancyPct(usedCapacity, flight.capacity),
+      durationSeconds: flight.durationMinutes * 60,
+    };
+  });
 };
 
 /**

@@ -1,6 +1,8 @@
-import { Search, Plus } from "lucide-react";
+import type { ReactNode } from "react";
+import { Building2, Package, Plane, Search, Plus } from "lucide-react";
 import { cn } from "@/utils/cn";
 import StatusDot from "@/components/atoms/StatusDot";
+import { useDrawerStore } from "@/store/drawerStore";
 
 // ============================================================================
 // SUB-COMPONENTES INTERNOS
@@ -129,6 +131,41 @@ const SearchInput = ({
   </form>
 );
 
+interface TopBarActionButtonProps {
+  icon?: ReactNode;
+  label: string;
+  onClick?: () => void;
+  variant?: "primary" | "secondary";
+  collapseLabel?: boolean;
+}
+
+const TopBarActionButton = ({
+  icon,
+  label,
+  onClick,
+  variant = "secondary",
+  collapseLabel = false,
+}: TopBarActionButtonProps) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={collapseLabel ? label : undefined}
+    title={collapseLabel ? label : undefined}
+    className={cn(
+      "inline-flex items-center gap-1.5 text-button py-2 rounded-input transition-colors",
+      collapseLabel ? "px-2 xl:px-3" : "px-3",
+      variant === "primary"
+        ? "bg-primary hover:bg-primary/90 text-text-inverse"
+        : "bg-card border border-border text-text-primary hover:bg-field"
+    )}
+  >
+    {icon}
+    <span className={collapseLabel ? "hidden xl:inline" : undefined}>
+      {label}
+    </span>
+  </button>
+);
+
 // ============================================================================
 // VARIANTES
 // ============================================================================
@@ -149,6 +186,9 @@ interface TopBarEjecucionProps {
     entregadas: number;
     cancelados: number;
   };
+  onOpenWarehouses?: () => void;
+  onOpenShipments?: () => void;
+  onOpenActiveFlights?: () => void;
 }
 
 interface TopBarDiaADiaProps {
@@ -167,6 +207,9 @@ interface TopBarDiaADiaProps {
     entregadas: number;
     cumplimiento: string;
   };
+  onOpenWarehouses?: () => void;
+  onOpenShipments?: () => void;
+  onOpenActiveFlights?: () => void;
   onRegistrarEnvio?: () => void;
 }
 
@@ -184,6 +227,9 @@ interface TopBarColapsoProps {
   enviosTotales: number;
   cumplimiento: string;
   estado: string;
+  onOpenWarehouses?: () => void;
+  onOpenShipments?: () => void;
+  onOpenActiveFlights?: () => void;
 }
 
 export type TopBarProps =
@@ -204,13 +250,17 @@ export type TopBarProps =
  * - "colapso":    simulacion de estres (badge rojo "Escenario de estres").
  */
 const TopBar = (props: TopBarProps) => {
+  const hasOpenDrawer = useDrawerStore((s) => s.selection !== null);
   const baseClass =
-    "h-topbar bg-card border-b border-border flex items-center px-5 gap-6 shrink-0";
+    "h-topbar bg-card border-b border-border flex items-center px-5 gap-6 shrink-0 overflow-x-auto transition-[padding] duration-200";
+  const drawerAwareStyle = hasOpenDrawer
+    ? { paddingRight: "calc(1.25rem + 380px)" }
+    : undefined;
 
   switch (props.variant) {
     case "ejecucion":
       return (
-        <header className={baseClass}>
+        <header className={baseClass} style={drawerAwareStyle}>
           <ModoBadge variant="ejecucion" texto="En ejecucion" />
           <KpiInline
             label="Inicio sim.:"
@@ -246,12 +296,28 @@ const TopBar = (props: TopBarProps) => {
             />
             <KpiInline label="Cancelados:" value={props.kpis.cancelados} />
           </div>
+          <TopBarActionButton
+            icon={<Plane size={14} />}
+            label="En vuelo"
+            onClick={props.onOpenActiveFlights}
+            collapseLabel
+          />
+          <TopBarActionButton
+            icon={<Building2 size={14} />}
+            label="Almacenes"
+            onClick={props.onOpenWarehouses}
+          />
+          <TopBarActionButton
+            icon={<Package size={14} />}
+            label="Envios"
+            onClick={props.onOpenShipments}
+          />
         </header>
       );
 
     case "dia-a-dia":
       return (
-        <header className={baseClass}>
+        <header className={baseClass} style={drawerAwareStyle}>
           <ModoBadge variant="dia-a-dia" texto="Tiempo real" />
           <OperationDate value={props.fechaActual} />
           <div className="flex items-center gap-5 ml-auto mr-4">
@@ -280,20 +346,34 @@ const TopBar = (props: TopBarProps) => {
             onChange={props.buscador.onChange}
             onSubmit={props.buscador.onSubmit}
           />
-          <button
-            type="button"
+          <TopBarActionButton
+            icon={<Plane size={14} />}
+            label="En vuelo"
+            onClick={props.onOpenActiveFlights}
+            collapseLabel
+          />
+          <TopBarActionButton
+            icon={<Building2 size={14} />}
+            label="Almacenes"
+            onClick={props.onOpenWarehouses}
+          />
+          <TopBarActionButton
+            icon={<Package size={14} />}
+            label="Envios"
+            onClick={props.onOpenShipments}
+          />
+          <TopBarActionButton
+            icon={<Plus size={14} />}
+            label="Registrar nuevo envio"
             onClick={props.onRegistrarEnvio}
-            className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-text-inverse text-button px-3 py-2 rounded-input transition-colors"
-          >
-            <Plus size={14} />
-            Registrar nuevo envio
-          </button>
+            variant="primary"
+          />
         </header>
       );
 
     case "colapso":
       return (
-        <header className={baseClass}>
+        <header className={baseClass} style={drawerAwareStyle}>
           <ModoBadge variant="colapso" texto="Escenario de estres" />
           <KpiInline
             label="Inicio sim.:"
@@ -332,6 +412,24 @@ const TopBar = (props: TopBarProps) => {
             value={props.estado}
             valueClass="text-danger"
           />
+          <div className="ml-auto flex items-center gap-2">
+            <TopBarActionButton
+              icon={<Plane size={14} />}
+              label="En vuelo"
+              onClick={props.onOpenActiveFlights}
+              collapseLabel
+            />
+            <TopBarActionButton
+              icon={<Building2 size={14} />}
+              label="Almacenes"
+              onClick={props.onOpenWarehouses}
+            />
+            <TopBarActionButton
+              icon={<Package size={14} />}
+              label="Envios"
+              onClick={props.onOpenShipments}
+            />
+          </div>
         </header>
       );
   }

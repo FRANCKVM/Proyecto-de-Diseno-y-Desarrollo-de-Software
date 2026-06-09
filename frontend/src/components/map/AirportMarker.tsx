@@ -4,13 +4,14 @@ import { Marker } from "react-leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { EstadoSemaforo } from "@/types/common.types";
 import { ESTADO_COLOR_HEX } from "@/utils/airportHelpers";
-import { AIRPORT_MARKER } from "@/styles/theme";
+import { AIRPORT_MARKER, COLORS } from "@/styles/theme";
 
 interface AirportMarkerProps {
   airport: AirportWithCoords;
   estado: EstadoSemaforo;
   /** Porcentaje de ocupacion (0-100), mostrado bajo el codigo ICAO. */
   ocupacion?: number;
+  selected?: boolean;
   onClick?: (airport: AirportWithCoords) => void;
 }
 
@@ -25,7 +26,8 @@ interface AirportMarkerProps {
 const buildIconHtml = (
   icao: string,
   color: string,
-  ocupacion?: number
+  ocupacion?: number,
+  selected = false
 ): string => {
   const { glow, ring, core } = AIRPORT_MARKER;
   const totalSize = glow.size; // ancho del SVG
@@ -36,13 +38,18 @@ const buildIconHtml = (
       : "";
 
   return `
-    <div class="tasf-airport-marker">
+    <div class="tasf-airport-marker" style="${selected ? "transform: scale(1.12);" : ""}">
       <svg width="${totalSize}" height="${totalSize}" viewBox="0 0 ${totalSize} ${totalSize}" xmlns="http://www.w3.org/2000/svg">
+        ${
+          selected
+            ? `<circle cx="${center}" cy="${center}" r="${glow.size / 2 - 2}" fill="none" stroke="${COLORS.primary.base}" stroke-width="3" opacity="0.95"/>`
+            : ""
+        }
         <circle cx="${center}" cy="${center}" r="${glow.size / 2}" fill="${color}" opacity="${glow.opacity}"/>
         <circle cx="${center}" cy="${center}" r="${ring.size / 2}" fill="${color}" opacity="${ring.opacity}"/>
         <circle cx="${center}" cy="${center}" r="${core.size / 2}" fill="${color}" opacity="${core.opacity}"/>
       </svg>
-      <span class="tasf-airport-label">${icao}</span>
+      <span class="tasf-airport-label" style="${selected ? `background:${COLORS.primary.base}; color:${COLORS.text.inverse}; padding:1px 5px; border-radius:6px;` : ""}">${icao}</span>
       ${ocupacionLabel}
     </div>
   `;
@@ -59,6 +66,7 @@ const AirportMarker = ({
   airport,
   estado,
   ocupacion,
+  selected = false,
   onClick,
 }: AirportMarkerProps) => {
   const color = ESTADO_COLOR_HEX[estado];
@@ -68,12 +76,12 @@ const AirportMarker = ({
   const icon = useMemo(
     () =>
       L.divIcon({
-        html: buildIconHtml(airport.icao, color, ocupacion),
+        html: buildIconHtml(airport.icao, color, ocupacion, selected),
         className: "", // anula el estilo por defecto de leaflet-div-icon
         iconSize: [60, 50],
         iconAnchor: [30, 14], // centro de la SVG sobre el lat/lng
       }),
-    [airport.icao, color, ocupacion]
+    [airport.icao, color, ocupacion, selected]
   );
 
   return (
@@ -81,6 +89,7 @@ const AirportMarker = ({
       position={[airport.lat, airport.lng]}
       icon={icon}
       riseOnHover
+      zIndexOffset={selected ? 1000 : 0}
       eventHandlers={{
         click: () => onClick?.(airport),
       }}

@@ -81,6 +81,20 @@ const SimulacionEjecucionPage = () => {
   const simulatedDay = useSimulationControlStore((s) => s.simulatedDay);
   const openAirport = useDrawerStore((s) => s.openAirport);
   const openFlight = useDrawerStore((s) => s.openFlight);
+  const openWarehouseList = useDrawerStore((s) => s.openWarehouseList);
+  const openShipmentsPanel = useDrawerStore((s) => s.openShipmentsPanel);
+  const openActiveFlightsPanel = useDrawerStore((s) => s.openActiveFlightsPanel);
+  const focusedAirportIcao = useDrawerStore((s) => s.focusedAirportIcao);
+  const focusedFlightId = useDrawerStore((s) => s.focusedFlightId);
+  const warehouseRegionFilter = useDrawerStore((s) => s.warehouseRegionFilter);
+  const activeFlightRegionFilter = useDrawerStore(
+    (s) => s.activeFlightRegionFilter
+  );
+  const activeFlightSemaphoreFilter = useDrawerStore(
+    (s) => s.activeFlightSemaphoreFilter
+  );
+  const activeFlightOnlyId = useDrawerStore((s) => s.activeFlightOnlyId);
+  const shipmentRouteSegments = useDrawerStore((s) => s.shipmentRouteSegments);
 
   const porcentajeResueltas = estado?.porcentajeResueltas ?? 0;
   const resueltas = estado?.resueltas ?? 0;
@@ -146,6 +160,9 @@ const SimulacionEjecucionPage = () => {
           entregadas: resueltas,
           cancelados: noResueltas,
         }}
+        onOpenWarehouses={openWarehouseList}
+        onOpenShipments={openShipmentsPanel}
+        onOpenActiveFlights={openActiveFlightsPanel}
       />
       <main className="flex-1 min-h-0 bg-map-bg relative">
         {!isLoading && (
@@ -154,6 +171,13 @@ const SimulacionEjecucionPage = () => {
             flights={flights}
             occupancyByIcao={occupancy}
             rangosSemaforo={rangosSemaforo}
+            focusedAirportIcao={focusedAirportIcao}
+            focusedFlightId={focusedFlightId}
+            warehouseRegionFilter={warehouseRegionFilter}
+            activeFlightRegionFilter={activeFlightRegionFilter}
+            activeFlightSemaphoreFilter={activeFlightSemaphoreFilter}
+            activeFlightOnlyId={activeFlightOnlyId}
+            shipmentRouteSegments={shipmentRouteSegments}
             onAirportClick={(a) => openAirport(a.icao)}
             onFlightClick={(id) => openFlight(id, { idSimulacion })}
           />
@@ -164,6 +188,9 @@ const SimulacionEjecucionPage = () => {
           airports={airports}
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
+          shipments={envios}
+          activeFlights={flights}
+          referenceMinute={estado?.punteroConsumoMinutos}
         />
       </main>
       <LegendBar variant="simulacion" />

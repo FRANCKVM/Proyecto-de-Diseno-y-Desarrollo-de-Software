@@ -6,6 +6,7 @@ import type { CreateOperationShipmentRequest } from "@/types/backendSimulation.t
 
 interface ShipmentRegistrationFormProps {
   airports: AirportWithCoords[];
+  occupancyByIcao?: Record<string, number>;
   onCreated?: () => Promise<void> | void;
   onCancel?: () => void;
   submitLabel?: string;
@@ -23,6 +24,7 @@ const inputClassName =
 
 const ShipmentRegistrationForm = ({
   airports,
+  occupancyByIcao = {},
   onCreated,
   onCancel,
   submitLabel = "Registrar envio",
@@ -40,19 +42,35 @@ const ShipmentRegistrationForm = ({
       ),
     [airports]
   );
+  const selectedOrigin = airportOptions.find(
+    (airport) => airport.icao === form.origenIcao
+  );
+  const originCapacity = selectedOrigin?.capacity ?? null;
+  const originOccupancy = form.origenIcao
+    ? occupancyByIcao[form.origenIcao]
+    : undefined;
+  const originAvailableBags =
+    originCapacity !== null ? Math.max(0, Math.floor(originCapacity)) : null;
+  const exceedsOriginCapacity =
+    originAvailableBags !== null && form.contarBolsas > originAvailableBags;
 
   const canSubmit =
     !isSubmitting &&
     form.origenIcao.trim() !== "" &&
     form.destinoIcao.trim() !== "" &&
     form.origenIcao !== form.destinoIcao &&
-    form.contarBolsas > 0;
+    form.contarBolsas > 0 &&
+    !exceedsOriginCapacity;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!canSubmit) {
-      setError("Completa los campos requeridos antes de registrar el envio.");
+      setError(
+        exceedsOriginCapacity
+          ? `El almacen origen solo tiene ${originAvailableBags ?? 0} maletas disponibles.`
+          : "Completa los campos requeridos antes de registrar el envio."
+      );
       setSuccess(null);
       return;
     }
@@ -124,6 +142,7 @@ const ShipmentRegistrationForm = ({
         <input
           type="number"
           min={1}
+          max={originAvailableBags ?? undefined}
           value={form.contarBolsas}
           onChange={(event) => {
             setForm((current) => ({
@@ -137,6 +156,29 @@ const ShipmentRegistrationForm = ({
         />
       </label>
 
+      {selectedOrigin && (
+        <div
+          className={cn(
+            "rounded-input border px-3 py-2",
+            exceedsOriginCapacity
+              ? "bg-danger-soft border-danger/20"
+              : "bg-field border-border"
+          )}
+        >
+          <p className="text-secondary text-text-primary">
+            Capacidad disponible en {selectedOrigin.icao}:{" "}
+            <span className={exceedsOriginCapacity ? "text-danger" : "text-success"}>
+              {originAvailableBags ?? 0} maletas
+            </span>
+          </p>
+          {originOccupancy !== undefined && (
+            <p className="text-secondary text-text-tertiary mt-0.5">
+              Ocupacion actual: {Math.round(originOccupancy)}%
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="rounded-input bg-primary-soft border border-primary/20 px-3 py-2">
         <p className="text-secondary text-text-primary">
           El plazo maximo se calcula automaticamente en backend segun si el
@@ -147,6 +189,12 @@ const ShipmentRegistrationForm = ({
       {form.origenIcao !== "" && form.origenIcao === form.destinoIcao && (
         <p className="text-secondary text-danger">
           El aeropuerto de origen debe ser distinto al de destino.
+        </p>
+      )}
+
+      {exceedsOriginCapacity && (
+        <p className="text-secondary text-danger">
+          La cantidad de maletas excede la capacidad disponible del almacen de origen.
         </p>
       )}
 
