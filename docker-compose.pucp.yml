@@ -34,8 +34,6 @@ services:
       SPRING_JPA_SHOW_SQL: "false"
       SPRING_JPA_FORMAT_SQL: "false"
       SPRING_SQL_INIT_MODE: always
-    ports:
-      - "8080:8080"
     networks:
       - tasfb2b_network
 
