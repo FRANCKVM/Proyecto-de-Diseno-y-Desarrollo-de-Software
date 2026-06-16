@@ -8,8 +8,6 @@ services:
       MYSQL_DATABASE: tasfb2b
       MYSQL_USER: pdds
       MYSQL_PASSWORD: pdds
-    ports:
-      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database/scripts:/docker-entrypoint-initdb.d:ro
