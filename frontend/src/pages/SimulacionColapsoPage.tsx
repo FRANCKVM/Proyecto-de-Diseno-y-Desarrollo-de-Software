@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/organisms/TopBar";
-import LegendBar from "@/components/organisms/LegendBar";
 import WorldMap from "@/components/map/WorldMap";
 import DrawerHost from "@/components/organisms/DrawerHost";
 import { OCCUPANCY_COLAPSO } from "@/services/sources2.0/demoOccupancy.mock";
@@ -40,7 +39,7 @@ const SimulacionColapsoPage = () => {
     occupancyByIcao,
     estado,
     envios,
-  } = useLiveSimulation({ autoStart: true, enablePolling: false });
+  } = useLiveSimulation({ autoStart: true, enablePolling: true });
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -130,27 +129,27 @@ const SimulacionColapsoPage = () => {
 
   return (
     <>
-      <TopBar
-        variant="colapso"
-        reloj={{
-          inicioSimulacion,
-          horaActual,
-          horaSimulacion,
-          tiempoRealTranscurrido: formatDuration(elapsedRealMs),
-          tiempoSimulacionTranscurrido: formatDuration(elapsedSimulatedMs),
-        }}
-        diaSimulado={USE_MOCK_DATA ? simulatedDay : estado?.bloquesProcesados ?? 0}
-        demanda={USE_MOCK_DATA ? `x ${demandFactor.toFixed(1)}` : `k=${estado?.k ?? 1}`}
-        enviosTotales={USE_MOCK_DATA ? 12450 : totalSolicitudes}
-        cumplimiento={
-          USE_MOCK_DATA ? "88 %" : `${Math.round(porcentajeResueltas)} %`
-        }
-        estado={USE_MOCK_DATA ? "COLAPSO" : estado?.activa ? "ACTIVA" : "DETENIDA"}
-        onOpenWarehouses={openWarehouseList}
-        onOpenShipments={openShipmentsPanel}
-        onOpenActiveFlights={openActiveFlightsPanel}
-      />
       <main className="flex-1 min-h-0 bg-map-bg relative">
+        <TopBar
+          variant="colapso"
+          reloj={{
+            inicioSimulacion,
+            horaActual,
+            horaSimulacion,
+            tiempoRealTranscurrido: formatDuration(elapsedRealMs),
+            tiempoSimulacionTranscurrido: formatDuration(elapsedSimulatedMs),
+          }}
+          diaSimulado={USE_MOCK_DATA ? simulatedDay : estado?.bloquesProcesados ?? 0}
+          demanda={USE_MOCK_DATA ? `x ${demandFactor.toFixed(1)}` : `k=${estado?.k ?? 1}`}
+          enviosTotales={USE_MOCK_DATA ? 12450 : totalSolicitudes}
+          cumplimiento={
+            USE_MOCK_DATA ? "88 %" : `${Math.round(porcentajeResueltas)} %`
+          }
+          estado={USE_MOCK_DATA ? "COLAPSO" : estado?.activa ? "ACTIVA" : "DETENIDA"}
+          onOpenWarehouses={openWarehouseList}
+          onOpenShipments={openShipmentsPanel}
+          onOpenActiveFlights={openActiveFlightsPanel}
+        />
         {!isLoading && (
           <WorldMap
             airports={airports}
@@ -180,7 +179,6 @@ const SimulacionColapsoPage = () => {
           referenceMinute={estado?.punteroConsumoMinutos}
         />
       </main>
-      <LegendBar variant="colapso" />
     </>
   );
 };

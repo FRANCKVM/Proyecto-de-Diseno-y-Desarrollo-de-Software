@@ -1,5 +1,10 @@
 import { useEffect, useMemo } from "react";
-import { MapContainer as LeafletMap, TileLayer, useMap } from "react-leaflet";
+import {
+  MapContainer as LeafletMap,
+  TileLayer,
+  ZoomControl,
+  useMap,
+} from "react-leaflet";
 import L from "leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
@@ -282,6 +287,7 @@ const WorldMap = ({
       zoom={INITIAL_ZOOM}
       minZoom={2}
       maxZoom={6}
+      zoomControl={false}
       maxBounds={WORLD_BOUNDS}
       maxBoundsViscosity={1}
       worldCopyJump={false}
@@ -293,6 +299,7 @@ const WorldMap = ({
         attribution={TILE_ATTRIBUTION}
         detectRetina
       />
+      <ZoomControl position="topright" />
       <MapFocusController airport={focusedAirport} flight={focusedFlight} />
 
       {/* Capa 1: rutas (al fondo) */}

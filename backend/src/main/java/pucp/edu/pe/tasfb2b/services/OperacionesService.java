@@ -7,6 +7,7 @@ import pucp.edu.pe.tasfb2b.controllers.dto.EstadoOperacionResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.RegistrarOperacionEnvioRequest;
 import pucp.edu.pe.tasfb2b.algorithms.ga.PlanificadorGenetico;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
+import pucp.edu.pe.tasfb2b.entities.AsignacionEnvio;
 import pucp.edu.pe.tasfb2b.entities.EstadoEnvio;
 import pucp.edu.pe.tasfb2b.entities.Grafo;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
@@ -14,6 +15,7 @@ import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
 import pucp.edu.pe.tasfb2b.entities.VueloCancelacion;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
+import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
 import pucp.edu.pe.tasfb2b.repositories.RutaRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
 import pucp.edu.pe.tasfb2b.repositories.VueloCancelacionRepository;
@@ -24,6 +26,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Collections;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +45,7 @@ public class OperacionesService {
 
     private final GrafoService grafoService;
     private final AeropuertoRepository aeropuertoRepository;
+    private final AsignacionEnvioRepository asignacionEnvioRepository;
     private final SolicitudEnvioRepository solicitudEnvioRepository;
     private final RutaRepository rutaRepository;
     private final VueloRepository vueloRepository;
@@ -52,6 +56,7 @@ public class OperacionesService {
     public OperacionesService(
             GrafoService grafoService,
             AeropuertoRepository aeropuertoRepository,
+            AsignacionEnvioRepository asignacionEnvioRepository,
             SolicitudEnvioRepository solicitudEnvioRepository,
             RutaRepository rutaRepository,
             VueloRepository vueloRepository,
@@ -61,6 +66,7 @@ public class OperacionesService {
     ) {
         this.grafoService = grafoService;
         this.aeropuertoRepository = aeropuertoRepository;
+        this.asignacionEnvioRepository = asignacionEnvioRepository;
         this.solicitudEnvioRepository = solicitudEnvioRepository;
         this.rutaRepository = rutaRepository;
         this.vueloRepository = vueloRepository;
@@ -82,7 +88,7 @@ public class OperacionesService {
             resultados.add(procesarSolicitudReal(solicitud));
         }
 
-        return resultados;
+        return adjuntarAsignaciones(resultados);
     }
 
     @Scheduled(fixedRate = 60000)
@@ -135,7 +141,9 @@ public class OperacionesService {
 
     @Transactional(readOnly = true)
     public List<SolicitudEnvio> obtenerEnviosOperacion() {
-        return solicitudEnvioRepository.findBySimulacionIsNullOrderByIdEnvioAsc();
+        return adjuntarAsignaciones(
+                solicitudEnvioRepository.findBySimulacionIsNullOrderByIdEnvioAsc()
+        );
     }
 
     @Transactional
@@ -177,7 +185,7 @@ public class OperacionesService {
                 calcularPlazoMaximoDias(origen, destino)
         );
 
-        return procesarBloqueReal(Collections.singletonList(solicitud)).get(0);
+        return adjuntarAsignaciones(procesarBloqueReal(Collections.singletonList(solicitud)).get(0));
     }
 
     @Transactional(readOnly = true)
@@ -278,40 +286,193 @@ public class OperacionesService {
         solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
         solicitudEnvioRepository.save(solicitudGuardada);
 
-        Ruta rutaDirecta = encontrarRutaDirectaFactible(solicitudGuardada);
+        Ruta mejorRuta = encontrarMejorRutaFactible(solicitudGuardada);
+        if (mejorRuta != null) {
+            return guardarRutaPlanificada(solicitudGuardada, mejorRuta);
+        }
+
+        List<AsignacionPlanificada> asignaciones = planificarSolicitudDividida(solicitudGuardada);
+        if (asignaciones.isEmpty()) {
+            solicitudGuardada.setEstado(EstadoEnvio.INGRESADO);
+            return solicitudEnvioRepository.save(solicitudGuardada);
+        }
+
+        return guardarAsignacionesPlanificadas(solicitudGuardada, asignaciones);
+    }
+
+    private SolicitudEnvio guardarRutaPlanificada(SolicitudEnvio solicitudGuardada, Ruta ruta) {
+        return guardarAsignacionesPlanificadas(
+                solicitudGuardada,
+                List.of(new AsignacionPlanificada(
+                        ruta,
+                        solicitudGuardada.getContarBolsas(),
+                        false
+                ))
+        );
+    }
+
+    private SolicitudEnvio guardarAsignacionesPlanificadas(
+            SolicitudEnvio solicitudGuardada,
+            List<AsignacionPlanificada> asignaciones
+    ) {
+        Aeropuerto origen = solicitudGuardada.getOrigen();
+        int totalAsignado = asignaciones.stream()
+                .mapToInt(AsignacionPlanificada::bolsas)
+                .sum();
+
+        origen.descontarCapacidad(totalAsignado);
+        aeropuertoRepository.save(origen);
+        asignacionEnvioRepository.deleteByEnvio_IdEnvio(solicitudGuardada.getIdEnvio());
+
+        Ruta rutaPrincipal = null;
+
+        for (AsignacionPlanificada asignacion : asignaciones) {
+            Ruta ruta = asignacion.ruta();
+            if (!asignacion.capacidadReservada()) {
+                ruta.reservarCapacidad(asignacion.bolsas());
+            }
+
+            guardarCapacidadesVuelos(ruta);
+            Ruta rutaGuardada = rutaRepository.save(ruta);
+            if (rutaPrincipal == null) {
+                rutaPrincipal = rutaGuardada;
+            }
+
+            asignacionEnvioRepository.save(new AsignacionEnvio(
+                    solicitudGuardada,
+                    rutaGuardada,
+                    asignacion.bolsas(),
+                    EstadoEnvio.EN_PROCESO
+            ));
+        }
+
+        solicitudGuardada.setRuta(rutaPrincipal);
+        solicitudGuardada.setEstado(totalAsignado >= solicitudGuardada.getContarBolsas()
+                ? EstadoEnvio.EN_PROCESO
+                : EstadoEnvio.PARCIAL);
+        return adjuntarAsignaciones(solicitudEnvioRepository.save(solicitudGuardada));
+    }
+
+    private SolicitudEnvio adjuntarAsignaciones(SolicitudEnvio envio) {
+        if (envio == null || envio.getIdEnvio() == null) {
+            return envio;
+        }
+
+        List<AsignacionEnvio> asignaciones = asignacionEnvioRepository
+                .findByEnvio_IdEnvioOrderByIdAsignacionAsc(envio.getIdEnvio());
+        envio.setAsignaciones(asignaciones.stream()
+                .map(this::mapearAsignacionVista)
+                .toList());
+        return envio;
+    }
+
+    private List<SolicitudEnvio> adjuntarAsignaciones(List<SolicitudEnvio> envios) {
+        if (envios == null || envios.isEmpty()) {
+            return envios;
+        }
+
+        List<Integer> idsEnvio = envios.stream()
+                .map(SolicitudEnvio::getIdEnvio)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Map<Integer, List<SolicitudEnvio.AsignacionEnvioVista>> asignacionesPorEnvio = new HashMap<>();
+
+        if (!idsEnvio.isEmpty()) {
+            for (AsignacionEnvio asignacion : asignacionEnvioRepository.findByEnvioIds(idsEnvio)) {
+                if (asignacion.getEnvio() == null || asignacion.getEnvio().getIdEnvio() == null) {
+                    continue;
+                }
+
+                asignacionesPorEnvio
+                        .computeIfAbsent(asignacion.getEnvio().getIdEnvio(), ignored -> new ArrayList<>())
+                        .add(mapearAsignacionVista(asignacion));
+            }
+        }
+
+        for (SolicitudEnvio envio : envios) {
+            envio.setAsignaciones(asignacionesPorEnvio.getOrDefault(
+                    envio.getIdEnvio(),
+                    List.of()
+            ));
+        }
+
+        return envios;
+    }
+
+    private SolicitudEnvio.AsignacionEnvioVista mapearAsignacionVista(AsignacionEnvio asignacion) {
+        return new SolicitudEnvio.AsignacionEnvioVista(
+                asignacion.getIdAsignacion(),
+                asignacion.getRuta(),
+                asignacion.getCantidadBolsas(),
+                asignacion.getEstado()
+        );
+    }
+
+    private Ruta encontrarMejorRutaFactible(SolicitudEnvio solicitud) {
+        Ruta rutaDirecta = encontrarRutaDirectaFactible(solicitud);
         if (rutaDirecta != null) {
-            return guardarRutaPlanificada(solicitudGuardada, rutaDirecta);
+            return rutaDirecta;
         }
 
         Grafo grafo = grafoService.construirGrafo();
         PlanificadorGenetico planificador = crearPlanificador(
                 grafo,
-                solicitudGuardada.getFechaHoraRegistro()
+                solicitud.getFechaHoraRegistro()
         );
-        Ruta mejorRuta = planificador.encontrarMejorRuta(solicitudGuardada);
+        Ruta mejorRuta = planificador.encontrarMejorRuta(solicitud);
 
-        if (mejorRuta == null || !mejorRuta.esFactible()) {
-            solicitudGuardada.setEstado(EstadoEnvio.INGRESADO);
-            return solicitudEnvioRepository.save(solicitudGuardada);
-        }
-
-        return guardarRutaPlanificada(solicitudGuardada, mejorRuta);
+        return mejorRuta != null && mejorRuta.esFactible() ? mejorRuta : null;
     }
 
-    private SolicitudEnvio guardarRutaPlanificada(SolicitudEnvio solicitudGuardada, Ruta ruta) {
-        Aeropuerto origen = solicitudGuardada.getOrigen();
+    private List<AsignacionPlanificada> planificarSolicitudDividida(SolicitudEnvio solicitud) {
+        List<AsignacionPlanificada> asignaciones = new ArrayList<>();
+        int restante = solicitud.getContarBolsas() != null ? solicitud.getContarBolsas() : 0;
 
-        origen.descontarCapacidad(solicitudGuardada.getContarBolsas());
-        aeropuertoRepository.save(origen);
+        while (restante > 0) {
+            SolicitudEnvio solicitudMinima = copiarSolicitudConCantidad(solicitud, 1);
+            Ruta ruta = encontrarMejorRutaFactible(solicitudMinima);
+            if (ruta == null) {
+                break;
+            }
 
-        ruta.reservarCapacidad(solicitudGuardada.getContarBolsas());
-        guardarCapacidadesVuelos(ruta);
+            int capacidadRuta = calcularCapacidadDisponibleRuta(ruta);
+            int bolsasAsignadas = Math.min(restante, capacidadRuta);
+            if (bolsasAsignadas <= 0) {
+                break;
+            }
 
-        Ruta rutaGuardada = rutaRepository.save(ruta);
+            ruta.reservarCapacidad(bolsasAsignadas);
+            asignaciones.add(new AsignacionPlanificada(ruta, bolsasAsignadas, true));
+            restante -= bolsasAsignadas;
+        }
 
-        solicitudGuardada.setRuta(rutaGuardada);
-        solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
-        return solicitudEnvioRepository.save(solicitudGuardada);
+        return asignaciones;
+    }
+
+    private SolicitudEnvio copiarSolicitudConCantidad(SolicitudEnvio solicitud, int bolsas) {
+        return new SolicitudEnvio(
+                solicitud.getIdEnvio(),
+                solicitud.getFecha(),
+                solicitud.getHora(),
+                solicitud.getIdCliente(),
+                solicitud.getOrigen(),
+                solicitud.getDestino(),
+                bolsas,
+                solicitud.getDiasTiempoMaximo()
+        );
+    }
+
+    private int calcularCapacidadDisponibleRuta(Ruta ruta) {
+        if (ruta == null || ruta.getVuelos() == null || ruta.getVuelos().isEmpty()) {
+            return 0;
+        }
+
+        int capacidad = Integer.MAX_VALUE;
+        for (Vuelo vuelo : ruta.getVuelos()) {
+            capacidad = Math.min(capacidad, vuelo.getCapacidadDisponible());
+        }
+
+        return capacidad == Integer.MAX_VALUE ? 0 : capacidad;
     }
 
     private Ruta encontrarRutaDirectaFactible(SolicitudEnvio solicitud) {
@@ -425,8 +586,7 @@ public class OperacionesService {
 
     private void replanificarEnviosAfectadosOperacion(VueloCancelacion cancelacion) {
         for (SolicitudEnvio envio : solicitudEnvioRepository.findBySimulacionIsNullOrderByIdEnvioAsc()) {
-            if (envio.getRuta() == null
-                    || envio.getEstado() == EstadoEnvio.COMPLETADO
+            if (envio.getEstado() == EstadoEnvio.COMPLETADO
                     || !envioUsaOcurrenciaCancelada(envio, cancelacion)) {
                 continue;
             }
@@ -440,7 +600,19 @@ public class OperacionesService {
     }
 
     private boolean envioUsaOcurrenciaCancelada(SolicitudEnvio envio, VueloCancelacion cancelacion) {
-        for (VentanaVueloOperacion ventana : calcularVentanasRutaOperacion(envio)) {
+        List<AsignacionEnvio> asignaciones = asignacionEnvioRepository
+                .findByEnvio_IdEnvioOrderByIdAsignacionAsc(envio.getIdEnvio());
+        List<VentanaVueloOperacion> ventanas = new ArrayList<>();
+
+        if (asignaciones.isEmpty()) {
+            ventanas.addAll(calcularVentanasRutaOperacion(envio, envio.getRuta()));
+        } else {
+            for (AsignacionEnvio asignacion : asignaciones) {
+                ventanas.addAll(calcularVentanasRutaOperacion(envio, asignacion.getRuta()));
+            }
+        }
+
+        for (VentanaVueloOperacion ventana : ventanas) {
             if (ventana.vuelo().getIdVuelo().equals(cancelacion.getVuelo().getIdVuelo())
                     && ventana.fechaHoraSalida().equals(cancelacion.getFechaHoraSalida())
                     && ventana.fechaHoraSalida().isAfter(cancelacion.getFechaHoraCancelacion())) {
@@ -452,8 +624,12 @@ public class OperacionesService {
     }
 
     private List<VentanaVueloOperacion> calcularVentanasRutaOperacion(SolicitudEnvio envio) {
+        return calcularVentanasRutaOperacion(envio, envio.getRuta());
+    }
+
+    private List<VentanaVueloOperacion> calcularVentanasRutaOperacion(SolicitudEnvio envio, Ruta ruta) {
         List<VentanaVueloOperacion> ventanas = new ArrayList<>();
-        if (envio.getRuta() == null || envio.getRuta().getVuelos() == null || envio.getFecha() == null) {
+        if (ruta == null || ruta.getVuelos() == null || envio.getFecha() == null) {
             return ventanas;
         }
 
@@ -462,7 +638,7 @@ public class OperacionesService {
                 ? envio.getHora().getHour() * 60 + envio.getHora().getMinute()
                 : 0;
 
-        for (Vuelo vuelo : envio.getRuta().getVuelos()) {
+        for (Vuelo vuelo : ruta.getVuelos()) {
             int salida = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
             int llegada = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salida;
 
@@ -487,6 +663,30 @@ public class OperacionesService {
     }
 
     private void liberarRutaOperacion(SolicitudEnvio envio) {
+        List<AsignacionEnvio> asignaciones = asignacionEnvioRepository
+                .findByEnvio_IdEnvioOrderByIdAsignacionAsc(envio.getIdEnvio());
+
+        if (!asignaciones.isEmpty()) {
+            int bolsasAsignadas = asignaciones.stream()
+                    .mapToInt(asignacion -> asignacion.getCantidadBolsas() != null
+                            ? asignacion.getCantidadBolsas()
+                            : 0)
+                    .sum();
+
+            Aeropuerto origen = envio.getOrigen();
+            if (origen != null) {
+                origen.aumentarCapacidad(bolsasAsignadas);
+                aeropuertoRepository.save(origen);
+            }
+
+            for (AsignacionEnvio asignacion : asignaciones) {
+                liberarCapacidadRuta(asignacion.getRuta(), asignacion.getCantidadBolsas());
+            }
+
+            asignacionEnvioRepository.deleteByEnvio_IdEnvio(envio.getIdEnvio());
+            return;
+        }
+
         Aeropuerto origen = envio.getOrigen();
         if (origen != null) {
             origen.aumentarCapacidad(envio.getContarBolsas());
@@ -498,10 +698,25 @@ public class OperacionesService {
         }
 
         for (Vuelo vuelo : envio.getRuta().getVuelos()) {
-            int capacidadUsada = vuelo.getCapacidadUsada() != null ? vuelo.getCapacidadUsada() : 0;
-            vuelo.setCapacidadUsada(Math.max(0, capacidadUsada - envio.getContarBolsas()));
-            vueloRepository.save(vuelo);
+            liberarCapacidadVuelo(vuelo, envio.getContarBolsas());
         }
+    }
+
+    private void liberarCapacidadRuta(Ruta ruta, Integer bolsas) {
+        if (ruta == null || ruta.getVuelos() == null) {
+            return;
+        }
+
+        for (Vuelo vuelo : ruta.getVuelos()) {
+            liberarCapacidadVuelo(vuelo, bolsas);
+        }
+    }
+
+    private void liberarCapacidadVuelo(Vuelo vuelo, Integer bolsas) {
+        int capacidadUsada = vuelo.getCapacidadUsada() != null ? vuelo.getCapacidadUsada() : 0;
+        int bolsasLiberadas = bolsas != null ? bolsas : 0;
+        vuelo.setCapacidadUsada(Math.max(0, capacidadUsada - bolsasLiberadas));
+        vueloRepository.save(vuelo);
     }
 
     private void validarSolicitud(SolicitudEnvio solicitud) {
@@ -558,16 +773,67 @@ public class OperacionesService {
     }
 
     private Map<String, Double> construirOcupacionPorAeropuertoOperacion(List<SolicitudEnvio> envios) {
-        Map<String, Integer> bolsasPorOrigen = new LinkedHashMap<>();
+        Map<String, Integer> bolsasAsignadasPorOrigen = new HashMap<>();
+        Map<String, Integer> bolsasOcupadasPorAeropuerto = new HashMap<>();
+        LocalDateTime ahora = LocalDateTime.now();
+        List<AsignacionEnvio> asignaciones = envios.isEmpty()
+                ? List.of()
+                : asignacionEnvioRepository.findByEnvioInOrderByEnvio_IdEnvioAscIdAsignacionAsc(envios);
+        Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio = new HashMap<>();
+
+        for (AsignacionEnvio asignacion : asignaciones) {
+            if (asignacion.getEnvio() == null || asignacion.getEnvio().getIdEnvio() == null) {
+                continue;
+            }
+
+            asignacionesPorEnvio
+                    .computeIfAbsent(asignacion.getEnvio().getIdEnvio(), ignored -> new ArrayList<>())
+                    .add(asignacion);
+        }
 
         for (SolicitudEnvio envio : envios) {
             if (envio.getOrigen() == null || envio.getOrigen().getCodigo() == null) {
                 continue;
             }
 
-            bolsasPorOrigen.merge(
+            List<AsignacionEnvio> asignacionesEnvio = asignacionesPorEnvio.getOrDefault(
+                    envio.getIdEnvio(),
+                    List.of()
+            );
+
+            if (asignacionesEnvio.isEmpty()) {
+                int bolsas = envio.getContarBolsas() != null ? envio.getContarBolsas() : 0;
+                if (envio.getRuta() != null) {
+                    bolsasAsignadasPorOrigen.merge(envio.getOrigen().getCodigo(), bolsas, Integer::sum);
+                    registrarOcupacionActualRutaOperacion(
+                            bolsasOcupadasPorAeropuerto,
+                            envio,
+                            envio.getRuta(),
+                            bolsas,
+                            ahora
+                    );
+                }
+                continue;
+            }
+
+            int bolsasAsignadas = 0;
+            for (AsignacionEnvio asignacion : asignacionesEnvio) {
+                int bolsas = asignacion.getCantidadBolsas() != null
+                        ? asignacion.getCantidadBolsas()
+                        : 0;
+                bolsasAsignadas += bolsas;
+                registrarOcupacionActualRutaOperacion(
+                        bolsasOcupadasPorAeropuerto,
+                        envio,
+                        asignacion.getRuta(),
+                        bolsas,
+                        ahora
+                );
+            }
+
+            bolsasAsignadasPorOrigen.merge(
                     envio.getOrigen().getCodigo(),
-                    envio.getContarBolsas() != null ? envio.getContarBolsas() : 0,
+                    bolsasAsignadas,
                     Integer::sum
             );
         }
@@ -575,12 +841,13 @@ public class OperacionesService {
         Map<String, Double> ocupacion = new LinkedHashMap<>();
         for (Aeropuerto aeropuerto : aeropuertoRepository.findAll()) {
             int capacidadActual = aeropuerto.getCapacidad() != null ? aeropuerto.getCapacidad() : 0;
-            int bolsasDespachadas = bolsasPorOrigen.getOrDefault(aeropuerto.getCodigo(), 0);
-            int capacidadBaseAprox = capacidadActual + bolsasDespachadas;
+            int bolsasAsignadas = bolsasAsignadasPorOrigen.getOrDefault(aeropuerto.getCodigo(), 0);
+            int bolsasOcupadas = bolsasOcupadasPorAeropuerto.getOrDefault(aeropuerto.getCodigo(), 0);
+            int capacidadBaseAprox = capacidadActual + bolsasAsignadas;
 
             double porcentaje = capacidadBaseAprox <= 0
                     ? 0.0
-                    : Math.min(100.0, (bolsasDespachadas * 100.0) / capacidadBaseAprox);
+                    : Math.min(100.0, (bolsasOcupadas * 100.0) / capacidadBaseAprox);
 
             ocupacion.put(aeropuerto.getCodigo(), porcentaje);
         }
@@ -588,10 +855,91 @@ public class OperacionesService {
         return ocupacion;
     }
 
+    private void registrarOcupacionActualRutaOperacion(
+            Map<String, Integer> bolsasOcupadasPorAeropuerto,
+            SolicitudEnvio envio,
+            Ruta ruta,
+            int bolsas,
+            LocalDateTime ahora
+    ) {
+        if (envio == null || ruta == null || bolsas <= 0 || ahora == null) {
+            return;
+        }
+
+        LocalDateTime registro = envio.getFechaHoraRegistro();
+        if (registro != null && ahora.isBefore(registro)) {
+            return;
+        }
+
+        List<VentanaVueloOperacion> ventanas = calcularVentanasRutaOperacion(envio, ruta);
+        if (ventanas.isEmpty()) {
+            return;
+        }
+
+        VentanaVueloOperacion primeraVentana = ventanas.get(0);
+        if (registro != null
+                && !ahora.isBefore(registro)
+                && ahora.isBefore(primeraVentana.fechaHoraSalida())
+                && envio.getOrigen() != null
+                && envio.getOrigen().getCodigo() != null) {
+            bolsasOcupadasPorAeropuerto.merge(envio.getOrigen().getCodigo(), bolsas, Integer::sum);
+            return;
+        }
+
+        for (int i = 0; i < ventanas.size() - 1; i++) {
+            VentanaVueloOperacion llegada = ventanas.get(i);
+            VentanaVueloOperacion siguienteSalida = ventanas.get(i + 1);
+
+            if (!ahora.isBefore(llegada.fechaHoraLlegada())
+                    && ahora.isBefore(siguienteSalida.fechaHoraSalida())
+                    && llegada.vuelo().getHasta() != null
+                    && llegada.vuelo().getHasta().getCodigo() != null) {
+                bolsasOcupadasPorAeropuerto.merge(
+                        llegada.vuelo().getHasta().getCodigo(),
+                        bolsas,
+                        Integer::sum
+                );
+                return;
+            }
+        }
+    }
+
     private List<MapaSimulacionEstado.VueloMapa> construirVuelosMapaOperacion(List<SolicitudEnvio> envios) {
         List<MapaSimulacionEstado.VueloMapa> vuelosMapa = new ArrayList<>();
         int minutoActualUtc = LocalTime.now(java.time.ZoneOffset.UTC).getHour() * 60
                 + LocalTime.now(java.time.ZoneOffset.UTC).getMinute();
+        List<AsignacionEnvio> asignaciones = envios.isEmpty()
+                ? List.of()
+                : asignacionEnvioRepository.findByEnvioInOrderByEnvio_IdEnvioAscIdAsignacionAsc(envios);
+
+        if (!asignaciones.isEmpty()) {
+            int indiceAsignacion = 0;
+            for (AsignacionEnvio asignacion : asignaciones) {
+                if (asignacion.getRuta() == null || asignacion.getRuta().getVuelos() == null) {
+                    continue;
+                }
+
+                int indiceVuelo = 0;
+                Integer idEnvio = asignacion.getEnvio() != null
+                        ? asignacion.getEnvio().getIdEnvio()
+                        : 0;
+
+                for (Vuelo vuelo : asignacion.getRuta().getVuelos()) {
+                    double progress = calcularProgress(minutoActualUtc, vuelo);
+                    vuelosMapa.add(new MapaSimulacionEstado.VueloMapa(
+                            "op-" + idEnvio + "-asignacion-" + indiceAsignacion + "-vuelo-" + vuelo.getIdVuelo() + "-" + indiceVuelo,
+                            vuelo.getDesde().getCodigo(),
+                            vuelo.getHasta().getCodigo(),
+                            progress
+                    ));
+                    indiceVuelo++;
+                }
+
+                indiceAsignacion++;
+            }
+
+            return vuelosMapa;
+        }
 
         for (SolicitudEnvio envio : envios) {
             if (envio.getRuta() == null || envio.getRuta().getVuelos() == null) {
@@ -646,6 +994,13 @@ public class OperacionesService {
             int llegadaMinuto,
             LocalDateTime fechaHoraSalida,
             LocalDateTime fechaHoraLlegada
+    ) {
+    }
+
+    private record AsignacionPlanificada(
+            Ruta ruta,
+            int bolsas,
+            boolean capacidadReservada
     ) {
     }
 }

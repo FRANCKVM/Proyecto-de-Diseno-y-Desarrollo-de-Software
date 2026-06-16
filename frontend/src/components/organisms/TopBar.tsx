@@ -1,5 +1,13 @@
-import type { ReactNode } from "react";
-import { Building2, Package, Plane, Search, Plus } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import {
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  Package,
+  Plane,
+  Plus,
+  Search,
+} from "lucide-react";
 import { cn } from "@/utils/cn";
 import StatusDot from "@/components/atoms/StatusDot";
 import { useDrawerStore } from "@/store/drawerStore";
@@ -166,6 +174,62 @@ const TopBarActionButton = ({
   </button>
 );
 
+interface TopBarToggleProps {
+  expanded: boolean;
+  onClick: () => void;
+}
+
+const TopBarToggle = ({ expanded, onClick }: TopBarToggleProps) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={expanded ? "Ocultar detalles" : "Mostrar detalles"}
+    title={expanded ? "Ocultar detalles" : "Mostrar detalles"}
+    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-input text-text-tertiary transition-colors hover:bg-field hover:text-text-primary"
+  >
+    {expanded ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
+  </button>
+);
+
+interface TopBarFrameProps {
+  expanded: boolean;
+  onToggle: () => void;
+  drawerAwareStyle?: React.CSSProperties;
+  top: ReactNode;
+  bottom: ReactNode;
+}
+
+const TopBarFrame = ({
+  expanded,
+  onToggle,
+  drawerAwareStyle,
+  top,
+  bottom,
+}: TopBarFrameProps) => (
+  <header
+    className="absolute left-0 top-0 z-[800] w-fit max-w-full overflow-hidden rounded-br-input border-b border-r border-border bg-card shadow-card transition-[padding,height] duration-200"
+    style={drawerAwareStyle}
+  >
+    <div className="flex h-topbar items-center gap-3 px-5">
+      <div className="flex min-w-0 items-center gap-5 overflow-x-auto">
+        {top}
+      </div>
+      <TopBarToggle expanded={expanded} onClick={onToggle} />
+    </div>
+    <div
+      className={cn(
+        "border-t border-border-subtle px-5 transition-[max-height,opacity,padding] duration-200",
+        expanded ? "max-h-topbar-sm py-1.5 opacity-100" : "max-h-0 py-0 opacity-0"
+      )}
+      aria-hidden={!expanded}
+    >
+      <div className="flex min-h-8 items-center gap-3 overflow-x-auto">
+        {bottom}
+      </div>
+    </div>
+  </header>
+);
+
 // ============================================================================
 // VARIANTES
 // ============================================================================
@@ -250,187 +314,224 @@ export type TopBarProps =
  * - "colapso":    simulacion de estres (badge rojo "Escenario de estres").
  */
 const TopBar = (props: TopBarProps) => {
+  const [expanded, setExpanded] = useState(true);
   const hasOpenDrawer = useDrawerStore((s) => s.selection !== null);
-  const baseClass =
-    "h-topbar bg-card border-b border-border flex items-center px-5 gap-6 shrink-0 overflow-x-auto transition-[padding] duration-200";
   const drawerAwareStyle = hasOpenDrawer
-    ? { paddingRight: "calc(1.25rem + 380px)" }
+    ? { maxWidth: "calc(100% - 24.75rem)" }
     : undefined;
+  const toggleExpanded = () => setExpanded((current) => !current);
 
   switch (props.variant) {
     case "ejecucion":
       return (
-        <header className={baseClass} style={drawerAwareStyle}>
-          <ModoBadge variant="ejecucion" texto="En ejecucion" />
-          <KpiInline
-            label="Inicio sim.:"
-            value={props.reloj.inicioSimulacion}
-          />
-          <KpiInline label="Hora actual:" value={props.reloj.horaActual} />
-          <KpiInline
-            label="Hora simulacion:"
-            value={props.reloj.horaSimulacion}
-          />
-          <KpiInline
-            label="Transcurrido real:"
-            value={props.reloj.tiempoRealTranscurrido}
-          />
-          <KpiInline
-            label="Transcurrido sim.:"
-            value={props.reloj.tiempoSimulacionTranscurrido}
-          />
-          <span className="text-button text-primary">
-            Dia {props.dia.actual} de {props.dia.total}
-          </span>
-          <div className="flex items-center gap-5 ml-auto mr-4">
-            <KpiInline
-              label="Entregas:"
-              value={props.kpis.entregas}
-              valueClass="text-success"
-            />
-            <KpiInline label="En transito:" value={props.kpis.enTransito} />
-            <KpiInline
-              label="Entregadas:"
-              value={props.kpis.entregadas.toLocaleString("es-PE")}
-              valueClass="text-success"
-            />
-            <KpiInline label="Cancelados:" value={props.kpis.cancelados} />
-          </div>
-          <TopBarActionButton
-            icon={<Plane size={14} />}
-            label="En vuelo"
-            onClick={props.onOpenActiveFlights}
-            collapseLabel
-          />
-          <TopBarActionButton
-            icon={<Building2 size={14} />}
-            label="Almacenes"
-            onClick={props.onOpenWarehouses}
-          />
-          <TopBarActionButton
-            icon={<Package size={14} />}
-            label="Envios"
-            onClick={props.onOpenShipments}
-          />
-        </header>
+        <TopBarFrame
+          expanded={expanded}
+          onToggle={toggleExpanded}
+          drawerAwareStyle={drawerAwareStyle}
+          top={
+            <>
+              <ModoBadge variant="ejecucion" texto="En ejecucion" />
+              <KpiInline
+                label="Inicio sim.:"
+                value={props.reloj.inicioSimulacion}
+              />
+              <KpiInline
+                label="Hora simulacion:"
+                value={props.reloj.horaSimulacion}
+              />
+              <span className="text-button text-primary whitespace-nowrap">
+                Dia {props.dia.actual} de {props.dia.total}
+              </span>
+              <div className="flex items-center gap-5">
+                <KpiInline
+                  label="Entregas:"
+                  value={props.kpis.entregas}
+                  valueClass="text-success"
+                />
+                <KpiInline label="En transito:" value={props.kpis.enTransito} />
+                <KpiInline
+                  label="Entregadas:"
+                  value={props.kpis.entregadas.toLocaleString("es-PE")}
+                  valueClass="text-success"
+                />
+                <KpiInline label="Cancelados:" value={props.kpis.cancelados} />
+              </div>
+            </>
+          }
+          bottom={
+            <>
+              <KpiInline label="Hora actual:" value={props.reloj.horaActual} />
+              <KpiInline
+                label="Transcurrido real:"
+                value={props.reloj.tiempoRealTranscurrido}
+              />
+              <KpiInline
+                label="Transcurrido sim.:"
+                value={props.reloj.tiempoSimulacionTranscurrido}
+              />
+              <div className="flex items-center gap-2">
+                <TopBarActionButton
+                  icon={<Plane size={14} />}
+                  label="En vuelo"
+                  onClick={props.onOpenActiveFlights}
+                  collapseLabel
+                />
+                <TopBarActionButton
+                  icon={<Building2 size={14} />}
+                  label="Almacenes"
+                  onClick={props.onOpenWarehouses}
+                />
+                <TopBarActionButton
+                  icon={<Package size={14} />}
+                  label="Envios"
+                  onClick={props.onOpenShipments}
+                />
+              </div>
+            </>
+          }
+        />
       );
 
     case "dia-a-dia":
       return (
-        <header className={baseClass} style={drawerAwareStyle}>
-          <ModoBadge variant="dia-a-dia" texto="Tiempo real" />
-          <OperationDate value={props.fechaActual} />
-          <div className="flex items-center gap-5 ml-auto mr-4">
-            <KpiInline label="Envios hoy:" value={props.kpis.enviosHoy} />
-            <KpiInline
-              label="En transito:"
-              value={props.kpis.enTransito}
-              valueClass="text-primary"
-            />
-            <KpiInline
-              label="Entregadas:"
-              value={props.kpis.entregadas}
-              valueClass="text-success"
-            />
-            <KpiInline
-              label="Cumplimiento:"
-              value={props.kpis.cumplimiento}
-              valueClass="text-success"
-            />
-          </div>
-          <SearchInput
-            placeholder="Buscar vuelo por ID..."
-            value={props.buscador.valor}
-            error={props.buscador.error}
-            isLoading={props.buscador.isLoading}
-            onChange={props.buscador.onChange}
-            onSubmit={props.buscador.onSubmit}
-          />
-          <TopBarActionButton
-            icon={<Plane size={14} />}
-            label="En vuelo"
-            onClick={props.onOpenActiveFlights}
-            collapseLabel
-          />
-          <TopBarActionButton
-            icon={<Building2 size={14} />}
-            label="Almacenes"
-            onClick={props.onOpenWarehouses}
-          />
-          <TopBarActionButton
-            icon={<Package size={14} />}
-            label="Envios"
-            onClick={props.onOpenShipments}
-          />
-          <TopBarActionButton
-            icon={<Plus size={14} />}
-            label="Registrar nuevo envio"
-            onClick={props.onRegistrarEnvio}
-            variant="primary"
-          />
-        </header>
+        <TopBarFrame
+          expanded={expanded}
+          onToggle={toggleExpanded}
+          drawerAwareStyle={drawerAwareStyle}
+          top={
+            <>
+              <ModoBadge variant="dia-a-dia" texto="Tiempo real" />
+              <OperationDate value={props.fechaActual} />
+              <div className="flex items-center gap-5">
+                <KpiInline label="Envios hoy:" value={props.kpis.enviosHoy} />
+                <KpiInline
+                  label="En transito:"
+                  value={props.kpis.enTransito}
+                  valueClass="text-primary"
+                />
+                <KpiInline
+                  label="Entregadas:"
+                  value={props.kpis.entregadas}
+                  valueClass="text-success"
+                />
+                <KpiInline
+                  label="Cumplimiento:"
+                  value={props.kpis.cumplimiento}
+                  valueClass="text-success"
+                />
+              </div>
+            </>
+          }
+          bottom={
+            <>
+              <SearchInput
+                placeholder="Buscar vuelo por ID..."
+                value={props.buscador.valor}
+                error={props.buscador.error}
+                isLoading={props.buscador.isLoading}
+                onChange={props.buscador.onChange}
+                onSubmit={props.buscador.onSubmit}
+              />
+              <TopBarActionButton
+                icon={<Plane size={14} />}
+                label="En vuelo"
+                onClick={props.onOpenActiveFlights}
+                collapseLabel
+              />
+              <TopBarActionButton
+                icon={<Building2 size={14} />}
+                label="Almacenes"
+                onClick={props.onOpenWarehouses}
+              />
+              <TopBarActionButton
+                icon={<Package size={14} />}
+                label="Envios"
+                onClick={props.onOpenShipments}
+              />
+              <TopBarActionButton
+                icon={<Plus size={14} />}
+                label="Registrar nuevo envio"
+                onClick={props.onRegistrarEnvio}
+                variant="primary"
+              />
+            </>
+          }
+        />
       );
 
     case "colapso":
       return (
-        <header className={baseClass} style={drawerAwareStyle}>
-          <ModoBadge variant="colapso" texto="Escenario de estres" />
-          <KpiInline
-            label="Inicio sim.:"
-            value={props.reloj.inicioSimulacion}
-          />
-          <KpiInline label="Hora actual:" value={props.reloj.horaActual} />
-          <KpiInline
-            label="Hora simulacion:"
-            value={props.reloj.horaSimulacion}
-          />
-          <KpiInline
-            label="Transcurrido real:"
-            value={props.reloj.tiempoRealTranscurrido}
-          />
-          <KpiInline
-            label="Transcurrido sim.:"
-            value={props.reloj.tiempoSimulacionTranscurrido}
-          />
-          <KpiInline label="Dia simulado:" value={props.diaSimulado} />
-          <KpiInline
-            label="Demanda:"
-            value={props.demanda}
-            valueClass="text-danger"
-          />
-          <KpiInline
-            label="Envios totales:"
-            value={props.enviosTotales.toLocaleString("es-PE")}
-          />
-          <KpiInline
-            label="Cumplimiento:"
-            value={props.cumplimiento}
-            valueClass="text-warning"
-          />
-          <KpiInline
-            label="Estado:"
-            value={props.estado}
-            valueClass="text-danger"
-          />
-          <div className="ml-auto flex items-center gap-2">
-            <TopBarActionButton
-              icon={<Plane size={14} />}
-              label="En vuelo"
-              onClick={props.onOpenActiveFlights}
-              collapseLabel
-            />
-            <TopBarActionButton
-              icon={<Building2 size={14} />}
-              label="Almacenes"
-              onClick={props.onOpenWarehouses}
-            />
-            <TopBarActionButton
-              icon={<Package size={14} />}
-              label="Envios"
-              onClick={props.onOpenShipments}
-            />
-          </div>
-        </header>
+        <TopBarFrame
+          expanded={expanded}
+          onToggle={toggleExpanded}
+          drawerAwareStyle={drawerAwareStyle}
+          top={
+            <>
+              <ModoBadge variant="colapso" texto="Escenario de estres" />
+              <KpiInline
+                label="Inicio sim.:"
+                value={props.reloj.inicioSimulacion}
+              />
+              <KpiInline
+                label="Hora simulacion:"
+                value={props.reloj.horaSimulacion}
+              />
+              <KpiInline label="Dia simulado:" value={props.diaSimulado} />
+              <KpiInline
+                label="Demanda:"
+                value={props.demanda}
+                valueClass="text-danger"
+              />
+              <div className="flex items-center gap-5">
+                <KpiInline
+                  label="Envios totales:"
+                  value={props.enviosTotales.toLocaleString("es-PE")}
+                />
+                <KpiInline
+                  label="Cumplimiento:"
+                  value={props.cumplimiento}
+                  valueClass="text-warning"
+                />
+                <KpiInline
+                  label="Estado:"
+                  value={props.estado}
+                  valueClass="text-danger"
+                />
+              </div>
+            </>
+          }
+          bottom={
+            <>
+              <KpiInline label="Hora actual:" value={props.reloj.horaActual} />
+              <KpiInline
+                label="Transcurrido real:"
+                value={props.reloj.tiempoRealTranscurrido}
+              />
+              <KpiInline
+                label="Transcurrido sim.:"
+                value={props.reloj.tiempoSimulacionTranscurrido}
+              />
+              <div className="flex items-center gap-2">
+                <TopBarActionButton
+                  icon={<Plane size={14} />}
+                  label="En vuelo"
+                  onClick={props.onOpenActiveFlights}
+                  collapseLabel
+                />
+                <TopBarActionButton
+                  icon={<Building2 size={14} />}
+                  label="Almacenes"
+                  onClick={props.onOpenWarehouses}
+                />
+                <TopBarActionButton
+                  icon={<Package size={14} />}
+                  label="Envios"
+                  onClick={props.onOpenShipments}
+                />
+              </div>
+            </>
+          }
+        />
       );
   }
 };

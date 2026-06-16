@@ -6,7 +6,10 @@ import AlertBanner from "@/components/molecules/AlertBanner";
 import { useSimulationConfigStore } from "@/store/simulationConfigStore";
 import { useSimulationControlStore } from "@/store/simulationControlStore";
 import { useLiveSimulationStore } from "@/store/liveSimulationStore";
-import { startLiveSimulation } from "@/services/simulationService";
+import {
+  getCurrentLiveSimulationState,
+  startLiveSimulation,
+} from "@/services/simulationService";
 import { ROUTES, resolveSimulationModuleRoute } from "@/utils/routes";
 import type { TipoSimulacion } from "@/types/common.types";
 
@@ -39,6 +42,14 @@ const DIAS_POR_TIPO: Record<TipoSimulacion, number | null> = {
 const K_BY_TIPO: Record<TipoSimulacion, number> = {
   semanal: 15,
   colapso: 200,
+};
+
+const inferTipoSimulacion = (k: number | null): TipoSimulacion => {
+  if (k === K_BY_TIPO.colapso) {
+    return "colapso";
+  }
+
+  return "semanal";
 };
 
 /**
@@ -105,6 +116,54 @@ const SimulacionConfigPage = () => {
   } = useSimulationConfigStore();
 
   const { reset: resetControl } = useSimulationControlStore();
+
+  useEffect(() => {
+    if (idSimulacion !== null) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const hydrateActiveSimulation = async () => {
+      const estado = await getCurrentLiveSimulationState();
+
+      if (
+        cancelled ||
+        !estado ||
+        estado.idSimulacion === null ||
+        !estado.activa
+      ) {
+        return;
+      }
+
+      const tipoActivo = inferTipoSimulacion(estado.k);
+      setEstadoSimulacion(estado);
+      setIdSimulacion(estado.idSimulacion);
+      setTipoSimulacion(tipoActivo);
+      setIsRunning(Boolean(estado.activa));
+      navigate(
+        resolveSimulationModuleRoute({
+          idSimulacion: estado.idSimulacion,
+          isRunning: Boolean(estado.activa),
+          tipoSimulacion: tipoActivo,
+        }),
+        { replace: true }
+      );
+    };
+
+    void hydrateActiveSimulation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    idSimulacion,
+    navigate,
+    setEstadoSimulacion,
+    setIdSimulacion,
+    setIsRunning,
+    setTipoSimulacion,
+  ]);
 
   useEffect(() => {
     if (idSimulacion === null) {

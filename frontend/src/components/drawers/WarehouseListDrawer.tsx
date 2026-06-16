@@ -7,6 +7,7 @@ import {
   type WarehouseSemaphoreFilter,
 } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
@@ -80,22 +81,24 @@ const getNearestFlightMinute = (
   let nearestDistance: number | null = null;
 
   for (const shipment of shipments) {
-    for (const flight of shipment.ruta?.vuelos ?? []) {
-      const airportMatches =
-        kind === "arrival"
-          ? flight.hasta.codigo === airportIcao
-          : flight.desde.codigo === airportIcao;
-      const flightMinute =
-        kind === "arrival" ? flight.llegadaUtcMin : flight.salidaUtcMin;
-      const distance = getMinutesUntil(flightMinute, referenceMinute);
+    for (const group of getShipmentRouteGroups(shipment)) {
+      for (const flight of group.ruta?.vuelos ?? []) {
+        const airportMatches =
+          kind === "arrival"
+            ? flight.hasta.codigo === airportIcao
+            : flight.desde.codigo === airportIcao;
+        const flightMinute =
+          kind === "arrival" ? flight.llegadaUtcMin : flight.salidaUtcMin;
+        const distance = getMinutesUntil(flightMinute, referenceMinute);
 
-      if (!airportMatches || distance === null) {
-        continue;
-      }
+        if (!airportMatches || distance === null) {
+          continue;
+        }
 
-      if (nearestDistance === null || distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestMinute = normalizeMinute(flightMinute);
+        if (nearestDistance === null || distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestMinute = normalizeMinute(flightMinute);
+        }
       }
     }
   }

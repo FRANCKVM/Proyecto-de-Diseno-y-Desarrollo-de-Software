@@ -6,6 +6,7 @@ import {
   buildShipmentRouteSegments,
   resolveShipmentFocusTarget,
 } from "@/utils/shipmentFocus";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 interface ShipmentOverviewDrawerProps {
@@ -19,6 +20,7 @@ const DAY_MINUTES = 24 * 60;
 
 const ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
   INGRESADO: "Ingresado",
+  PARCIAL: "Parcial",
   EN_PROCESO: "En proceso",
   COMPLETADO: "Completado",
 };
@@ -76,26 +78,33 @@ const getNextFlightWindow = (
 const getShipmentTimeline = (
   shipment: BackendSolicitudEnvio
 ): { firstDeparture: number | null; lastArrival: number | null } => {
-  const flights = shipment.ruta?.vuelos ?? [];
+  const routeGroups = getShipmentRouteGroups(shipment);
 
-  if (flights.length === 0) {
+  if (routeGroups.length === 0) {
     return { firstDeparture: null, lastArrival: null };
   }
 
-  let earliestMinute = parseShipmentUtcMinute(shipment);
   let firstDeparture: number | null = null;
   let lastArrival: number | null = null;
 
-  for (const flight of flights) {
-    const window = getNextFlightWindow(
-      earliestMinute,
-      flight.salidaUtcMin,
-      flight.llegadaUtcMin
-    );
+  for (const group of routeGroups) {
+    let earliestMinute = parseShipmentUtcMinute(shipment);
 
-    firstDeparture ??= window.departure;
-    lastArrival = window.arrival;
-    earliestMinute = window.arrival;
+    for (const flight of group.ruta?.vuelos ?? []) {
+      const window = getNextFlightWindow(
+        earliestMinute,
+        flight.salidaUtcMin,
+        flight.llegadaUtcMin
+      );
+
+      firstDeparture =
+        firstDeparture === null
+          ? window.departure
+          : Math.min(firstDeparture, window.departure);
+      lastArrival =
+        lastArrival === null ? window.arrival : Math.max(lastArrival, window.arrival);
+      earliestMinute = window.arrival;
+    }
   }
 
   return { firstDeparture, lastArrival };
@@ -179,6 +188,7 @@ const resolveDerivedShipmentStatus = (
   }
 
   if (
+    shipment.estado === "PARCIAL" ||
     shipment.estado === "EN_PROCESO" ||
     (timeline.firstDeparture !== null && referenceMinute >= timeline.firstDeparture)
   ) {

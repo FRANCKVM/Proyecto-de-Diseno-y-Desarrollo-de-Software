@@ -1,4 +1,5 @@
 import type { BackendSolicitudEnvio, BackendVuelo } from "@/types/backendSimulation.types";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 
 const DAY_MINUTES = 24 * 60;
 
@@ -64,7 +65,9 @@ export const resolveShipmentFocusTarget = (
   }
 
   const routeFlights = shipment.ruta?.vuelos ?? [];
-  if (routeFlights.length === 0) {
+  const routeGroups = getShipmentRouteGroups(shipment);
+  const focusRouteFlights = routeGroups[0]?.ruta?.vuelos ?? routeFlights;
+  if (focusRouteFlights.length === 0) {
     return {
       focusedAirportIcao: shipment.origen.codigo,
       focusedFlightId: null,
@@ -75,7 +78,7 @@ export const resolveShipmentFocusTarget = (
   let previousAirportIcao = shipment.origen.codigo;
   let earliestMinute = 0;
 
-  for (const flight of routeFlights) {
+  for (const flight of focusRouteFlights) {
     const window = buildFlightWindow(flight, earliestMinute);
 
     if (reference < window.departure) {
@@ -105,7 +108,9 @@ export const resolveShipmentFocusTarget = (
 export const buildShipmentRouteSegments = (
   shipment: BackendSolicitudEnvio
 ): ShipmentRouteSegment[] => {
-  const routeFlights = shipment.ruta?.vuelos ?? [];
+  const routeFlights = getShipmentRouteGroups(shipment).flatMap(
+    (group) => group.ruta?.vuelos ?? []
+  );
 
   if (routeFlights.length > 0) {
     return routeFlights.map((flight) => ({

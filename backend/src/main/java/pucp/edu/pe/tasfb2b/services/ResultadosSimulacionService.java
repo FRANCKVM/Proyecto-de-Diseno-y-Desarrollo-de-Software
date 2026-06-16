@@ -6,10 +6,12 @@ import pucp.edu.pe.tasfb2b.controllers.dto.HistorialSimulacionResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.ResultadoColapsoResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.ResultadoPeriodoResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
+import pucp.edu.pe.tasfb2b.entities.AsignacionEnvio;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
 import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
 
@@ -32,52 +34,64 @@ public class ResultadosSimulacionService {
 
     private final SimulacionRepository simulacionRepository;
     private final SolicitudEnvioRepository solicitudEnvioRepository;
+    private final AsignacionEnvioRepository asignacionEnvioRepository;
 
     public ResultadosSimulacionService(
             SimulacionRepository simulacionRepository,
-            SolicitudEnvioRepository solicitudEnvioRepository
+            SolicitudEnvioRepository solicitudEnvioRepository,
+            AsignacionEnvioRepository asignacionEnvioRepository
     ) {
         this.simulacionRepository = simulacionRepository;
         this.solicitudEnvioRepository = solicitudEnvioRepository;
+        this.asignacionEnvioRepository = asignacionEnvioRepository;
     }
 
     public ResultadoPeriodoResponse obtenerResultadoPeriodo(Integer idSimulacion) {
         Simulacion simulacion = obtenerSimulacion(idSimulacion);
         List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
-        return construirResultadoPeriodo(simulacion, envios);
+        return construirResultadoPeriodo(simulacion, envios, agruparAsignacionesPorEnvio(envios));
     }
 
     private ResultadoPeriodoResponse construirResultadoPeriodo(
             Simulacion simulacion,
-            List<SolicitudEnvio> envios
+            List<SolicitudEnvio> envios,
+            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
     ) {
-        Map<String, AeropuertoStats> statsPorAeropuerto = construirStatsPorAeropuerto(simulacion, envios);
+        Map<String, AeropuertoStats> statsPorAeropuerto = construirStatsPorAeropuerto(
+                simulacion,
+                envios,
+                asignacionesPorEnvio
+        );
         List<ResultadoPeriodoResponse.DesempenoAeropuertoResponse> desempeno = statsPorAeropuerto.values().stream()
                 .map(this::mapearDesempenoAeropuerto)
                 .toList();
 
         int totalMaletas = envios.stream().mapToInt(envio -> valor(envio.getContarBolsas())).sum();
         int totalDentroDePlazo = (int) envios.stream()
-                .filter(this::cumplePlazoComprometido)
+                .filter(envio -> cumplePlazoComprometido(
+                        envio,
+                        obtenerRutasAsignadas(envio, asignacionesPorEnvio)
+                ))
                 .count();
         int cumplimiento = calcularPorcentaje(totalDentroDePlazo, envios.size());
         int vuelosEjecutados = envios.stream()
-                .map(SolicitudEnvio::getRuta)
+                .flatMap(envio -> obtenerRutasAsignadas(envio, asignacionesPorEnvio).stream())
+                .map(RutaAsignada::ruta)
                 .filter(ruta -> ruta != null && ruta.getVuelos() != null)
                 .mapToInt(ruta -> ruta.getVuelos().size())
                 .sum();
-        int cancelaciones = (int) envios.stream()
-                .filter(envio -> envio.getRuta() == null)
-                .count();
+        int cancelaciones = valor(simulacion.getCancelacionesVuelos());
         int replanificaciones = (int) envios.stream()
-                .map(SolicitudEnvio::getRuta)
+                .flatMap(envio -> obtenerRutasAsignadas(envio, asignacionesPorEnvio).stream())
+                .map(RutaAsignada::ruta)
                 .filter(ruta -> ruta != null && ruta.getVuelos() != null && ruta.getVuelos().size() > 1)
                 .count();
 
         ResultadoPeriodoResponse.ResumenOperativoResponse resumen = construirResumenOperativo(
                 simulacion,
                 envios,
-                statsPorAeropuerto
+                statsPorAeropuerto,
+                asignacionesPorEnvio
         );
 
         String conclusion = cumplimiento >= 90
@@ -107,7 +121,7 @@ public class ResultadosSimulacionService {
     public ResultadoColapsoResponse obtenerResultadoColapso(Integer idSimulacion) {
         Simulacion simulacion = obtenerSimulacion(idSimulacion);
         List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
-        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios);
+        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios, agruparAsignacionesPorEnvio(envios));
         return construirResultadoColapso(periodo);
     }
 
@@ -153,7 +167,7 @@ public class ResultadosSimulacionService {
         return new ResultadoColapsoResponse(
                 periodo.id(),
                 periodo.rango(),
-                Math.max(1, periodo.resumen().duracionMinutos().intValue() / (24 * 60)),
+                Math.max(1, (int) Math.ceil(periodo.resumen().duracionMinutos() / (double) (24 * 60))),
                 periodo.totalMaletas(),
                 plazosIncumplidos,
                 new ResultadoColapsoResponse.AlmacenesSaturadosResponse(
@@ -205,12 +219,63 @@ public class ResultadosSimulacionService {
         return enviosPorSimulacion;
     }
 
+    private Map<Integer, List<AsignacionEnvio>> agruparAsignacionesPorEnvio(List<SolicitudEnvio> envios) {
+        Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio = new HashMap<>();
+
+        if (envios == null || envios.isEmpty()) {
+            return asignacionesPorEnvio;
+        }
+
+        for (AsignacionEnvio asignacion : asignacionEnvioRepository
+                .findByEnvioInOrderByEnvio_IdEnvioAscIdAsignacionAsc(envios)) {
+            if (asignacion.getEnvio() == null || asignacion.getEnvio().getIdEnvio() == null) {
+                continue;
+            }
+
+            asignacionesPorEnvio
+                    .computeIfAbsent(asignacion.getEnvio().getIdEnvio(), ignored -> new ArrayList<>())
+                    .add(asignacion);
+        }
+
+        return asignacionesPorEnvio;
+    }
+
+    private List<RutaAsignada> obtenerRutasAsignadas(
+            SolicitudEnvio envio,
+            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
+    ) {
+        if (envio == null) {
+            return List.of();
+        }
+
+        List<AsignacionEnvio> asignaciones = asignacionesPorEnvio.getOrDefault(
+                envio.getIdEnvio(),
+                List.of()
+        );
+
+        if (!asignaciones.isEmpty()) {
+            return asignaciones.stream()
+                    .filter(asignacion -> asignacion.getRuta() != null)
+                    .map(asignacion -> new RutaAsignada(
+                            asignacion.getRuta(),
+                            valor(asignacion.getCantidadBolsas())
+                    ))
+                    .toList();
+        }
+
+        if (envio.getRuta() == null) {
+            return List.of();
+        }
+
+        return List.of(new RutaAsignada(envio.getRuta(), valor(envio.getContarBolsas())));
+    }
+
     private HistorialSimulacionResponse mapearHistorialSimulacion(
             Simulacion simulacion,
             List<SolicitudEnvio> envios
     ) {
         String tipo = inferirTipo(simulacion);
-        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios);
+        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios, agruparAsignacionesPorEnvio(envios));
 
         if ("colapso".equals(tipo)) {
             ResultadoColapsoResponse colapso = construirResultadoColapso(periodo);
@@ -256,14 +321,20 @@ public class ResultadosSimulacionService {
 
     private Map<String, AeropuertoStats> construirStatsPorAeropuerto(
             Simulacion simulacion,
-            List<SolicitudEnvio> envios
+            List<SolicitudEnvio> envios,
+            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
     ) {
         Map<String, AeropuertoStats> stats = new LinkedHashMap<>();
 
         for (SolicitudEnvio envio : envios) {
             registrarAeropuerto(stats, envio.getOrigen(), true, valor(envio.getContarBolsas()));
             registrarAeropuerto(stats, envio.getDestino(), false, valor(envio.getContarBolsas()));
-            registrarOcupacionAlmacen(stats, simulacion, envio);
+            registrarOcupacionAlmacen(
+                    stats,
+                    simulacion,
+                    envio,
+                    obtenerRutasAsignadas(envio, asignacionesPorEnvio)
+            );
         }
 
         long horizonteMinutos = calcularHorizonteOcupacion(stats);
@@ -299,28 +370,37 @@ public class ResultadosSimulacionService {
     private void registrarOcupacionAlmacen(
             Map<String, AeropuertoStats> stats,
             Simulacion simulacion,
-            SolicitudEnvio envio
+            SolicitudEnvio envio,
+            List<RutaAsignada> rutasAsignadas
     ) {
-        if (simulacion == null || envio == null || envio.getRuta() == null || envio.getRuta().getVuelos() == null) {
+        if (simulacion == null || envio == null || rutasAsignadas.isEmpty()) {
             return;
         }
 
-        List<VentanaVuelo> ventanas = calcularVentanasRuta(
-                envio.getRuta(),
-                calcularMinutoSimulacion(simulacion, envio)
-        );
+        int minutoSolicitud = calcularMinutoSimulacion(simulacion, envio);
 
-        if (ventanas.isEmpty()) {
-            return;
-        }
+        for (RutaAsignada rutaAsignada : rutasAsignadas) {
+            if (rutaAsignada.ruta() == null || rutaAsignada.ruta().getVuelos() == null) {
+                continue;
+            }
 
-        int maletas = valor(envio.getContarBolsas());
-        registrarReservaAlmacen(stats, envio.getOrigen(), calcularMinutoSimulacion(simulacion, envio), ventanas.getFirst().salidaMinuto(), maletas);
+            List<VentanaVuelo> ventanas = calcularVentanasRuta(
+                    rutaAsignada.ruta(),
+                    minutoSolicitud
+            );
 
-        for (int i = 0; i < ventanas.size() - 1; i++) {
-            VentanaVuelo llegada = ventanas.get(i);
-            VentanaVuelo siguienteSalida = ventanas.get(i + 1);
-            registrarReservaAlmacen(stats, llegada.vuelo().getHasta(), llegada.llegadaMinuto(), siguienteSalida.salidaMinuto(), maletas);
+            if (ventanas.isEmpty()) {
+                continue;
+            }
+
+            int maletas = rutaAsignada.maletas();
+            registrarReservaAlmacen(stats, envio.getOrigen(), minutoSolicitud, ventanas.getFirst().salidaMinuto(), maletas);
+
+            for (int i = 0; i < ventanas.size() - 1; i++) {
+                VentanaVuelo llegada = ventanas.get(i);
+                VentanaVuelo siguienteSalida = ventanas.get(i + 1);
+                registrarReservaAlmacen(stats, llegada.vuelo().getHasta(), llegada.llegadaMinuto(), siguienteSalida.salidaMinuto(), maletas);
+            }
         }
     }
 
@@ -445,7 +525,8 @@ public class ResultadosSimulacionService {
     private ResultadoPeriodoResponse.ResumenOperativoResponse construirResumenOperativo(
             Simulacion simulacion,
             List<SolicitudEnvio> envios,
-            Map<String, AeropuertoStats> statsPorAeropuerto
+            Map<String, AeropuertoStats> statsPorAeropuerto,
+            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
     ) {
         int maletasIntra = 0;
         int maletasInter = 0;
@@ -459,9 +540,8 @@ public class ResultadosSimulacionService {
                     && envio.getDestino() != null
                     && envio.getOrigen().getRegion().equalsIgnoreCase(envio.getDestino().getRegion());
             int maletas = valor(envio.getContarBolsas());
-            double tiempoRuta = envio.getRuta() != null && envio.getRuta().getTiempoTotal() != null
-                    ? envio.getRuta().getTiempoTotal()
-                    : 0.0;
+            List<RutaAsignada> rutasAsignadas = obtenerRutasAsignadas(envio, asignacionesPorEnvio);
+            double tiempoRuta = calcularTiempoPromedioRutasAsignadas(rutasAsignadas);
 
             if (intra) {
                 maletasIntra += maletas;
@@ -483,8 +563,11 @@ public class ResultadosSimulacionService {
                 .map(stats -> stats.aeropuerto.getCodigo())
                 .toList();
 
-        LocalDateTime fin = simulacion.getFechaFin() != null ? simulacion.getFechaFin() : LocalDateTime.now();
-        long duracionMinutos = Math.max(1, Duration.between(simulacion.getFechaInicio(), fin).toMinutes());
+        long duracionMinutos = calcularDuracionSimuladaMinutos(
+                simulacion,
+                envios,
+                asignacionesPorEnvio
+        );
 
         return new ResultadoPeriodoResponse.ResumenOperativoResponse(
                 maletasIntra,
@@ -495,6 +578,61 @@ public class ResultadosSimulacionService {
                 icaosEnRojo,
                 duracionMinutos
         );
+    }
+
+    private double calcularTiempoPromedioRutasAsignadas(List<RutaAsignada> rutasAsignadas) {
+        if (rutasAsignadas == null || rutasAsignadas.isEmpty()) {
+            return 0.0;
+        }
+
+        int totalMaletas = 0;
+        double sumaPonderada = 0.0;
+
+        for (RutaAsignada rutaAsignada : rutasAsignadas) {
+            if (rutaAsignada.ruta() == null || rutaAsignada.ruta().getTiempoTotal() == null) {
+                continue;
+            }
+
+            int maletas = Math.max(1, rutaAsignada.maletas());
+            totalMaletas += maletas;
+            sumaPonderada += rutaAsignada.ruta().getTiempoTotal() * maletas;
+        }
+
+        return totalMaletas == 0 ? 0.0 : sumaPonderada / totalMaletas;
+    }
+
+    private long calcularDuracionSimuladaMinutos(
+            Simulacion simulacion,
+            List<SolicitudEnvio> envios,
+            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
+    ) {
+        if (simulacion.getDuracionSimulacionMinutos() != null
+                && simulacion.getDuracionSimulacionMinutos() > 0) {
+            return simulacion.getDuracionSimulacionMinutos();
+        }
+
+        long maxMinuto = 0;
+        for (SolicitudEnvio envio : envios) {
+            int minutoSolicitud = calcularMinutoSimulacion(simulacion, envio);
+            maxMinuto = Math.max(maxMinuto, minutoSolicitud);
+
+            for (RutaAsignada rutaAsignada : obtenerRutasAsignadas(envio, asignacionesPorEnvio)) {
+                if (rutaAsignada.ruta() == null || rutaAsignada.ruta().getVuelos() == null) {
+                    continue;
+                }
+
+                List<VentanaVuelo> ventanas = calcularVentanasRuta(rutaAsignada.ruta(), minutoSolicitud);
+                if (!ventanas.isEmpty()) {
+                    maxMinuto = Math.max(maxMinuto, ventanas.getLast().llegadaMinuto());
+                }
+            }
+        }
+
+        if (maxMinuto <= 0 && simulacion.getFechaInicio() != null && simulacion.getFechaFin() != null) {
+            maxMinuto = Duration.between(simulacion.getFechaInicio(), simulacion.getFechaFin()).toMinutes();
+        }
+
+        return Math.max(1, maxMinuto);
     }
 
     private String construirRango(Simulacion simulacion) {
@@ -525,17 +663,21 @@ public class ResultadosSimulacionService {
         return (int) Math.round((numerador * 100.0) / denominador);
     }
 
-    private boolean cumplePlazoComprometido(SolicitudEnvio envio) {
-        if (envio == null || envio.getRuta() == null) {
+    private boolean cumplePlazoComprometido(SolicitudEnvio envio, List<RutaAsignada> rutasAsignadas) {
+        if (envio == null || rutasAsignadas == null || rutasAsignadas.isEmpty()) {
             return false;
         }
 
-        Double tiempoTotal = envio.getRuta().getTiempoTotal();
         Double plazoMaximo = envio.getDiasTiempoMaximo();
+        if (plazoMaximo == null) {
+            return false;
+        }
 
-        return tiempoTotal != null
-                && plazoMaximo != null
-                && tiempoTotal <= plazoMaximo;
+        return rutasAsignadas.stream()
+                .map(RutaAsignada::ruta)
+                .allMatch(ruta -> ruta != null
+                        && ruta.getTiempoTotal() != null
+                        && ruta.getTiempoTotal() <= plazoMaximo);
     }
 
     private int valor(Integer numero) {
@@ -563,6 +705,12 @@ public class ResultadosSimulacionService {
             Vuelo vuelo,
             int salidaMinuto,
             int llegadaMinuto
+    ) {
+    }
+
+    private record RutaAsignada(
+            Ruta ruta,
+            int maletas
     ) {
     }
 

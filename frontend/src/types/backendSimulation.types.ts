@@ -30,6 +30,13 @@ export interface BackendRuta {
   factible: boolean;
 }
 
+export interface BackendAsignacionEnvio {
+  idAsignacion: number | null;
+  ruta: BackendRuta | null;
+  cantidadBolsas: number;
+  estado: "INGRESADO" | "PARCIAL" | "EN_PROCESO" | "COMPLETADO";
+}
+
 export interface BackendSimulacion {
   idSimulacion: number;
   k: number;
@@ -51,7 +58,8 @@ export interface BackendSolicitudEnvio {
   destino: BackendAeropuerto;
   contarBolsas: number;
   diasTiempoMaximo: number;
-  estado: "INGRESADO" | "EN_PROCESO" | "COMPLETADO";
+  estado: "INGRESADO" | "PARCIAL" | "EN_PROCESO" | "COMPLETADO";
+  asignaciones?: BackendAsignacionEnvio[];
 }
 
 export interface BackendEstadoSimulacion {

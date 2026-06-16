@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pucp.edu.pe.tasfb2b.algorithms.ga.PlanificadorGenetico;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
+import pucp.edu.pe.tasfb2b.entities.AsignacionEnvio;
 import pucp.edu.pe.tasfb2b.entities.EstadoEnvio;
 import pucp.edu.pe.tasfb2b.entities.Grafo;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
@@ -17,6 +18,7 @@ import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
+import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
 import pucp.edu.pe.tasfb2b.repositories.RutaRepository;
 import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
@@ -56,6 +58,7 @@ public class SimulacionService {
     private final SimulacionCargaService simulacionCargaService;
     private final SimulacionEstadoService simulacionEstadoService;
     private final AeropuertoRepository aeropuertoRepository;
+    private final AsignacionEnvioRepository asignacionEnvioRepository;
     private final SolicitudEnvioRepository solicitudEnvioRepository;
     private final RutaRepository rutaRepository;
     private final SimulacionRepository simulacionRepository;
@@ -75,6 +78,7 @@ public class SimulacionService {
 
     private LocalDateTime fechaHoraInicioReal;
     private LocalDateTime fechaHoraInicioSimulacion;
+    private Long duracionSolicitadaMinutos;
     private List<SolicitudEnvio> solicitudesPendientes = new ArrayList<>();
     private PlanificadorGenetico planificadorGA;
     private final SimulacionMetricas metricas = new SimulacionMetricas();
@@ -92,6 +96,7 @@ public class SimulacionService {
             SimulacionCargaService simulacionCargaService,
             SimulacionEstadoService simulacionEstadoService,
             AeropuertoRepository aeropuertoRepository,
+            AsignacionEnvioRepository asignacionEnvioRepository,
             SolicitudEnvioRepository solicitudEnvioRepository,
             RutaRepository rutaRepository,
             SimulacionRepository simulacionRepository,
@@ -102,6 +107,7 @@ public class SimulacionService {
         this.simulacionCargaService = simulacionCargaService;
         this.simulacionEstadoService = simulacionEstadoService;
         this.aeropuertoRepository = aeropuertoRepository;
+        this.asignacionEnvioRepository = asignacionEnvioRepository;
         this.solicitudEnvioRepository = solicitudEnvioRepository;
         this.rutaRepository = rutaRepository;
         this.simulacionRepository = simulacionRepository;
@@ -161,6 +167,9 @@ public class SimulacionService {
         this.cancelacionesVuelosSimulados.clear();
         this.fechaHoraInicioReal = LocalDateTime.now();
         this.fechaHoraInicioSimulacion = fechaHoraInicio;
+        this.duracionSolicitadaMinutos = duracionDias != null
+                ? duracionDias.longValue() * VueloCancelacionService.MINUTOS_DIA
+                : null;
 
         metricas.reiniciar();
 
@@ -178,9 +187,10 @@ public class SimulacionService {
                 fechaHoraInicioSimulacion
         );
 
-        this.simulacionActual = simulacionRepository.save(
-                new Simulacion(k, fechaHoraInicioSimulacion, true)
-        );
+        Simulacion nuevaSimulacion = new Simulacion(k, fechaHoraInicioSimulacion, true);
+        nuevaSimulacion.setCancelacionesVuelos(0);
+        nuevaSimulacion.setDuracionSimulacionMinutos(duracionSolicitadaMinutos);
+        this.simulacionActual = simulacionRepository.save(nuevaSimulacion);
         this.ultimoIdSimulacion = this.simulacionActual.getIdSimulacion();
 
         inicializarEstadoSimulado();
@@ -225,12 +235,14 @@ public class SimulacionService {
         List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
 
         if (vuelosSimulados.isEmpty()) {
-            return envios;
+            return adjuntarAsignaciones(envios, false);
         }
 
-        return envios.stream()
+        List<SolicitudEnvio> enviosClonados = envios.stream()
                 .map(this::clonarSolicitudConRutaSimulada)
                 .collect(Collectors.toList());
+
+        return adjuntarAsignaciones(enviosClonados, true);
     }
 
     public synchronized MapaSimulacionEstado obtenerMapaSimulacion(Integer idSimulacion) {
@@ -357,44 +369,49 @@ public class SimulacionService {
         solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
         solicitudEnvioRepository.save(solicitudGuardada);
 
-        SolicitudEnvio solicitudSimulada = construirSolicitudSimulada(solicitudGuardada);
-
         long inicioPlanificacion = System.nanoTime();
-        Ruta mejorRutaSimulada = crearPlanificadorSimulado(minutoSolicitud).encontrarMejorRuta(solicitudSimulada);
+        Ruta mejorRutaSimulada = encontrarRutaSimuladaFactible(solicitudGuardada, minutoSolicitud);
         long finPlanificacion = System.nanoTime();
 
         metricas.registrarTiempoPlanificacion(finPlanificacion - inicioPlanificacion);
 
-        if (mejorRutaSimulada != null && mejorRutaSimulada.esFactible()) {
-            origenSimulado.descontarCapacidad(solicitudGuardada.getContarBolsas());
-            List<ReservaVueloSimulado> reservasRuta = calcularReservasRuta(
-                    mejorRutaSimulada,
-                    minutoSolicitud,
-                    solicitudGuardada.getIdEnvio(),
-                    solicitudGuardada.getContarBolsas()
-            );
-            registrarReservasRuta(
-                    solicitudGuardada.getIdEnvio(),
-                    solicitudGuardada.getOrigen().getCodigo(),
-                    solicitudGuardada.getContarBolsas(),
-                    reservasRuta,
+        if (mejorRutaSimulada != null) {
+            guardarAsignacionesSimuladas(
+                    solicitudGuardada,
+                    List.of(new AsignacionSimulada(
+                            mejorRutaSimulada,
+                            solicitudGuardada.getContarBolsas()
+                    )),
                     minutoSolicitud
             );
+            metricas.registrarRutaResuelta(mejorRutaSimulada.getCosto(), mejorRutaSimulada.getVuelos().size());
+            return;
+        }
 
-            Ruta rutaGuardada = rutaRepository.save(convertirRutaPersistible(mejorRutaSimulada));
+        List<AsignacionSimulada> asignaciones = planificarSolicitudSimuladaDividida(
+                solicitudGuardada,
+                minutoSolicitud
+        );
 
-            solicitudGuardada.setRuta(rutaGuardada);
-            solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
-            solicitudEnvioRepository.save(solicitudGuardada);
-
-            int cantidadVuelos = mejorRutaSimulada.getVuelos().size();
-            metricas.registrarRutaResuelta(mejorRutaSimulada.getCosto(), cantidadVuelos);
-        } else {
+        if (asignaciones.isEmpty()) {
             metricas.incrementarNoResueltasPorRutaVueloPlazo();
 
             solicitudGuardada.setEstado(EstadoEnvio.INGRESADO);
             solicitudEnvioRepository.save(solicitudGuardada);
+            return;
         }
+
+        guardarAsignacionesSimuladas(solicitudGuardada, asignaciones, minutoSolicitud);
+
+        int cantidadVuelos = asignaciones.stream()
+                .mapToInt(asignacion -> asignacion.ruta().getVuelos().size())
+                .sum();
+        double costoTotal = asignaciones.stream()
+                .mapToDouble(asignacion -> asignacion.ruta().getCosto() != null
+                        ? asignacion.ruta().getCosto()
+                        : 0.0)
+                .sum();
+        metricas.registrarRutaResuelta(costoTotal, cantidadVuelos);
     }
 
     private void inicializarEstadoSimulado() {
@@ -451,6 +468,10 @@ public class SimulacionService {
     }
 
     private SolicitudEnvio construirSolicitudSimulada(SolicitudEnvio solicitudReal) {
+        return construirSolicitudSimulada(solicitudReal, solicitudReal.getContarBolsas());
+    }
+
+    private SolicitudEnvio construirSolicitudSimulada(SolicitudEnvio solicitudReal, Integer bolsas) {
         Aeropuerto origenSimulado = aeropuertosSimulados.get(solicitudReal.getOrigen().getCodigo());
         Aeropuerto destinoSimulado = aeropuertosSimulados.get(solicitudReal.getDestino().getCodigo());
 
@@ -461,9 +482,123 @@ public class SimulacionService {
                 solicitudReal.getIdCliente(),
                 origenSimulado,
                 destinoSimulado,
-                solicitudReal.getContarBolsas(),
+                bolsas,
                 solicitudReal.getDiasTiempoMaximo()
         );
+    }
+
+    private Ruta encontrarRutaSimuladaFactible(SolicitudEnvio solicitudReal, int minutoInicio) {
+        SolicitudEnvio solicitudSimulada = construirSolicitudSimulada(solicitudReal);
+        Ruta ruta = crearPlanificadorSimulado(minutoInicio).encontrarMejorRuta(solicitudSimulada);
+        return ruta != null && ruta.esFactible() ? ruta : null;
+    }
+
+    private List<AsignacionSimulada> planificarSolicitudSimuladaDividida(
+            SolicitudEnvio solicitud,
+            int minutoSolicitud
+    ) {
+        List<AsignacionSimulada> asignaciones = new ArrayList<>();
+        int restante = solicitud.getContarBolsas() != null ? solicitud.getContarBolsas() : 0;
+
+        while (restante > 0) {
+            SolicitudEnvio solicitudMinima = construirSolicitudSimulada(solicitud, 1);
+            Ruta ruta = crearPlanificadorSimulado(minutoSolicitud).encontrarMejorRuta(solicitudMinima);
+            if (ruta == null || !ruta.esFactible()) {
+                break;
+            }
+
+            int capacidadRuta = calcularCapacidadDisponibleRuta(ruta);
+            int bolsasAsignadas = Math.min(restante, capacidadRuta);
+            if (bolsasAsignadas <= 0) {
+                break;
+            }
+
+            List<ReservaVueloSimulado> reservasRuta = calcularReservasRuta(
+                    ruta,
+                    minutoSolicitud,
+                    solicitud.getIdEnvio(),
+                    bolsasAsignadas
+            );
+            registrarReservasRuta(
+                    solicitud.getIdEnvio(),
+                    solicitud.getOrigen().getCodigo(),
+                    bolsasAsignadas,
+                    reservasRuta,
+                    minutoSolicitud
+            );
+            asignaciones.add(new AsignacionSimulada(ruta, bolsasAsignadas, true));
+            restante -= bolsasAsignadas;
+        }
+
+        return asignaciones;
+    }
+
+    private SolicitudEnvio guardarAsignacionesSimuladas(
+            SolicitudEnvio solicitud,
+            List<AsignacionSimulada> asignaciones,
+            int minutoReferencia
+    ) {
+        int totalAsignado = asignaciones.stream()
+                .mapToInt(AsignacionSimulada::bolsas)
+                .sum();
+
+        Aeropuerto origenSimulado = aeropuertosSimulados.get(solicitud.getOrigen().getCodigo());
+        if (origenSimulado != null) {
+            origenSimulado.descontarCapacidad(totalAsignado);
+        }
+
+        asignacionEnvioRepository.deleteByEnvio_IdEnvio(solicitud.getIdEnvio());
+
+        Ruta rutaPrincipal = null;
+        for (AsignacionSimulada asignacion : asignaciones) {
+            if (!asignacion.reservasRegistradas()) {
+                List<ReservaVueloSimulado> reservasRuta = calcularReservasRuta(
+                        asignacion.ruta(),
+                        minutoReferencia,
+                        solicitud.getIdEnvio(),
+                        asignacion.bolsas()
+                );
+                registrarReservasRuta(
+                        solicitud.getIdEnvio(),
+                        solicitud.getOrigen().getCodigo(),
+                        asignacion.bolsas(),
+                        reservasRuta,
+                        minutoReferencia
+                );
+            }
+
+            Ruta rutaGuardada = rutaRepository.save(convertirRutaPersistible(asignacion.ruta()));
+            if (rutaPrincipal == null) {
+                rutaPrincipal = rutaGuardada;
+            }
+
+            asignacionEnvioRepository.save(new AsignacionEnvio(
+                    solicitud,
+                    rutaGuardada,
+                    asignacion.bolsas(),
+                    EstadoEnvio.EN_PROCESO
+            ));
+        }
+
+        solicitud.setRuta(rutaPrincipal);
+        solicitud.setEstado(totalAsignado >= solicitud.getContarBolsas()
+                ? EstadoEnvio.EN_PROCESO
+                : EstadoEnvio.PARCIAL);
+
+        return solicitudEnvioRepository.save(solicitud);
+    }
+
+    private int calcularCapacidadDisponibleRuta(Ruta ruta) {
+        if (ruta == null || ruta.getVuelos() == null || ruta.getVuelos().isEmpty()) {
+            return 0;
+        }
+
+        int capacidad = Integer.MAX_VALUE;
+        for (Vuelo vuelo : ruta.getVuelos()) {
+            capacidad = Math.min(capacidad, vuelo.getCapacidadDisponible());
+        }
+
+        return capacidad == Integer.MAX_VALUE ? 0 : capacidad;
     }
 
     private Ruta convertirRutaPersistible(Ruta rutaSimulada) {
@@ -522,14 +657,64 @@ public class SimulacionService {
         return rutaClonada;
     }
 
+    private List<SolicitudEnvio> adjuntarAsignaciones(
+            List<SolicitudEnvio> envios,
+            boolean usarVuelosSimulados
+    ) {
+        if (envios == null || envios.isEmpty()) {
+            return envios;
+        }
+
+        List<Integer> idsEnvio = envios.stream()
+                .map(SolicitudEnvio::getIdEnvio)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Map<Integer, List<SolicitudEnvio.AsignacionEnvioVista>> asignacionesPorEnvio = new HashMap<>();
+
+        if (!idsEnvio.isEmpty()) {
+            for (AsignacionEnvio asignacion : asignacionEnvioRepository.findByEnvioIds(idsEnvio)) {
+                if (asignacion.getEnvio() == null || asignacion.getEnvio().getIdEnvio() == null) {
+                    continue;
+                }
+
+                Ruta ruta = usarVuelosSimulados
+                        ? clonarRutaConVuelosSimulados(asignacion.getRuta())
+                        : asignacion.getRuta();
+
+                asignacionesPorEnvio
+                        .computeIfAbsent(asignacion.getEnvio().getIdEnvio(), ignored -> new ArrayList<>())
+                        .add(new SolicitudEnvio.AsignacionEnvioVista(
+                                asignacion.getIdAsignacion(),
+                                ruta,
+                                asignacion.getCantidadBolsas(),
+                                asignacion.getEstado()
+                        ));
+            }
+        }
+
+        for (SolicitudEnvio envio : envios) {
+            envio.setAsignaciones(asignacionesPorEnvio.getOrDefault(
+                    envio.getIdEnvio(),
+                    List.of()
+            ));
+        }
+
+        return envios;
+    }
+
     private void finalizarSimulacion() {
         Integer idSimulacionFinal = simulacionActual != null
                 ? simulacionActual.getIdSimulacion()
                 : ultimoIdSimulacion;
 
         if (this.simulacionActual != null) {
+            long duracionFinalMinutos = calcularDuracionFinalMinutos();
             this.simulacionActual.setActiva(false);
-            this.simulacionActual.setFechaFin(LocalDateTime.now());
+            this.simulacionActual.setFechaFin(fechaHoraInicioSimulacion != null
+                    ? fechaHoraInicioSimulacion.plusMinutes(duracionFinalMinutos)
+                    : LocalDateTime.now());
+            this.simulacionActual.setCancelacionesVuelos(cancelacionesVuelosSimulados.size());
+            this.simulacionActual.setDuracionSimulacionMinutos(duracionFinalMinutos);
             simulacionRepository.save(this.simulacionActual);
         }
 
@@ -556,9 +741,34 @@ public class SimulacionService {
         this.planificadorGA = null;
         this.fechaHoraInicioReal = null;
         this.fechaHoraInicioSimulacion = null;
+        this.duracionSolicitadaMinutos = null;
         this.simulacionActual = null;
         this.intervaloRealActualMs = null;
         this.ultimaEjecucionBloqueRealMs = null;
+    }
+
+    private long calcularDuracionFinalMinutos() {
+        if (duracionSolicitadaMinutos != null
+                && duracionSolicitadaMinutos > 0
+                && simulacionCompletoRangoCargado()) {
+            return duracionSolicitadaMinutos;
+        }
+
+        long puntero = punteroConsumoMinutos != null ? punteroConsumoMinutos.longValue() : 0L;
+        long ultimo = ultimoMinutoSimulacion != null ? ultimoMinutoSimulacion.longValue() : 0L;
+        long procesado = Math.max(puntero, ultimo);
+
+        return Math.max(1L, procesado);
+    }
+
+    private boolean simulacionCompletoRangoCargado() {
+        boolean consumioSolicitudes = solicitudesPendientes != null
+                && indiceSiguienteSolicitud >= solicitudesPendientes.size();
+        boolean consumioHorizonte = punteroConsumoMinutos != null
+                && ultimoMinutoSimulacion != null
+                && punteroConsumoMinutos > ultimoMinutoSimulacion;
+
+        return consumioSolicitudes || consumioHorizonte;
     }
 
     private long resolverIntervaloRealMs(Integer duracionDias) {
@@ -752,12 +962,13 @@ public class SimulacionService {
 
     private void replanificarEnvioSimulado(Integer idEnvio, int minutoReplanificacion) {
         SolicitudEnvio envio = solicitudEnvioRepository.findById(idEnvio).orElse(null);
-        if (envio == null || envio.getRuta() == null || envio.getEstado() == EstadoEnvio.COMPLETADO) {
+        if (envio == null || envio.getEstado() == EstadoEnvio.COMPLETADO) {
             return;
         }
 
         liberarReservasEnvioSimulado(envio, minutoReplanificacion);
         actualizarReservasSimuladas(minutoReplanificacion);
+        asignacionEnvioRepository.deleteByEnvio_IdEnvio(envio.getIdEnvio());
 
         Aeropuerto origenSimulado = aeropuertosSimulados.get(envio.getOrigen().getCodigo());
         if (origenSimulado == null || !origenSimulado.tieneCapacidad(envio.getContarBolsas())) {
@@ -767,40 +978,44 @@ public class SimulacionService {
             return;
         }
 
-        SolicitudEnvio solicitudSimulada = construirSolicitudSimulada(envio);
-        Ruta rutaReplanificada = crearPlanificadorSimulado(minutoReplanificacion).encontrarMejorRuta(solicitudSimulada);
+        Ruta rutaReplanificada = encontrarRutaSimuladaFactible(envio, minutoReplanificacion);
 
-        if (rutaReplanificada == null || !rutaReplanificada.esFactible()) {
+        if (rutaReplanificada != null) {
+            guardarAsignacionesSimuladas(
+                    envio,
+                    List.of(new AsignacionSimulada(
+                            rutaReplanificada,
+                            envio.getContarBolsas()
+                    )),
+                    minutoReplanificacion
+            );
+            return;
+        }
+
+        List<AsignacionSimulada> asignaciones = planificarSolicitudSimuladaDividida(
+                envio,
+                minutoReplanificacion
+        );
+
+        if (asignaciones.isEmpty()) {
             envio.setRuta(null);
             envio.setEstado(EstadoEnvio.INGRESADO);
             solicitudEnvioRepository.save(envio);
             return;
         }
 
-        origenSimulado.descontarCapacidad(envio.getContarBolsas());
-        List<ReservaVueloSimulado> nuevasReservas = calcularReservasRuta(
-                rutaReplanificada,
-                minutoReplanificacion,
-                envio.getIdEnvio(),
-                envio.getContarBolsas()
-        );
-        registrarReservasRuta(
-                envio.getIdEnvio(),
-                envio.getOrigen().getCodigo(),
-                envio.getContarBolsas(),
-                nuevasReservas,
-                minutoReplanificacion
-        );
-
-        envio.setRuta(rutaRepository.save(convertirRutaPersistible(rutaReplanificada)));
-        envio.setEstado(EstadoEnvio.EN_PROCESO);
-        solicitudEnvioRepository.save(envio);
+        guardarAsignacionesSimuladas(envio, asignaciones, minutoReplanificacion);
     }
 
     private void liberarReservasEnvioSimulado(SolicitudEnvio envio, int minutoReferencia) {
-        boolean restaurarOrigen = reservasAlmacenesSimulados.stream()
-                .anyMatch(reserva -> reserva.idEnvio().equals(envio.getIdEnvio())
-                        && reserva.minutoLiberacion() > minutoReferencia);
+        Map<String, Integer> capacidadARestaurarPorAeropuerto = reservasAlmacenesSimulados.stream()
+                .filter(reserva -> reserva.idEnvio().equals(envio.getIdEnvio()))
+                .filter(reserva -> reserva.minutoEvento() > minutoReferencia)
+                .filter(reserva -> reserva.deltaCapacidad() > 0)
+                .collect(Collectors.groupingBy(
+                        ReservaAlmacenSimulado::codigoAeropuerto,
+                        Collectors.summingInt(ReservaAlmacenSimulado::deltaCapacidad)
+                ));
 
         reservasAlmacenesSimulados.removeIf(reserva -> reserva.idEnvio().equals(envio.getIdEnvio()));
 
@@ -809,10 +1024,10 @@ public class SimulacionService {
         }
         reservasVuelosSimulados.entrySet().removeIf(entry -> entry.getValue().isEmpty());
 
-        if (restaurarOrigen) {
-            Aeropuerto origen = aeropuertosSimulados.get(envio.getOrigen().getCodigo());
-            if (origen != null) {
-                origen.aumentarCapacidad(envio.getContarBolsas());
+        for (Map.Entry<String, Integer> entry : capacidadARestaurarPorAeropuerto.entrySet()) {
+            Aeropuerto aeropuerto = aeropuertosSimulados.get(entry.getKey());
+            if (aeropuerto != null && entry.getValue() > 0) {
+                aeropuerto.aumentarCapacidad(entry.getValue());
             }
         }
     }
@@ -823,17 +1038,34 @@ public class SimulacionService {
         while (iterator.hasNext()) {
             ReservaAlmacenSimulado reserva = iterator.next();
 
-            if (reserva.minutoLiberacion() > minutoSimulacion) {
+            if (reserva.minutoEvento() > minutoSimulacion) {
                 continue;
             }
 
             Aeropuerto aeropuerto = aeropuertosSimulados.get(reserva.codigoAeropuerto());
             if (aeropuerto != null) {
-                aeropuerto.aumentarCapacidad(reserva.bolsas());
+                aplicarDeltaCapacidadAlmacen(aeropuerto, reserva.deltaCapacidad());
             }
 
             iterator.remove();
         }
+    }
+
+    private void aplicarDeltaCapacidadAlmacen(Aeropuerto aeropuerto, int deltaCapacidad) {
+        if (deltaCapacidad == 0) {
+            return;
+        }
+
+        int capacidadActual = aeropuerto.getCapacidad() != null ? aeropuerto.getCapacidad() : 0;
+        if (deltaCapacidad > 0) {
+            int capacidadBase = aeropuertoRepository.findByCodigo(aeropuerto.getCodigo())
+                    .map(Aeropuerto::getCapacidad)
+                    .orElse(capacidadActual + deltaCapacidad);
+            aeropuerto.setCapacidad(Math.min(capacidadBase, capacidadActual + deltaCapacidad));
+            return;
+        }
+
+        aeropuerto.setCapacidad(Math.max(0, capacidadActual + deltaCapacidad));
     }
 
     private void liberarReservasVuelos(int minutoSimulacion) {
@@ -947,6 +1179,29 @@ public class SimulacionService {
                 primeraReserva.salidaMinuto()
         ));
 
+        for (int i = 0; i < reservasRuta.size() - 1; i++) {
+            ReservaVueloSimulado llegada = reservasRuta.get(i);
+            ReservaVueloSimulado siguienteSalida = reservasRuta.get(i + 1);
+            Vuelo vuelo = vuelosSimulados.get(llegada.idVuelo());
+            if (vuelo == null || vuelo.getHasta() == null || vuelo.getHasta().getCodigo() == null) {
+                continue;
+            }
+
+            String codigoEscala = vuelo.getHasta().getCodigo();
+            reservasAlmacenesSimulados.add(new ReservaAlmacenSimulado(
+                    idEnvio,
+                    codigoEscala,
+                    -bolsas,
+                    llegada.llegadaMinuto()
+            ));
+            reservasAlmacenesSimulados.add(new ReservaAlmacenSimulado(
+                    idEnvio,
+                    codigoEscala,
+                    bolsas,
+                    siguienteSalida.salidaMinuto()
+            ));
+        }
+
         for (ReservaVueloSimulado reserva : reservasRuta) {
             reservasVuelosSimulados.computeIfAbsent(reserva.idVuelo(), ignored -> new ArrayList<>())
                     .add(reserva);
@@ -1031,9 +1286,19 @@ public class SimulacionService {
     private record ReservaAlmacenSimulado(
             Integer idEnvio,
             String codigoAeropuerto,
-            int bolsas,
-            int minutoLiberacion
+            int deltaCapacidad,
+            int minutoEvento
     ) {
+    }
+
+    private record AsignacionSimulada(
+            Ruta ruta,
+            int bolsas,
+            boolean reservasRegistradas
+    ) {
+        private AsignacionSimulada(Ruta ruta, int bolsas) {
+            this(ruta, bolsas, false);
+        }
     }
 
     private record ClaveVueloSimulado(

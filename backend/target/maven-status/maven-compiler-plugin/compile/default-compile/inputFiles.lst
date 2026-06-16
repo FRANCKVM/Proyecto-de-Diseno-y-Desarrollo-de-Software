@@ -20,6 +20,7 @@ C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Sof
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\controllers\SimulacionController.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\controllers\VueloController.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Aeropuerto.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\AsignacionEnvio.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\EstadoEnvio.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Grafo.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Ruta.java
@@ -28,6 +29,7 @@ C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Sof
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\Vuelo.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\entities\VueloCancelacion.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\repositories\AeropuertoRepository.java
+C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\repositories\AsignacionEnvioRepository.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\repositories\RutaRepository.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\repositories\SimulacionRepository.java
 C:\Users\valer\OneDrive\Documentos\GitHub\Proyecto-de-Diseno-y-Desarrollo-de-Software\backend\src\main\java\pucp\edu\pe\tasfb2b\repositories\SolicitudEnvioRepository.java

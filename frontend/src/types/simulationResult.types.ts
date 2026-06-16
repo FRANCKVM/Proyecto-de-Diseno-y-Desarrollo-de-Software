@@ -55,7 +55,7 @@ export interface ResumenOperativo {
   aeropuertosEnRojo: number;
   /** ICAOs de los aeropuertos en rojo. */
   icaosEnRojo: string[];
-  /** Duracion real de la simulacion en minutos. */
+  /** Duracion simulada de la corrida en minutos. */
   duracionMinutos: number;
 }
 

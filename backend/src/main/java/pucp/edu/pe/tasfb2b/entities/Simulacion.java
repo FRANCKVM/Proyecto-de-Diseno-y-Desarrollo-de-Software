@@ -25,6 +25,12 @@ public class Simulacion {
     @Column(name = "activa", nullable = false)
     private Boolean activa = true;
 
+    @Column(name = "cancelaciones_vuelos")
+    private Integer cancelacionesVuelos = 0;
+
+    @Column(name = "duracion_simulacion_minutos")
+    private Long duracionSimulacionMinutos;
+
     public Simulacion() {
     }
 
@@ -72,5 +78,21 @@ public class Simulacion {
 
     public void setActiva(Boolean activa) {
         this.activa = activa;
+    }
+
+    public Integer getCancelacionesVuelos() {
+        return cancelacionesVuelos;
+    }
+
+    public void setCancelacionesVuelos(Integer cancelacionesVuelos) {
+        this.cancelacionesVuelos = cancelacionesVuelos;
+    }
+
+    public Long getDuracionSimulacionMinutos() {
+        return duracionSimulacionMinutos;
+    }
+
+    public void setDuracionSimulacionMinutos(Long duracionSimulacionMinutos) {
+        this.duracionSimulacionMinutos = duracionSimulacionMinutos;
     }
 }

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import TopBar from "@/components/organisms/TopBar";
-import LegendBar from "@/components/organisms/LegendBar";
 import WorldMap from "@/components/map/WorldMap";
 import DrawerHost from "@/components/organisms/DrawerHost";
 import { OCCUPANCY_NORMAL } from "@/services/sources2.0/demoOccupancy.mock";
@@ -9,6 +8,7 @@ import { useFlightSimulation } from "@/hooks/useFlightSimulation";
 import { useOperationData } from "@/hooks/useOperationData";
 import { useDrawerStore } from "@/store/drawerStore";
 import { getFlightByCode } from "@/services/flightService";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import { USE_MOCK_DATA } from "@/utils/constants";
 import type {
   BackendSolicitudEnvio,
@@ -84,22 +84,26 @@ const isShipmentDelivered = (
   shipment: BackendSolicitudEnvio,
   now: Date
 ): boolean => {
-  const routeFlights = shipment.ruta?.vuelos ?? [];
+  const routeGroups = getShipmentRouteGroups(shipment);
 
-  if (routeFlights.length === 0) {
+  if (routeGroups.length === 0) {
     return false;
   }
 
-  let earliestDeparture = parseShipmentUtcMinute(shipment);
-  let lastArrival = earliestDeparture;
+  let lastArrival: number | null = null;
 
-  for (const flight of routeFlights) {
-    const window = getNextFlightWindow(earliestDeparture, flight);
-    earliestDeparture = window.arrival;
-    lastArrival = window.arrival;
+  for (const group of routeGroups) {
+    let earliestDeparture = parseShipmentUtcMinute(shipment);
+
+    for (const flight of group.ruta?.vuelos ?? []) {
+      const window = getNextFlightWindow(earliestDeparture, flight);
+      earliestDeparture = window.arrival;
+      lastArrival =
+        lastArrival === null ? window.arrival : Math.max(lastArrival, window.arrival);
+    }
   }
 
-  return getUtcMinutesSinceShipmentDay(now, shipment) >= lastArrival;
+  return lastArrival !== null && getUtcMinutesSinceShipmentDay(now, shipment) >= lastArrival;
 };
 
 const buildOperationKpis = (
@@ -216,32 +220,32 @@ const OperacionDiaADiaPage = () => {
 
   return (
     <>
-      <TopBar
-        variant="dia-a-dia"
-        fechaActual={formatOperationDateTime(systemDate)}
-        kpis={{
-          enviosHoy: USE_MOCK_DATA ? 23 : operationKpis.enviosHoy,
-          enTransito: USE_MOCK_DATA ? flights.length : operationKpis.enTransito,
-          entregadas: USE_MOCK_DATA ? 89 : operationKpis.entregadas,
-          cumplimiento: USE_MOCK_DATA
-            ? "100%"
-            : `${operationKpis.cumplimiento}%`,
-        }}
-        buscador={{
-          valor: flightQuery,
-          error: searchError,
-          isLoading: isSearchingFlight,
-          onChange: handleFlightQueryChange,
-          onSubmit: () => {
-            void handleFlightSearch();
-          },
-        }}
-        onOpenWarehouses={openWarehouseList}
-        onOpenShipments={openShipmentsPanel}
-        onOpenActiveFlights={openActiveFlightsPanel}
-        onRegistrarEnvio={handleRegistrarEnvio}
-      />
       <main className="flex-1 min-h-0 bg-map-bg relative">
+        <TopBar
+          variant="dia-a-dia"
+          fechaActual={formatOperationDateTime(systemDate)}
+          kpis={{
+            enviosHoy: USE_MOCK_DATA ? 23 : operationKpis.enviosHoy,
+            enTransito: USE_MOCK_DATA ? flights.length : operationKpis.enTransito,
+            entregadas: USE_MOCK_DATA ? 89 : operationKpis.entregadas,
+            cumplimiento: USE_MOCK_DATA
+              ? "100%"
+              : `${operationKpis.cumplimiento}%`,
+          }}
+          buscador={{
+            valor: flightQuery,
+            error: searchError,
+            isLoading: isSearchingFlight,
+            onChange: handleFlightQueryChange,
+            onSubmit: () => {
+              void handleFlightSearch();
+            },
+          }}
+          onOpenWarehouses={openWarehouseList}
+          onOpenShipments={openShipmentsPanel}
+          onOpenActiveFlights={openActiveFlightsPanel}
+          onRegistrarEnvio={handleRegistrarEnvio}
+        />
         {!isLoading && (
           <WorldMap
             airports={airports}
@@ -267,7 +271,6 @@ const OperacionDiaADiaPage = () => {
           onShipmentCreated={refresh}
         />
       </main>
-      <LegendBar variant="dia-a-dia" />
     </>
   );
 };

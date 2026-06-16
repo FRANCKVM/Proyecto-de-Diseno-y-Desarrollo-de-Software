@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "solicitud_envio")
@@ -56,6 +58,9 @@ public class SolicitudEnvio {
     @Enumerated(EnumType.STRING)
     @Column(name = "estado", nullable = false)
     private EstadoEnvio estado = EstadoEnvio.INGRESADO;
+
+    @Transient
+    private List<AsignacionEnvioVista> asignaciones = new ArrayList<>();
 
     public SolicitudEnvio() {
     }
@@ -243,11 +248,73 @@ public class SolicitudEnvio {
         this.estado = estado;
     }
 
+    public List<AsignacionEnvioVista> getAsignaciones() {
+        return asignaciones;
+    }
+
+    public void setAsignaciones(List<AsignacionEnvioVista> asignaciones) {
+        this.asignaciones = asignaciones != null ? asignaciones : new ArrayList<>();
+    }
+
     public LocalDateTime getFechaHoraRegistro() {
         if (fecha == null || hora == null) {
             return null;
         }
         return LocalDateTime.of(fecha, hora);
+    }
+
+    public static class AsignacionEnvioVista {
+        private Integer idAsignacion;
+        private Ruta ruta;
+        private Integer cantidadBolsas;
+        private EstadoEnvio estado;
+
+        public AsignacionEnvioVista() {
+        }
+
+        public AsignacionEnvioVista(
+                Integer idAsignacion,
+                Ruta ruta,
+                Integer cantidadBolsas,
+                EstadoEnvio estado
+        ) {
+            this.idAsignacion = idAsignacion;
+            this.ruta = ruta;
+            this.cantidadBolsas = cantidadBolsas;
+            this.estado = estado;
+        }
+
+        public Integer getIdAsignacion() {
+            return idAsignacion;
+        }
+
+        public void setIdAsignacion(Integer idAsignacion) {
+            this.idAsignacion = idAsignacion;
+        }
+
+        public Ruta getRuta() {
+            return ruta;
+        }
+
+        public void setRuta(Ruta ruta) {
+            this.ruta = ruta;
+        }
+
+        public Integer getCantidadBolsas() {
+            return cantidadBolsas;
+        }
+
+        public void setCantidadBolsas(Integer cantidadBolsas) {
+            this.cantidadBolsas = cantidadBolsas;
+        }
+
+        public EstadoEnvio getEstado() {
+            return estado;
+        }
+
+        public void setEstado(EstadoEnvio estado) {
+            this.estado = estado;
+        }
     }
 
     @Override

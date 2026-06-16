@@ -10,13 +10,15 @@ import { ROUTES } from "@/utils/routes";
 import type { ResultadoPeriodo } from "@/types/simulationResult.types";
 
 const formatDuration = (minutes: number) => {
-  if (minutes < 60) {
-    return `${minutes} min`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
+  const days = Math.floor(minutes / (24 * 60));
+  const minutesAfterDays = minutes % (24 * 60);
+  const hours = Math.floor(minutesAfterDays / 60);
+  const remainingMinutes = minutesAfterDays % 60;
   const parts: string[] = [];
+
+  if (days > 0) {
+    parts.push(`${days} d`);
+  }
 
   if (hours > 0) {
     parts.push(`${hours} h`);
@@ -26,7 +28,15 @@ const formatDuration = (minutes: number) => {
     parts.push(`${remainingMinutes} min`);
   }
 
-  return parts.join(" ");
+  if (parts.length > 0) {
+    return parts.join(" ");
+  }
+
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  return "0 min";
 };
 
 /**
@@ -85,7 +95,7 @@ const ResultadosPeriodoPage = () => {
       />
 
       {/* KPIs */}
-      <section className="grid grid-cols-4 gap-4 mb-6">
+      <section className="grid grid-cols-5 gap-4 mb-6">
         <KpiCard
           dotVariant="primary"
           label="Total maletas"
@@ -101,6 +111,12 @@ const ResultadosPeriodoPage = () => {
           dotVariant="primary"
           label="Vuelos ejecutados"
           value={resultado.vuelosEjecutados}
+        />
+        <KpiCard
+          dotVariant={resultado.cancelaciones > 0 ? "elevado" : "normal"}
+          label="Cancelaciones"
+          value={resultado.cancelaciones}
+          valueVariant={resultado.cancelaciones > 0 ? "warning" : "success"}
         />
         <KpiCard
           dotVariant="primary"

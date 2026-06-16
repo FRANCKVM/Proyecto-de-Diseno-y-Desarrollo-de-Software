@@ -4,6 +4,7 @@ import type {
   BackendSolicitudEnvio,
   BackendVuelo,
 } from "@/types/backendSimulation.types";
+import { getAssignedBags, getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 
 export interface HomeKpis {
   aeropuertos: { total: number; sublabel: string };
@@ -68,7 +69,9 @@ const isShipmentInCourse = (
   envio: BackendSolicitudEnvio,
   minutoActualUtc: number
 ) => {
-  const vuelos = envio.ruta?.vuelos ?? [];
+  const vuelos = getShipmentRouteGroups(envio).flatMap(
+    (group) => group.ruta?.vuelos ?? []
+  );
 
   if (vuelos.length === 0) {
     return false;
@@ -78,7 +81,11 @@ const isShipmentInCourse = (
 };
 
 const isShipmentCompliant = (envio: BackendSolicitudEnvio) => {
-  const tiempoTotal = envio.ruta?.tiempoTotal;
+  const routeGroups = getShipmentRouteGroups(envio);
+  const tiempoTotal =
+    routeGroups.length > 0
+      ? Math.max(...routeGroups.map((group) => group.ruta?.tiempoTotal ?? 0))
+      : envio.ruta?.tiempoTotal;
   const diasTiempoMaximo = envio.diasTiempoMaximo;
 
   if (tiempoTotal == null || diasTiempoMaximo == null) {
@@ -124,12 +131,19 @@ const buildActivityMessage = (
   minutoActualUtc: number
 ) => {
   const idLabel = envio.idEnvio ?? "s/n";
-  const tramos = envio.ruta?.vuelos?.length ?? 0;
+  const routeGroups = getShipmentRouteGroups(envio);
+  const tramos = routeGroups.reduce(
+    (total, group) => total + (group.ruta?.vuelos?.length ?? 0),
+    0
+  );
   const origen = envio.origen.codigo;
   const destino = envio.destino.codigo;
-  const maletas = numberFormatter.format(envio.contarBolsas ?? 0);
+  const maletasAsignadas = getAssignedBags(envio);
+  const maletas = numberFormatter.format(
+    maletasAsignadas > 0 ? maletasAsignadas : (envio.contarBolsas ?? 0)
+  );
 
-  if (!envio.ruta || tramos === 0) {
+  if (routeGroups.length === 0 || tramos === 0) {
     return `Envio ${idLabel} registrado sin ruta: ${origen} -> ${destino}.`;
   }
 
@@ -148,7 +162,13 @@ const buildActivitySeverity = (
   envio: BackendSolicitudEnvio,
   minutoActualUtc: number
 ): ActividadReciente["severidad"] => {
-  if (!envio.ruta || (envio.ruta.vuelos?.length ?? 0) === 0) {
+  const routeGroups = getShipmentRouteGroups(envio);
+  const tramos = routeGroups.reduce(
+    (total, group) => total + (group.ruta?.vuelos?.length ?? 0),
+    0
+  );
+
+  if (routeGroups.length === 0 || tramos === 0) {
     return "error";
   }
 
@@ -156,7 +176,7 @@ const buildActivitySeverity = (
     return "informacion";
   }
 
-  if ((envio.ruta.vuelos?.length ?? 0) > 1) {
+  if (tramos > 1) {
     return "advertencia";
   }
 
@@ -180,7 +200,8 @@ export const buildHomeKpis = ({
   );
 
   for (const envio of envios) {
-    for (const vuelo of envio.ruta?.vuelos ?? []) {
+    for (const group of getShipmentRouteGroups(envio)) {
+      for (const vuelo of group.ruta?.vuelos ?? []) {
       const progress = calculateFlightProgress(vuelo, minutoActualUtc);
 
       if (progress <= 0 || progress >= 1) {
@@ -191,11 +212,15 @@ export const buildHomeKpis = ({
       if (isIntercontinentalFlight(vuelo)) {
         vuelosIntercontinentalesIds.add(vuelo.idVuelo);
       }
+      }
     }
   }
 
   const maletasEnCurso = enviosEnCurso.reduce(
-    (total, envio) => total + (envio.contarBolsas ?? 0),
+    (total, envio) => {
+      const asignadas = getAssignedBags(envio);
+      return total + (asignadas > 0 ? asignadas : (envio.contarBolsas ?? 0));
+    },
     0
   );
   const enviosCumplen = envios.filter(isShipmentCompliant).length;

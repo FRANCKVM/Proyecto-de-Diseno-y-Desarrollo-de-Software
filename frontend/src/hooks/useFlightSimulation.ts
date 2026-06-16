@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSimulationControlStore } from "@/store/simulationControlStore";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import {
   generateFlight,
   generateFlightPool,
@@ -116,51 +117,55 @@ const buildFlightsFromShipments = (
   const activeFlightsByOccurrence = new Map<string, ActiveFlightAggregate>();
 
   shipments.forEach((shipment, shipmentIndex) => {
-    const routeFlights = shipment.ruta?.vuelos ?? [];
     const shipmentMinute = getShipmentMinute(shipment, simulationStartMs);
-    let earliestDeparture = shipmentMinute ?? 0;
+    const routeGroups = getShipmentRouteGroups(shipment);
 
-    routeFlights.forEach((flight, segmentIndex) => {
-      const { departure, arrival, durationMinutes } = getNextFlightWindow(
-        earliestDeparture,
-        flight.salidaUtcMin,
-        flight.llegadaUtcMin
-      );
+    routeGroups.forEach((group, groupIndex) => {
+      const routeFlights = group.ruta?.vuelos ?? [];
+      let earliestDeparture = shipmentMinute ?? 0;
 
-      earliestDeparture = arrival;
-
-      if (currentMinute < departure || currentMinute >= arrival) {
-        return;
-      }
-
-      const progress = clampProgress(
-        (currentMinute - departure) / durationMinutes
-      );
-      const occurrenceKey = `${flight.idVuelo}-${departure}`;
-      const existing = activeFlightsByOccurrence.get(occurrenceKey);
-
-      if (existing) {
-        existing.activeBags += shipment.contarBolsas ?? 0;
-        existing.reportedUsedCapacity = Math.max(
-          existing.reportedUsedCapacity ?? 0,
-          flight.capacidadUsada ?? 0
+      routeFlights.forEach((flight, segmentIndex) => {
+        const { departure, arrival, durationMinutes } = getNextFlightWindow(
+          earliestDeparture,
+          flight.salidaUtcMin,
+          flight.llegadaUtcMin
         );
-        return;
-      }
 
-      activeFlightsByOccurrence.set(occurrenceKey, {
-        idVuelo: flight.idVuelo,
-        departure,
-        segmentIndex,
-        fromIcao: flight.desde.codigo,
-        toIcao: flight.hasta.codigo,
-        progress,
-        durationMinutes,
-        capacity: flight.capacidad,
-        reportedUsedCapacity: flight.capacidadUsada,
-        activeBags: shipment.contarBolsas ?? 0,
-        firstShipmentId: shipment.idEnvio,
-        firstShipmentIndex: shipmentIndex,
+        earliestDeparture = arrival;
+
+        if (currentMinute < departure || currentMinute >= arrival) {
+          return;
+        }
+
+        const progress = clampProgress(
+          (currentMinute - departure) / durationMinutes
+        );
+        const occurrenceKey = `${flight.idVuelo}-${departure}`;
+        const existing = activeFlightsByOccurrence.get(occurrenceKey);
+
+        if (existing) {
+          existing.activeBags += group.cantidadBolsas;
+          existing.reportedUsedCapacity = Math.max(
+            existing.reportedUsedCapacity ?? 0,
+            flight.capacidadUsada ?? 0
+          );
+          return;
+        }
+
+        activeFlightsByOccurrence.set(occurrenceKey, {
+          idVuelo: flight.idVuelo,
+          departure,
+          segmentIndex: groupIndex * 100 + segmentIndex,
+          fromIcao: flight.desde.codigo,
+          toIcao: flight.hasta.codigo,
+          progress,
+          durationMinutes,
+          capacity: flight.capacidad,
+          reportedUsedCapacity: flight.capacidadUsada,
+          activeBags: group.cantidadBolsas,
+          firstShipmentId: shipment.idEnvio,
+          firstShipmentIndex: shipmentIndex,
+        });
       });
     });
   });

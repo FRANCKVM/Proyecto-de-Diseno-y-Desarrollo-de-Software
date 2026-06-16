@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import TopBar from "@/components/organisms/TopBar";
-import LegendBar from "@/components/organisms/LegendBar";
 import WorldMap from "@/components/map/WorldMap";
 import SimulationControlPanel from "@/components/organisms/SimulationControlPanel";
 import DrawerHost from "@/components/organisms/DrawerHost";
@@ -42,7 +41,7 @@ const SimulacionEjecucionPage = () => {
     occupancyByIcao,
     estado,
     envios,
-  } = useLiveSimulation({ autoStart: true, enablePolling: false });
+  } = useLiveSimulation({ autoStart: true, enablePolling: true });
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -144,30 +143,30 @@ const SimulacionEjecucionPage = () => {
 
   return (
     <>
-      <TopBar
-        variant="ejecucion"
-        reloj={{
-          inicioSimulacion,
-          horaActual,
-          horaSimulacion,
-          tiempoRealTranscurrido: formatDuration(elapsedRealMs),
-          tiempoSimulacionTranscurrido: formatDuration(elapsedSimulatedMs),
-        }}
-        dia={{
-          actual: diaActual,
-          total: DURACION_SIMULACION_SEMANAL_DIAS,
-        }}
-        kpis={{
-          entregas: `${Math.round(porcentajeResueltas)}%`,
-          enTransito: flights.length,
-          entregadas: resueltas,
-          cancelados: noResueltas,
-        }}
-        onOpenWarehouses={openWarehouseList}
-        onOpenShipments={openShipmentsPanel}
-        onOpenActiveFlights={openActiveFlightsPanel}
-      />
       <main className="flex-1 min-h-0 bg-map-bg relative">
+        <TopBar
+          variant="ejecucion"
+          reloj={{
+            inicioSimulacion,
+            horaActual,
+            horaSimulacion,
+            tiempoRealTranscurrido: formatDuration(elapsedRealMs),
+            tiempoSimulacionTranscurrido: formatDuration(elapsedSimulatedMs),
+          }}
+          dia={{
+            actual: diaActual,
+            total: DURACION_SIMULACION_SEMANAL_DIAS,
+          }}
+          kpis={{
+            entregas: `${Math.round(porcentajeResueltas)}%`,
+            enTransito: flights.length,
+            entregadas: resueltas,
+            cancelados: noResueltas,
+          }}
+          onOpenWarehouses={openWarehouseList}
+          onOpenShipments={openShipmentsPanel}
+          onOpenActiveFlights={openActiveFlightsPanel}
+        />
         {!isLoading && (
           <WorldMap
             airports={airports}
@@ -197,7 +196,6 @@ const SimulacionEjecucionPage = () => {
           referenceMinute={estado?.punteroConsumoMinutos}
         />
       </main>
-      <LegendBar variant="simulacion" />
     </>
   );
 };

@@ -52,6 +52,7 @@ const VUELO_ESTADO_LABEL: Record<string, string> = {
 
 const ENVIO_ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
   INGRESADO: "Ingresado",
+  PARCIAL: "Parcial",
   EN_PROCESO: "En proceso",
   COMPLETADO: "Completado",
 };
