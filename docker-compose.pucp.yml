@@ -47,7 +47,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "5173:80"
     networks:
       - tasfb2b_network
 
