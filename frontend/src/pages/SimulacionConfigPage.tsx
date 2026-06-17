@@ -27,7 +27,7 @@ const PERIOD_OPTIONS: Array<{
   sublabel: string;
 }> = [
   { tipo: "semanal", label: "Semanal", sublabel: "5 dias" },
-  { tipo: "colapso", label: "Colapso", sublabel: "30 dias" },
+  { tipo: "colapso", label: "Colapso", sublabel: "" },
 ];
 
 /**

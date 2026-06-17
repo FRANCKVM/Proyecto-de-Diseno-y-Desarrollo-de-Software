@@ -287,6 +287,66 @@ public class SimulacionService {
                 .collect(Collectors.toList());
     }
 
+    public synchronized boolean estaVueloSimuladoCancelado(
+            Integer idSimulacion,
+            Integer idVuelo,
+            int salidaMinuto
+    ) {
+        validarSimulacionSolicitada(idSimulacion);
+        return cancelacionesVuelosSimulados.containsKey(new ClaveVueloSimulado(
+                idVuelo,
+                salidaMinuto
+        ));
+    }
+
+    public synchronized void cancelarVueloSimulado(
+            Integer idSimulacion,
+            Integer idVuelo,
+            int salidaMinuto
+    ) {
+        validarSimulacionSolicitada(idSimulacion);
+
+        if (idVuelo == null || !vuelosSimulados.containsKey(idVuelo)) {
+            throw new IllegalArgumentException("No existe un vuelo simulado con codigo " + idVuelo + ".");
+        }
+
+        if (salidaMinuto <= punteroConsumoMinutos) {
+            throw new IllegalArgumentException("Solo se puede cancelar un vuelo programado.");
+        }
+
+        ClaveVueloSimulado clave = new ClaveVueloSimulado(idVuelo, salidaMinuto);
+        if (cancelacionesVuelosSimulados.containsKey(clave)) {
+            return;
+        }
+
+        CancelacionVueloSimulada cancelacion = new CancelacionVueloSimulada(
+                idVuelo,
+                salidaMinuto,
+                punteroConsumoMinutos
+        );
+        cancelacionesVuelosSimulados.put(clave, cancelacion);
+        replanificarEnviosAfectadosPorCancelacion(cancelacion);
+    }
+
+    public synchronized boolean estaVueloSimuladoCanceladoEnDia(
+            Integer idSimulacion,
+            Integer idVuelo,
+            int minutoReferencia
+    ) {
+        validarSimulacionSolicitada(idSimulacion);
+        int dia = Math.floorDiv(Math.max(0, minutoReferencia), VueloCancelacionService.MINUTOS_DIA);
+        int inicioDia = dia * VueloCancelacionService.MINUTOS_DIA;
+        int finDia = inicioDia + VueloCancelacionService.MINUTOS_DIA;
+
+        return cancelacionesVuelosSimulados.values().stream()
+                .anyMatch(cancelacion -> cancelacion.idVuelo().equals(idVuelo)
+                        && (
+                        (cancelacion.salidaMinuto() >= inicioDia && cancelacion.salidaMinuto() < finDia)
+                                || (cancelacion.cancelacionMinuto() >= inicioDia
+                                && cancelacion.cancelacionMinuto() < finDia)
+                ));
+    }
+
     @Scheduled(fixedRate = INTERVALO_VERIFICACION_MS)
     @Transactional
     public synchronized void procesarSiguienteBloqueProgramado() {

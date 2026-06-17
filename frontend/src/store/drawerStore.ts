@@ -18,7 +18,7 @@ export type DrawerSelection =
   | { type: "active-flights-panel" }
   | { type: "airport"; icao: string }
   | { type: "flight"; codigo: string; idSimulacion?: number | null }
-  | { type: "shipment"; codigo: string }
+  | { type: "shipment"; codigo: string; idSimulacion?: number | null }
   | { type: "shipment-form" };
 
 interface DrawerState {
@@ -47,6 +47,7 @@ interface DrawerState {
   openShipment: (
     codigo: string,
     options?: {
+      idSimulacion?: number | null;
       focusedAirportIcao?: string | null;
       focusedFlightId?: string | null;
       shipmentRouteSegments?: ShipmentRouteSegment[];
@@ -154,7 +155,11 @@ export const useDrawerStore = create<DrawerState>((set) => ({
     }),
   openShipment: (codigo, options) =>
     set({
-      selection: { type: "shipment", codigo },
+      selection: {
+        type: "shipment",
+        codigo,
+        idSimulacion: options?.idSimulacion ?? null,
+      },
       focusedAirportIcao: options?.focusedAirportIcao ?? null,
       focusedFlightId: options?.focusedFlightId ?? null,
       warehouseSemaphoreFilter: "todos",

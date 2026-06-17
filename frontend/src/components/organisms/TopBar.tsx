@@ -248,7 +248,6 @@ interface TopBarEjecucionProps {
     entregas: string;
     enTransito: number;
     entregadas: number;
-    cancelados: number;
   };
   onOpenWarehouses?: () => void;
   onOpenShipments?: () => void;
@@ -354,7 +353,6 @@ const TopBar = (props: TopBarProps) => {
                   value={props.kpis.entregadas.toLocaleString("es-PE")}
                   valueClass="text-success"
                 />
-                <KpiInline label="Cancelados:" value={props.kpis.cancelados} />
               </div>
             </>
           }

@@ -4,13 +4,17 @@ import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
 import ProgressBar from "@/components/atoms/ProgressBar";
 import { getAirportByIcao } from "@/services/airportService";
-import { listFlightsByAirport } from "@/services/flightService";
+import {
+  cancelFlightByCode,
+  listFlightsByAirport,
+} from "@/services/flightService";
 import { useDrawerStore } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import {
   buildShipmentRouteSegments,
   resolveShipmentFocusTarget,
 } from "@/utils/shipmentFocus";
+import { cacheFlightsForAirport } from "@/store/referenceDataStore";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoVuelo, VueloDetalle } from "@/types/flight.types";
@@ -120,6 +124,8 @@ const AirportDrawer = ({
   const [flights, setFlights] = useState<VueloDetalle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEstado, setSelectedEstado] = useState<FlightFilter>("todos");
+  const [cancellingFlightCode, setCancellingFlightCode] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,10 +180,42 @@ const AirportDrawer = ({
     openShipment(
       formatShipmentCode(shipment.idEnvio),
       {
+        idSimulacion,
         ...resolveShipmentFocusTarget(shipment, referenceMinute),
         shipmentRouteSegments: buildShipmentRouteSegments(shipment),
       }
     );
+  };
+
+  const handleCancelFlight = async (flight: VueloDetalle) => {
+    setCancellingFlightCode(flight.codigo);
+    setCancelError(null);
+
+    try {
+      const updatedFlight = await cancelFlightByCode(
+        flight.codigo,
+        flight.fechaSalida,
+        idSimulacion
+      );
+      setFlights((currentFlights) => {
+        const nextFlights = currentFlights.map((candidate) =>
+          candidate.codigo === updatedFlight.codigo ? updatedFlight : candidate
+        );
+        if (idSimulacion == null) {
+          cacheFlightsForAirport(icao, nextFlights);
+        }
+        return nextFlights;
+      });
+      setSelectedEstado("cancelado");
+    } catch (error: any) {
+      const message =
+        typeof error?.response?.data === "string"
+          ? error.response.data
+          : "No se pudo cancelar el vuelo.";
+      setCancelError(message);
+    } finally {
+      setCancellingFlightCode(null);
+    }
   };
 
   if (isLoading || !airport) {
@@ -292,6 +330,9 @@ const AirportDrawer = ({
               </select>
             </div>
           )}
+          {cancelError && (
+            <p className="text-secondary text-danger mb-3">{cancelError}</p>
+          )}
           {filteredFlights.length === 0 ? (
             <p className="text-body text-text-tertiary">
               No hay vuelos asociados a este aeropuerto para el filtro seleccionado.
@@ -322,11 +363,27 @@ const AirportDrawer = ({
                         : `Llegada: ${formatArrivalTime(v.fechaLlegadaEstimada)}`}
                     </span>
                   </div>
-                  <Tag
-                    variant={v.estado === "en_vuelo" ? "primary" : "neutral"}
-                  >
-                    {VUELO_ESTADO_LABEL[v.estado] ?? v.estado}
-                  </Tag>
+                  <div className="flex flex-col items-end gap-2">
+                    <Tag
+                      variant={v.estado === "en_vuelo" ? "primary" : "neutral"}
+                    >
+                      {VUELO_ESTADO_LABEL[v.estado] ?? v.estado}
+                    </Tag>
+                    {v.estado === "programado" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleCancelFlight(v);
+                        }}
+                        disabled={cancellingFlightCode === v.codigo}
+                        className="px-3 py-1.5 rounded-input border border-danger text-secondary text-danger bg-card hover:bg-danger/10 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {cancellingFlightCode === v.codigo
+                          ? "Cancelando..."
+                          : "Cancelar"}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -334,109 +391,113 @@ const AirportDrawer = ({
         </section>
       )}
 
-      <section className={showFlights ? "mt-6" : ""}>
-        <h3 className="text-section-title mb-3">
-          Envios salientes{outgoingShipments.length > 0 && ` (${outgoingShipments.length})`}
-        </h3>
-        {outgoingShipments.length === 0 ? (
-          <p className="text-body text-text-tertiary">
-            No hay envios salientes asociados a este almacen.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {outgoingShipments.map((shipment) => (
-              <li
-                key={getShipmentKey(shipment)}
-                className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
-              >
-                <div>
-                  {shipment.idEnvio !== null ? (
-                    <button
-                      type="button"
-                      className="text-button text-primary hover:underline block"
-                      onClick={() => handleOpenShipment(shipment)}
-                    >
-                      {getShipmentCodeLabel(shipment)}
-                    </button>
-                  ) : (
-                    <p className="text-button text-text-primary">
-                      {getShipmentCodeLabel(shipment)}
-                    </p>
-                  )}
-                  <span className="text-secondary text-text-secondary">
-                    {shipment.origen.codigo} &gt; {shipment.destino.codigo}
-                  </span>
-                  <span className="text-secondary text-text-tertiary block">
-                    Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
-                  </span>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Tag
-                    variant={shipment.estado === "COMPLETADO" ? "normal" : "primary"}
+      {!showFlights && (
+        <>
+          <section>
+            <h3 className="text-section-title mb-3">
+              Envios salientes{outgoingShipments.length > 0 && ` (${outgoingShipments.length})`}
+            </h3>
+            {outgoingShipments.length === 0 ? (
+              <p className="text-body text-text-tertiary">
+                No hay envios salientes asociados a este almacen.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {outgoingShipments.map((shipment) => (
+                  <li
+                    key={getShipmentKey(shipment)}
+                    className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
                   >
-                    {ENVIO_ESTADO_LABEL[shipment.estado]}
-                  </Tag>
-                  <span className="text-secondary text-text-tertiary">
-                    {shipment.contarBolsas} maletas
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                    <div>
+                      {shipment.idEnvio !== null ? (
+                        <button
+                          type="button"
+                          className="text-button text-primary hover:underline block"
+                          onClick={() => handleOpenShipment(shipment)}
+                        >
+                          {getShipmentCodeLabel(shipment)}
+                        </button>
+                      ) : (
+                        <p className="text-button text-text-primary">
+                          {getShipmentCodeLabel(shipment)}
+                        </p>
+                      )}
+                      <span className="text-secondary text-text-secondary">
+                        {shipment.origen.codigo} &gt; {shipment.destino.codigo}
+                      </span>
+                      <span className="text-secondary text-text-tertiary block">
+                        Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Tag
+                        variant={shipment.estado === "COMPLETADO" ? "normal" : "primary"}
+                      >
+                        {ENVIO_ESTADO_LABEL[shipment.estado]}
+                      </Tag>
+                      <span className="text-secondary text-text-tertiary">
+                        {shipment.contarBolsas} maletas
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
-      <section className="mt-6">
-        <h3 className="text-section-title mb-3">
-          Envios entrantes{incomingShipments.length > 0 && ` (${incomingShipments.length})`}
-        </h3>
-        {incomingShipments.length === 0 ? (
-          <p className="text-body text-text-tertiary">
-            No hay envios entrantes asociados a este almacen.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {incomingShipments.map((shipment) => (
-              <li
-                key={getShipmentKey(shipment)}
-                className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
-              >
-                <div>
-                  {shipment.idEnvio !== null ? (
-                    <button
-                      type="button"
-                      className="text-button text-primary hover:underline block"
-                      onClick={() => handleOpenShipment(shipment)}
-                    >
-                      {getShipmentCodeLabel(shipment)}
-                    </button>
-                  ) : (
-                    <p className="text-button text-text-primary">
-                      {getShipmentCodeLabel(shipment)}
-                    </p>
-                  )}
-                  <span className="text-secondary text-text-secondary">
-                    {shipment.origen.codigo} &gt; {shipment.destino.codigo}
-                  </span>
-                  <span className="text-secondary text-text-tertiary block">
-                    Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
-                  </span>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Tag
-                    variant={shipment.estado === "COMPLETADO" ? "normal" : "primary"}
+          <section className="mt-6">
+            <h3 className="text-section-title mb-3">
+              Envios entrantes{incomingShipments.length > 0 && ` (${incomingShipments.length})`}
+            </h3>
+            {incomingShipments.length === 0 ? (
+              <p className="text-body text-text-tertiary">
+                No hay envios entrantes asociados a este almacen.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {incomingShipments.map((shipment) => (
+                  <li
+                    key={getShipmentKey(shipment)}
+                    className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
                   >
-                    {ENVIO_ESTADO_LABEL[shipment.estado]}
-                  </Tag>
-                  <span className="text-secondary text-text-tertiary">
-                    {shipment.contarBolsas} maletas
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                    <div>
+                      {shipment.idEnvio !== null ? (
+                        <button
+                          type="button"
+                          className="text-button text-primary hover:underline block"
+                          onClick={() => handleOpenShipment(shipment)}
+                        >
+                          {getShipmentCodeLabel(shipment)}
+                        </button>
+                      ) : (
+                        <p className="text-button text-text-primary">
+                          {getShipmentCodeLabel(shipment)}
+                        </p>
+                      )}
+                      <span className="text-secondary text-text-secondary">
+                        {shipment.origen.codigo} &gt; {shipment.destino.codigo}
+                      </span>
+                      <span className="text-secondary text-text-tertiary block">
+                        Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Tag
+                        variant={shipment.estado === "COMPLETADO" ? "normal" : "primary"}
+                      >
+                        {ENVIO_ESTADO_LABEL[shipment.estado]}
+                      </Tag>
+                      <span className="text-secondary text-text-tertiary">
+                        {shipment.contarBolsas} maletas
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
     </DrawerBase>
   );
 };
