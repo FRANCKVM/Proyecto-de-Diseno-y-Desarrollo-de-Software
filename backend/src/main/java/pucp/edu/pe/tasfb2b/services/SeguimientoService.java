@@ -2,6 +2,7 @@ package pucp.edu.pe.tasfb2b.services;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import pucp.edu.pe.tasfb2b.controllers.dto.CancelarVueloRequest;
 import pucp.edu.pe.tasfb2b.controllers.dto.EnvioDetalleResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.VueloDetalleResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
@@ -14,6 +15,7 @@ import pucp.edu.pe.tasfb2b.entities.Vuelo;
 import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
 import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
+import pucp.edu.pe.tasfb2b.repositories.VueloCancelacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
 
 import java.time.LocalDate;
@@ -52,6 +54,8 @@ public class SeguimientoService {
     private final AsignacionEnvioRepository asignacionEnvioRepository;
     private final SimulacionRepository simulacionRepository;
     private final SolicitudEnvioRepository solicitudEnvioRepository;
+    private final VueloCancelacionRepository vueloCancelacionRepository;
+    private final OperacionesService operacionesService;
     private final SimulacionService simulacionService;
     private final EstadoLogisticoService estadoLogisticoService;
 
@@ -60,6 +64,8 @@ public class SeguimientoService {
             AsignacionEnvioRepository asignacionEnvioRepository,
             SimulacionRepository simulacionRepository,
             SolicitudEnvioRepository solicitudEnvioRepository,
+            VueloCancelacionRepository vueloCancelacionRepository,
+            OperacionesService operacionesService,
             SimulacionService simulacionService,
             EstadoLogisticoService estadoLogisticoService
     ) {
@@ -67,6 +73,8 @@ public class SeguimientoService {
         this.asignacionEnvioRepository = asignacionEnvioRepository;
         this.simulacionRepository = simulacionRepository;
         this.solicitudEnvioRepository = solicitudEnvioRepository;
+        this.vueloCancelacionRepository = vueloCancelacionRepository;
+        this.operacionesService = operacionesService;
         this.simulacionService = simulacionService;
         this.estadoLogisticoService = estadoLogisticoService;
     }
@@ -86,6 +94,33 @@ public class SeguimientoService {
         Integer salidaOcurrencia = parsearSalidaOcurrenciaVuelo(codigo);
 
         return construirVueloDetalle(vuelo, idSimulacion, enviosAsociados, salidaOcurrencia);
+    }
+
+    @Transactional
+    public VueloDetalleResponse cancelarVuelo(String codigo, CancelarVueloRequest request) {
+        if (request == null || request.fechaSalida() == null || request.fechaSalida().isBlank()) {
+            throw new IllegalArgumentException("La fecha de salida del vuelo es obligatoria.");
+        }
+
+        Integer idVuelo = parsearIdVuelo(codigo);
+        LocalDateTime fechaSalida = parsearFechaHora(request.fechaSalida());
+
+        if (request.idSimulacion() != null) {
+            LocalDateTime fechaInicioSimulacion = obtenerFechaInicioSimulacion(request.idSimulacion());
+            if (fechaInicioSimulacion == null) {
+                throw new IllegalArgumentException("No existe fecha de inicio para la simulacion solicitada.");
+            }
+
+            int salidaMinuto = (int) java.time.Duration.between(
+                    fechaInicioSimulacion,
+                    fechaSalida
+            ).toMinutes();
+            simulacionService.cancelarVueloSimulado(request.idSimulacion(), idVuelo, salidaMinuto);
+            return obtenerVueloDetalle(codigo, request.idSimulacion());
+        }
+
+        operacionesService.cancelarVueloOperacion(idVuelo, fechaSalida);
+        return obtenerVueloDetalle(codigo, null);
     }
 
     private VueloDetalleResponse construirVueloDetalle(
@@ -131,13 +166,19 @@ public class SeguimientoService {
                     .toList();
         }
 
+        String estadoVuelo = determinarEstadoVueloDetalle(
+                vuelo,
+                idSimulacion,
+                fechaInicioSimulacion,
+                minutoReferenciaFechas,
+                salidaOcurrencia,
+                minutoReferencia,
+                contextoFinalizado
+        );
+
         return new VueloDetalleResponse(
                 formatearCodigoVuelo(vuelo.getIdVuelo()),
-                estadoLogisticoService.determinarEstadoVuelo(
-                        vuelo,
-                        minutoReferencia,
-                        contextoFinalizado
-                ),
+                estadoVuelo,
                 determinarTipoVuelo(vuelo.getDesde(), vuelo.getHasta()),
                 vuelo.getCapacidad(),
                 vuelo.getCapacidadUsada(),
@@ -277,10 +318,22 @@ public class SeguimientoService {
     }
 
     public EnvioDetalleResponse obtenerEnvioDetalle(String codigo) {
+        return obtenerEnvioDetalle(codigo, null);
+    }
+
+    public EnvioDetalleResponse obtenerEnvioDetalle(String codigo, Integer idSimulacion) {
         Integer idEnvio = parsearIdEnvio(codigo);
 
         SolicitudEnvio envio = solicitudEnvioRepository.findById(idEnvio)
                 .orElseThrow(() -> new IllegalArgumentException("No existe un envio con codigo " + codigo + "."));
+
+        if (idSimulacion != null
+                && (envio.getSimulacion() == null
+                || !Objects.equals(envio.getSimulacion().getIdSimulacion(), idSimulacion))) {
+            throw new IllegalArgumentException(
+                    "El envio " + codigo + " no pertenece a la simulacion " + idSimulacion + "."
+            );
+        }
 
         Ruta ruta = envio.getRuta();
         List<AsignacionEnvio> asignaciones = asignacionEnvioRepository
@@ -408,45 +461,54 @@ public class SeguimientoService {
 
         Vuelo primerVuelo = ruta.getVuelos().getFirst();
         int minuto = minutoReferencia != null ? minutoReferencia : Integer.MIN_VALUE;
+        LocalDateTime fechaBase = envio.getFecha() != null
+                ? envio.getFecha().atStartOfDay()
+                : LocalDate.now(ZoneOffset.UTC).atStartOfDay();
+        int minutoRuta = envio.getHora() != null
+                ? envio.getHora().getHour() * 60 + envio.getHora().getMinute()
+                : 0;
+        VentanaVueloSimulada primeraVentana = calcularVentanaRutaVuelo(primerVuelo, minutoRuta);
         hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                 "salida",
                 envio.getOrigen().getCodigo(),
                 formatearFechaRegistro(envio),
                 formatearCodigoVuelo(primerVuelo.getIdVuelo()),
-                contextoFinalizado || minuto >= valor(primerVuelo.getSalidaUtcMin()) ? "completado" : "pendiente"
+                contextoFinalizado || minuto >= primeraVentana.salidaMinuto() ? "completado" : "pendiente"
         ));
 
         for (int i = 0; i < ruta.getVuelos().size(); i++) {
             Vuelo vuelo = ruta.getVuelos().get(i);
             boolean esUltimo = i == ruta.getVuelos().size() - 1;
-            int salida = valor(vuelo.getSalidaUtcMin());
-            int llegada = valor(vuelo.getLlegadaUtcMin());
-            String estadoVuelo = contextoFinalizado || minuto >= llegada
+            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vuelo, minutoRuta);
+            String estadoVuelo = contextoFinalizado || minuto >= ventana.llegadaMinuto()
                     ? "completado"
-                    : minuto >= salida
+                    : minuto >= ventana.salidaMinuto()
                     ? "activo"
                     : "pendiente";
 
             hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                     "vuelo",
                     formatearCodigoVuelo(vuelo.getIdVuelo()),
-                    formatearFechaVuelo(vuelo.getSalidaUtcMin()),
+                    fechaBase.plusMinutes(ventana.salidaMinuto()).format(ISO_FORMATTER),
                     formatearCodigoVuelo(vuelo.getIdVuelo()),
                     estadoVuelo
             ));
 
             if (!esUltimo) {
                 Vuelo siguienteVuelo = ruta.getVuelos().get(i + 1);
-                int salidaSiguiente = valor(siguienteVuelo.getSalidaUtcMin());
-                String estadoEscala = contextoFinalizado || minuto >= salidaSiguiente
+                VentanaVueloSimulada siguienteVentana = calcularVentanaRutaVuelo(
+                        siguienteVuelo,
+                        ventana.llegadaMinuto()
+                );
+                String estadoEscala = contextoFinalizado || minuto >= siguienteVentana.salidaMinuto()
                         ? "completado"
-                        : minuto >= llegada
+                        : minuto >= ventana.llegadaMinuto()
                         ? "activo"
                         : "pendiente";
                 hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                         "escala",
                         vuelo.getHasta().getCodigo(),
-                        formatearFechaVuelo(vuelo.getLlegadaUtcMin()),
+                        fechaBase.plusMinutes(ventana.llegadaMinuto()).format(ISO_FORMATTER),
                         formatearCodigoVuelo(vuelo.getIdVuelo()),
                         estadoEscala
                 ));
@@ -461,11 +523,13 @@ public class SeguimientoService {
                 hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                         "entrega",
                         vuelo.getHasta().getCodigo(),
-                        formatearFechaVuelo(vuelo.getLlegadaUtcMin()),
+                        fechaBase.plusMinutes(ventana.llegadaMinuto()).format(ISO_FORMATTER),
                         formatearCodigoVuelo(vuelo.getIdVuelo()),
                         estadoEntrega
                 ));
             }
+
+            minutoRuta = ventana.llegadaMinuto();
         }
 
         return hitos;
@@ -603,6 +667,16 @@ public class SeguimientoService {
         LocalDate fecha = envio.getFecha() != null ? envio.getFecha() : LocalDate.now(ZoneOffset.UTC);
         LocalTime hora = envio.getHora() != null ? envio.getHora() : LocalTime.MIDNIGHT;
         return LocalDateTime.of(fecha, hora).format(ISO_FORMATTER);
+    }
+
+    private LocalDateTime parsearFechaHora(String valor) {
+        String normalizado = valor.trim();
+
+        if (normalizado.endsWith("Z") || normalizado.matches(".*[+-]\\d{2}:\\d{2}$")) {
+            return java.time.OffsetDateTime.parse(normalizado).toLocalDateTime();
+        }
+
+        return LocalDateTime.parse(normalizado);
     }
 
     private String formatearFechaVuelo(Integer minutoUtc) {
@@ -759,6 +833,74 @@ public class SeguimientoService {
         return origen.getRegion().equalsIgnoreCase(destino.getRegion())
                 ? "intracontinental"
                 : "intercontinental";
+    }
+
+    private String determinarEstadoVueloDetalle(
+            Vuelo vuelo,
+            Integer idSimulacion,
+            LocalDateTime fechaInicioSimulacion,
+            Integer minutoReferenciaFechas,
+            Integer salidaOcurrencia,
+            Integer minutoReferencia,
+            boolean contextoFinalizado
+    ) {
+        if (estaOcurrenciaVueloCancelada(
+                vuelo,
+                idSimulacion,
+                fechaInicioSimulacion,
+                minutoReferenciaFechas,
+                salidaOcurrencia
+        )) {
+            return "cancelado";
+        }
+
+        return estadoLogisticoService.determinarEstadoVuelo(
+                vuelo,
+                minutoReferencia,
+                contextoFinalizado
+        );
+    }
+
+    private boolean estaOcurrenciaVueloCancelada(
+            Vuelo vuelo,
+            Integer idSimulacion,
+            LocalDateTime fechaInicioSimulacion,
+            Integer minutoReferencia,
+            Integer salidaOcurrencia
+    ) {
+        if (vuelo == null || vuelo.getIdVuelo() == null) {
+            return false;
+        }
+
+        if (idSimulacion != null) {
+            if (salidaOcurrencia == null) {
+                return simulacionService.estaVueloSimuladoCanceladoEnDia(
+                        idSimulacion,
+                        vuelo.getIdVuelo(),
+                        minutoReferencia != null ? minutoReferencia : 0
+                );
+            }
+
+            return simulacionService.estaVueloSimuladoCancelado(
+                    idSimulacion,
+                    vuelo.getIdVuelo(),
+                    salidaOcurrencia
+            );
+        }
+
+        LocalDateTime fechaSalida = salidaOcurrencia != null
+                ? LocalDate.now(ZoneOffset.UTC).atStartOfDay().plusMinutes(salidaOcurrencia)
+                : vueloCancelacionServiceFechaSalidaActual(vuelo);
+
+        return vueloCancelacionRepository.existsByVuelo_IdVueloAndFechaHoraSalida(
+                vuelo.getIdVuelo(),
+                fechaSalida
+        );
+    }
+
+    private LocalDateTime vueloCancelacionServiceFechaSalidaActual(Vuelo vuelo) {
+        int salida = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
+        return LocalDate.now(ZoneOffset.UTC).atStartOfDay().plusMinutes(salida);
     }
 
     private String determinarEstadoEnvioDetalle(

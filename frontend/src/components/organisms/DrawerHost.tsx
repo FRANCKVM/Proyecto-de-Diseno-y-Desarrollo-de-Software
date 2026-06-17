@@ -83,6 +83,7 @@ const DrawerHost = ({
         <ShipmentOverviewDrawer
           key="shipments-panel"
           shipments={shipments}
+          idSimulacion={idSimulacion}
           referenceMinute={referenceMinute}
         />
       );
@@ -122,8 +123,9 @@ const DrawerHost = ({
     case "shipment":
       return (
         <ShipmentDrawer
-          key={`shipment-${selection.codigo}`}
+          key={`shipment-${selection.codigo}-${selection.idSimulacion ?? "real"}`}
           codigo={selection.codigo}
+          idSimulacion={selection.idSimulacion}
         />
       );
     case "shipment-form":

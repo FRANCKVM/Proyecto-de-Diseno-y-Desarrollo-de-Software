@@ -8,6 +8,7 @@ import type { EnvioDetalle } from "@/types/shipment.types";
 
 interface ShipmentDrawerProps {
   codigo: string;
+  idSimulacion?: number | null;
 }
 
 /**
@@ -29,7 +30,7 @@ const formatFechaCorta = (iso: string): string => {
  * Muestra info del envio, ruta asignada con timeline de hitos,
  * lista de paquetes (en bloques) y tiempo restante para entrega.
  */
-const ShipmentDrawer = ({ codigo }: ShipmentDrawerProps) => {
+const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
 
   const [shipment, setShipment] = useState<EnvioDetalle | null>(null);
@@ -39,7 +40,7 @@ const ShipmentDrawer = ({ codigo }: ShipmentDrawerProps) => {
     let cancelled = false;
     setIsLoading(true);
 
-    getShipmentByCode(codigo)
+    getShipmentByCode(codigo, idSimulacion)
       .then((data) => {
         if (cancelled) return;
         setShipment(data);
@@ -52,7 +53,7 @@ const ShipmentDrawer = ({ codigo }: ShipmentDrawerProps) => {
     return () => {
       cancelled = true;
     };
-  }, [codigo]);
+  }, [codigo, idSimulacion]);
 
   if (isLoading || !shipment) {
     return (

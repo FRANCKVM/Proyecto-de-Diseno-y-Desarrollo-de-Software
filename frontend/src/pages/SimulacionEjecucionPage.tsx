@@ -100,7 +100,6 @@ const SimulacionEjecucionPage = () => {
 
   const porcentajeResueltas = estado?.porcentajeResueltas ?? 0;
   const resueltas = estado?.resueltas ?? 0;
-  const noResueltas = estado?.noResueltas ?? 0;
   const {
     elapsedRealMs,
     elapsedSimulatedMs,
@@ -161,7 +160,6 @@ const SimulacionEjecucionPage = () => {
             entregas: `${Math.round(porcentajeResueltas)}%`,
             enTransito: flights.length,
             entregadas: resueltas,
-            cancelados: noResueltas,
           }}
           onOpenWarehouses={openWarehouseList}
           onOpenShipments={openShipmentsPanel}

@@ -183,6 +183,7 @@ const FlightDrawer = ({
     }
 
     openShipment(shipmentCode, {
+      idSimulacion,
       ...resolveShipmentFocusTarget(shipment, referenceMinute),
       shipmentRouteSegments: buildShipmentRouteSegments(shipment),
     });

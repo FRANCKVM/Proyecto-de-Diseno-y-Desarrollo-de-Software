@@ -11,10 +11,12 @@ import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 interface ShipmentOverviewDrawerProps {
   shipments: BackendSolicitudEnvio[];
+  idSimulacion?: number | null;
   referenceMinute?: number | null;
 }
 
-type ShipmentViewMode = "planificados" | "en-curso" | "entregados";
+type ShipmentStatus = "planificados" | "en-curso" | "entregados";
+type ShipmentViewMode = "todos" | "en-curso" | "entregados";
 
 const DAY_MINUTES = 24 * 60;
 
@@ -176,7 +178,7 @@ const getLastArrivalMinute = (shipment: BackendSolicitudEnvio): number | null =>
 const resolveDerivedShipmentStatus = (
   shipment: BackendSolicitudEnvio,
   referenceMinute: number
-): ShipmentViewMode => {
+): ShipmentStatus => {
   if (shipment.estado === "COMPLETADO") {
     return "entregados";
   }
@@ -200,20 +202,18 @@ const resolveDerivedShipmentStatus = (
 
 const ShipmentOverviewDrawer = ({
   shipments,
+  idSimulacion,
   referenceMinute,
 }: ShipmentOverviewDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
-  const [mode, setMode] = useState<ShipmentViewMode>("planificados");
+  const [mode, setMode] = useState<ShipmentViewMode>("todos");
   const [deliveredHours, setDeliveredHours] = useState(6);
   const getReferenceMinuteForShipment = (shipment: BackendSolicitudEnvio) =>
     referenceMinute ?? getUtcMinutesSinceShipmentDay(shipment);
 
   const shipmentStatus = (shipment: BackendSolicitudEnvio) =>
     resolveDerivedShipmentStatus(shipment, getReferenceMinuteForShipment(shipment));
-  const plannedShipments = shipments.filter(
-    (shipment) => shipmentStatus(shipment) === "planificados"
-  );
   const inProgressShipments = shipments.filter(
     (shipment) => shipmentStatus(shipment) === "en-curso"
   );
@@ -230,8 +230,8 @@ const ShipmentOverviewDrawer = ({
     return elapsed !== null && elapsed < deliveredHours * 60;
   });
   const visibleShipments =
-    mode === "planificados"
-      ? plannedShipments
+    mode === "todos"
+      ? shipments
       : mode === "en-curso"
         ? inProgressShipments
         : deliveredShipments;
@@ -252,6 +252,7 @@ const ShipmentOverviewDrawer = ({
     openShipment(
       shipmentCode,
       {
+        idSimulacion,
         ...resolveShipmentFocusTarget(
           shipment,
           getReferenceMinuteForShipment(shipment)
@@ -271,13 +272,13 @@ const ShipmentOverviewDrawer = ({
         <button
           type="button"
           className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "planificados"
+            mode === "todos"
               ? "bg-primary border-primary text-text-inverse"
               : "bg-card border-border text-text-primary hover:bg-field"
           }`}
-          onClick={() => setMode("planificados")}
+          onClick={() => setMode("todos")}
         >
-          Planificados ({plannedShipments.length})
+          Todos ({shipments.length})
         </button>
         <button
           type="button"
@@ -334,13 +335,13 @@ const ShipmentOverviewDrawer = ({
               shipment.idEnvio !== null
                 ? formatShipmentCode(shipment.idEnvio)
                 : null;
+            const derivedStatus = shipmentStatus(shipment);
             const timeLabel =
-              mode === "planificados"
+              derivedStatus === "planificados"
                 ? `Salida: ${formatUtcMinute(getFirstDepartureMinute(shipment))}`
-                : mode === "en-curso"
+                : derivedStatus === "en-curso"
                   ? `Llegada estimada: ${formatUtcMinute(getLastArrivalMinute(shipment))}`
                 : `Entrega: ${formatUtcMinute(getLastArrivalMinute(shipment))}`;
-            const derivedStatus = shipmentStatus(shipment);
 
             return (
               <li

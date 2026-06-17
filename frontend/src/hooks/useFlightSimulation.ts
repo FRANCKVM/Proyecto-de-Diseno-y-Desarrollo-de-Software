@@ -40,6 +40,24 @@ const parseLocalDateTimeMs = (value: string | null | undefined): number | null =
   return Number.isNaN(date.getTime()) ? null : date.getTime();
 };
 
+const parseShipmentUtcMinute = (shipment: BackendSolicitudEnvio): number => {
+  const [hour = "0", minute = "0"] = (shipment.hora ?? "00:00").split(":");
+  return Number(hour) * 60 + Number(minute);
+};
+
+const getUtcMinutesSinceShipmentDay = (
+  shipment: BackendSolicitudEnvio,
+  nowMs: number
+): number | null => {
+  const shipmentDayMs = Date.parse(`${shipment.fecha}T00:00:00Z`);
+
+  if (Number.isNaN(shipmentDayMs)) {
+    return null;
+  }
+
+  return Math.floor((nowMs - shipmentDayMs) / 60_000);
+};
+
 const getShipmentMinute = (
   shipment: BackendSolicitudEnvio,
   simulationStartMs: number | null
@@ -112,12 +130,25 @@ interface ActiveFlightAggregate {
 const buildFlightsFromShipments = (
   shipments: BackendSolicitudEnvio[],
   currentMinute: number,
-  simulationStartMs: number | null
+  simulationStartMs: number | null,
+  nowMs: number = Date.now()
 ): AnimatedFlight[] => {
   const activeFlightsByOccurrence = new Map<string, ActiveFlightAggregate>();
 
   shipments.forEach((shipment, shipmentIndex) => {
-    const shipmentMinute = getShipmentMinute(shipment, simulationStartMs);
+    const shipmentMinute =
+      simulationStartMs === null
+        ? parseShipmentUtcMinute(shipment)
+        : getShipmentMinute(shipment, simulationStartMs);
+    const referenceMinute =
+      simulationStartMs === null
+        ? getUtcMinutesSinceShipmentDay(shipment, nowMs)
+        : currentMinute;
+
+    if (referenceMinute === null) {
+      return;
+    }
+
     const routeGroups = getShipmentRouteGroups(shipment);
 
     routeGroups.forEach((group, groupIndex) => {
@@ -133,12 +164,12 @@ const buildFlightsFromShipments = (
 
         earliestDeparture = arrival;
 
-        if (currentMinute < departure || currentMinute >= arrival) {
+        if (referenceMinute < departure || referenceMinute >= arrival) {
           return;
         }
 
         const progress = clampProgress(
-          (currentMinute - departure) / durationMinutes
+          (referenceMinute - departure) / durationMinutes
         );
         const occurrenceKey = `${flight.idVuelo}-${departure}`;
         const existing = activeFlightsByOccurrence.get(occurrenceKey);

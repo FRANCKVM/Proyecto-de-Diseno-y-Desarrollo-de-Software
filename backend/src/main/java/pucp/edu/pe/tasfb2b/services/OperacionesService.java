@@ -24,6 +24,7 @@ import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -137,6 +138,46 @@ public class OperacionesService {
                 replanificarEnviosAfectadosOperacion(cancelacion);
             }
         }
+    }
+
+    @Transactional
+    public VueloCancelacion cancelarVueloOperacion(Integer idVuelo, LocalDateTime fechaHoraSalida) {
+        if (idVuelo == null) {
+            throw new IllegalArgumentException("El codigo del vuelo es obligatorio.");
+        }
+
+        if (fechaHoraSalida == null) {
+            throw new IllegalArgumentException("La fecha de salida del vuelo es obligatoria.");
+        }
+
+        Vuelo vuelo = vueloRepository.findById(idVuelo)
+                .orElseThrow(() -> new IllegalArgumentException("No existe un vuelo con codigo " + idVuelo + "."));
+
+        if (vuelo.estaCancelado()) {
+            throw new IllegalArgumentException("El vuelo base ya se encuentra cancelado.");
+        }
+
+        LocalDateTime ahora = LocalDateTime.now();
+        if (!fechaHoraSalida.isAfter(ahora)) {
+            throw new IllegalArgumentException("Solo se puede cancelar un vuelo programado.");
+        }
+
+        VueloCancelacion cancelacionExistente = vueloCancelacionRepository
+                .findByVuelo_IdVueloAndFechaHoraSalida(idVuelo, fechaHoraSalida)
+                .orElse(null);
+
+        if (cancelacionExistente != null) {
+            return cancelacionExistente;
+        }
+
+        VueloCancelacion cancelacion = vueloCancelacionRepository.save(new VueloCancelacion(
+                vuelo,
+                fechaHoraSalida,
+                ahora,
+                ahora
+        ));
+        replanificarEnviosAfectadosOperacion(cancelacion);
+        return cancelacion;
     }
 
     @Transactional(readOnly = true)
@@ -906,8 +947,7 @@ public class OperacionesService {
 
     private List<MapaSimulacionEstado.VueloMapa> construirVuelosMapaOperacion(List<SolicitudEnvio> envios) {
         List<MapaSimulacionEstado.VueloMapa> vuelosMapa = new ArrayList<>();
-        int minutoActualUtc = LocalTime.now(java.time.ZoneOffset.UTC).getHour() * 60
-                + LocalTime.now(java.time.ZoneOffset.UTC).getMinute();
+        LocalDateTime ahoraUtc = LocalDateTime.now(java.time.ZoneOffset.UTC);
         List<AsignacionEnvio> asignaciones = envios.isEmpty()
                 ? List.of()
                 : asignacionEnvioRepository.findByEnvioInOrderByEnvio_IdEnvioAscIdAsignacionAsc(envios);
@@ -915,17 +955,22 @@ public class OperacionesService {
         if (!asignaciones.isEmpty()) {
             int indiceAsignacion = 0;
             for (AsignacionEnvio asignacion : asignaciones) {
-                if (asignacion.getRuta() == null || asignacion.getRuta().getVuelos() == null) {
+                SolicitudEnvio envio = asignacion.getEnvio();
+                Ruta ruta = asignacion.getRuta() != null
+                        ? asignacion.getRuta()
+                        : envio != null ? envio.getRuta() : null;
+
+                if (envio == null || ruta == null || ruta.getVuelos() == null) {
                     continue;
                 }
 
                 int indiceVuelo = 0;
-                Integer idEnvio = asignacion.getEnvio() != null
-                        ? asignacion.getEnvio().getIdEnvio()
-                        : 0;
+                Integer idEnvio = envio.getIdEnvio() != null ? envio.getIdEnvio() : 0;
+                List<VentanaVueloOperacion> ventanas = calcularVentanasRutaOperacion(envio, ruta);
 
-                for (Vuelo vuelo : asignacion.getRuta().getVuelos()) {
-                    double progress = calcularProgress(minutoActualUtc, vuelo);
+                for (VentanaVueloOperacion ventana : ventanas) {
+                    Vuelo vuelo = ventana.vuelo();
+                    double progress = calcularProgress(ahoraUtc, ventana);
                     vuelosMapa.add(new MapaSimulacionEstado.VueloMapa(
                             "op-" + idEnvio + "-asignacion-" + indiceAsignacion + "-vuelo-" + vuelo.getIdVuelo() + "-" + indiceVuelo,
                             vuelo.getDesde().getCodigo(),
@@ -947,8 +992,9 @@ public class OperacionesService {
             }
 
             int indice = 0;
-            for (Vuelo vuelo : envio.getRuta().getVuelos()) {
-                double progress = calcularProgress(minutoActualUtc, vuelo);
+            for (VentanaVueloOperacion ventana : calcularVentanasRutaOperacion(envio)) {
+                Vuelo vuelo = ventana.vuelo();
+                double progress = calcularProgress(ahoraUtc, ventana);
                 vuelosMapa.add(new MapaSimulacionEstado.VueloMapa(
                         "op-" + envio.getIdEnvio() + "-vuelo-" + vuelo.getIdVuelo() + "-" + indice,
                         vuelo.getDesde().getCodigo(),
@@ -962,23 +1008,25 @@ public class OperacionesService {
         return vuelosMapa;
     }
 
-    private double calcularProgress(int minutoActualUtc, Vuelo vuelo) {
-        int salida = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-        int llegada = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salida;
-
-        if (llegada <= salida) {
-            return minutoActualUtc >= llegada ? 1.0 : 0.0;
-        }
-
-        if (minutoActualUtc <= salida) {
+    private double calcularProgress(LocalDateTime ahora, VentanaVueloOperacion ventana) {
+        if (ahora == null || ventana == null || !ahora.isAfter(ventana.fechaHoraSalida())) {
             return 0.0;
         }
 
-        if (minutoActualUtc >= llegada) {
+        if (!ahora.isBefore(ventana.fechaHoraLlegada())) {
             return 1.0;
         }
 
-        return (minutoActualUtc - salida) / (double) (llegada - salida);
+        long duracionSegundos = Math.max(1, Duration.between(
+                ventana.fechaHoraSalida(),
+                ventana.fechaHoraLlegada()
+        ).getSeconds());
+        long transcurridosSegundos = Math.max(0, Duration.between(
+                ventana.fechaHoraSalida(),
+                ahora
+        ).getSeconds());
+
+        return Math.min(1.0, transcurridosSegundos / (double) duracionSegundos);
     }
 
     private record VentanaVueloOperacion(

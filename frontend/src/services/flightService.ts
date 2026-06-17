@@ -2,8 +2,10 @@ import {
   fetchFlightsByAirportReferenceData,
   fetchFlightDetailReferenceData,
 } from "@/services/referenceDataService";
+import api from "@/services/api";
 import {
   cacheFlightsForAirport,
+  cacheFlightDetail,
   getCachedFlightByCode,
   getCachedFlightsByAirport,
   hasCachedFlightsByAirport,
@@ -91,4 +93,18 @@ export const listFlightsByAirport = async (
   const flights = await fetchFlightsByAirportReferenceData(icao);
   cacheFlightsForAirport(icao, flights);
   return flights;
+};
+
+export const cancelFlightByCode = async (
+  codigo: string,
+  fechaSalida: string,
+  idSimulacion?: number | null
+): Promise<VueloDetalle> => {
+  const { data } = await api.post<VueloDetalle>(`/vuelos/${codigo}/cancelar`, {
+    idSimulacion: idSimulacion ?? null,
+    fechaSalida,
+  });
+
+  cacheFlightDetail(data);
+  return data;
 };
