@@ -8,10 +8,8 @@ import {
   stopLiveSimulation,
 } from "@/services/simulationService";
 import { useSimulationConfigStore } from "@/store/simulationConfigStore";
-import { useSimulationControlStore } from "@/store/simulationControlStore";
 import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { USE_MOCK_DATA } from "@/utils/constants";
-import { buildEmptyMapFlights } from "@/utils/mapFlightHelpers";
 import type { MapFlight } from "@/components/map/WorldMap";
 import type { BackendEstadoSimulacion } from "@/types/backendSimulation.types";
 import type { TipoSimulacion } from "@/types/common.types";
@@ -61,7 +59,6 @@ export const useLiveSimulation = (
   const fechaInicio = useSimulationConfigStore((s) => s.fechaInicio);
   const horaInicio = useSimulationConfigStore((s) => s.horaInicio);
   const kColapso = useSimulationConfigStore((s) => s.kColapso);
-  const speed = useSimulationControlStore((s) => s.speed);
 
   const {
     idSimulacion,
@@ -255,32 +252,14 @@ export const useLiveSimulation = (
   ]);
 
   const flights: MapFlight[] = useMemo(
-    () => {
-      const backendSimMinutesPerSecond =
-        estado?.scMinutos && estado.intervaloRealMs && estado.intervaloRealMs > 0
-          ? estado.scMinutos / (estado.intervaloRealMs / 1000)
-          : null;
-
-      return buildEmptyMapFlights(mapa?.vuelos ?? [], {
-        shipments: envios,
-        referenceMinute: estado?.punteroConsumoMinutos,
-        simulationStart: estado?.fechaHoraInicioSimulacion,
-        simMinutesPerSecond:
-          backendSimMinutesPerSecond !== null
-            ? backendSimMinutesPerSecond * speed
-            : null,
-        allowBackendProgressFallback: false,
-      });
-    },
-    [
-      envios,
-      estado?.fechaHoraInicioSimulacion,
-      estado?.intervaloRealMs,
-      estado?.punteroConsumoMinutos,
-      estado?.scMinutos,
-      mapa?.vuelos,
-      speed,
-    ]
+    () =>
+      (mapa?.vuelos ?? []).map((vuelo) => ({
+        id: vuelo.id,
+        fromIcao: vuelo.fromIcao,
+        toIcao: vuelo.toIcao,
+        progress: vuelo.progress,
+      })),
+    [mapa]
   );
 
   const occupancyByIcao = useMemo(
@@ -298,7 +277,6 @@ export const useLiveSimulation = (
   return {
     idSimulacion,
     estado,
-    mapa,
     envios,
     flights,
     occupancyByIcao,

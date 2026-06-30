@@ -46,9 +46,9 @@ const INITIAL_STATE: Pick<
   "tipoPeriodo" | "fechaInicio" | "horaInicio" | "rangos" | "kColapso" | "csvSummary"
 > = {
   tipoPeriodo: "semanal",
-  fechaInicio: "2026-09-07",
+  fechaInicio: "2026-04-07",
   horaInicio: "06:00",
-  rangos: { verde: 40, ambar: 70 },
+  rangos: { verde: 60, ambar: 85 },
   kColapso: 200,
   csvSummary: null,
 };

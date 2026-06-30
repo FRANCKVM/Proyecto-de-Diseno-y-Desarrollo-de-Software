@@ -19,7 +19,7 @@ const ShipmentFormDrawer = ({
   return (
     <DrawerBase eyebrow="Nuevo envio" title="Registrar envio" onClose={close}>
       <section className="space-y-4">
-        <p className="text-secondary text-text-primary">
+        <p className="text-secondary text-text-secondary">
           Selecciona origen, destino y cantidad de maletas. El plazo se define
           automaticamente en backend.
         </p>

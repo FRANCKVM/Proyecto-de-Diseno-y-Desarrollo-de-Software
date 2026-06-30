@@ -35,7 +35,6 @@ import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -46,9 +45,8 @@ public class SimulacionService {
     private static final int SA_MINUTOS = 5;// bloque en minutos debe multiplicarse por k
     private static final int DURACION_SEMANAL_DIAS = 5;
     private static final long INTERVALO_VERIFICACION_MS = 1000;
-    private static final long INTERVALO_REAL_SEMANAL_MS = 40000;
+    private static final long INTERVALO_REAL_SEMANAL_MS = 30000;
     private static final long INTERVALO_REAL_COLAPSO_MS = 75000;
-    private static final int VENTANA_CANCELACIONES_MAPA_MIN = 60;
 
     private static final int TAMANO_POBLACION = 30;
     private static final int GENERACIONES = 60;
@@ -252,15 +250,8 @@ public class SimulacionService {
 
         Map<String, Double> ocupacionPorAeropuerto = construirOcupacionPorAeropuerto(idSimulacion);
         List<MapaSimulacionEstado.VueloMapa> vuelosMapa = construirVuelosMapa(idSimulacion);
-        List<MapaSimulacionEstado.CancelacionVueloMapa> cancelacionesMapa =
-                construirCancelacionesRecientesMapa();
 
-        return new MapaSimulacionEstado(
-                idSimulacion,
-                ocupacionPorAeropuerto,
-                vuelosMapa,
-                cancelacionesMapa
-        );
+        return new MapaSimulacionEstado(idSimulacion, ocupacionPorAeropuerto, vuelosMapa);
     }
 
     public synchronized Vuelo obtenerVueloSimulado(Integer idSimulacion, Integer idVuelo) {
@@ -319,30 +310,22 @@ public class SimulacionService {
             throw new IllegalArgumentException("No existe un vuelo simulado con codigo " + idVuelo + ".");
         }
 
-        int minutoCancelacion = obtenerMinutoReferenciaMapa();
-        int salidaCancelable = resolverSalidaCancelableSimulada(salidaMinuto, minutoCancelacion);
+        if (salidaMinuto <= punteroConsumoMinutos) {
+            throw new IllegalArgumentException("Solo se puede cancelar un vuelo programado.");
+        }
 
-        ClaveVueloSimulado clave = new ClaveVueloSimulado(idVuelo, salidaCancelable);
+        ClaveVueloSimulado clave = new ClaveVueloSimulado(idVuelo, salidaMinuto);
         if (cancelacionesVuelosSimulados.containsKey(clave)) {
             return;
         }
 
         CancelacionVueloSimulada cancelacion = new CancelacionVueloSimulada(
                 idVuelo,
-                salidaCancelable,
-                minutoCancelacion
+                salidaMinuto,
+                punteroConsumoMinutos
         );
         cancelacionesVuelosSimulados.put(clave, cancelacion);
         replanificarEnviosAfectadosPorCancelacion(cancelacion);
-    }
-
-    private int resolverSalidaCancelableSimulada(int salidaMinuto, int minutoReferencia) {
-        int salidaCancelable = salidaMinuto;
-        while (salidaCancelable - minutoReferencia < VueloCancelacionService.MINUTOS_AVISO_MIN) {
-            salidaCancelable += VueloCancelacionService.MINUTOS_DIA;
-        }
-
-        return salidaCancelable;
     }
 
     public synchronized boolean estaVueloSimuladoCanceladoEnDia(
@@ -908,151 +891,27 @@ public class SimulacionService {
     }
 
     private List<MapaSimulacionEstado.VueloMapa> construirVuelosMapa(Integer idSimulacion) {
-        if (punteroConsumoMinutos == null || vuelosSimulados.isEmpty()) {
-            return List.of();
-        }
-
-        int minutoReferencia = obtenerMinutoReferenciaMapa();
         List<MapaSimulacionEstado.VueloMapa> vuelosMapa = new ArrayList<>();
+        List<SolicitudEnvio> solicitudes = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
 
-        for (Vuelo vuelo : vuelosSimulados.values()) {
-            if (vuelo.getIdVuelo() == null
-                    || vuelo.getDesde() == null
-                    || vuelo.getDesde().getCodigo() == null
-                    || vuelo.getHasta() == null
-                    || vuelo.getHasta().getCodigo() == null) {
+        for (SolicitudEnvio solicitud : solicitudes) {
+            if (solicitud.getRuta() == null || solicitud.getRuta().getVuelos() == null) {
                 continue;
             }
 
-            VentanaVueloSimulada ventana = calcularVentanaActivaVuelo(vuelo, minutoReferencia);
-            if (ventana == null || cancelacionesVuelosSimulados.containsKey(new ClaveVueloSimulado(
-                    vuelo.getIdVuelo(),
-                    ventana.salidaMinuto()
-            ))) {
-                continue;
+            int indice = 0;
+            for (Vuelo vuelo : solicitud.getRuta().getVuelos()) {
+                vuelosMapa.add(new MapaSimulacionEstado.VueloMapa(
+                        "sim-" + solicitud.getIdEnvio() + "-vuelo-" + vuelo.getIdVuelo() + "-" + indice,
+                        vuelo.getDesde().getCodigo(),
+                        vuelo.getHasta().getCodigo(),
+                        solicitud.getEstado() == EstadoEnvio.COMPLETADO ? 0.5 : 0.0
+                ));
+                indice++;
             }
-
-            int capacidad = vuelo.getCapacidad() != null ? vuelo.getCapacidad() : 0;
-            int bolsasActivas = reservasVuelosSimulados
-                    .getOrDefault(vuelo.getIdVuelo(), List.of())
-                    .stream()
-                    .filter(reserva -> reserva.salidaMinuto() == ventana.salidaMinuto())
-                    .filter(reserva -> reserva.llegadaMinuto() == ventana.llegadaMinuto())
-                    .mapToInt(ReservaVueloSimulado::bolsas)
-                    .sum();
-            double occupancyPct = capacidad <= 0
-                    ? 0.0
-                    : Math.min(100.0, (bolsasActivas * 100.0) / capacidad);
-            double progress = Math.max(
-                    0.001,
-                    Math.min(
-                            0.999,
-                            (minutoReferencia - ventana.salidaMinuto())
-                                    / (double) ventana.durationMinutes()
-                    )
-            );
-
-            vuelosMapa.add(new MapaSimulacionEstado.VueloMapa(
-                    "sim-vuelo-" + vuelo.getIdVuelo() + "-" + ventana.salidaMinuto(),
-                    String.valueOf(vuelo.getIdVuelo()),
-                    vuelo.getDesde().getCodigo(),
-                    vuelo.getHasta().getCodigo(),
-                    progress,
-                    occupancyPct,
-                    ventana.salidaMinuto(),
-                    ventana.llegadaMinuto(),
-                    ventana.durationMinutes()
-            ));
         }
 
         return vuelosMapa;
-    }
-
-    private int obtenerMinutoReferenciaMapa() {
-        int fallback = Math.max(0, punteroConsumoMinutos != null ? punteroConsumoMinutos : 0);
-
-        if (!simulacionActiva
-                || fechaHoraInicioReal == null
-                || scMinutos == null
-                || intervaloRealActualMs == null
-                || intervaloRealActualMs <= 0) {
-            return fallback;
-        }
-
-        long realMs = Math.max(
-                0,
-                ChronoUnit.MILLIS.between(fechaHoraInicioReal, LocalDateTime.now())
-        );
-        long minutoVisual = (realMs * scMinutos) / intervaloRealActualMs;
-        int referencia = (int) Math.min(Integer.MAX_VALUE, minutoVisual);
-
-        if (ultimoMinutoSimulacion != null) {
-            referencia = Math.min(referencia, Math.max(fallback, ultimoMinutoSimulacion));
-        }
-
-        return Math.max(fallback, referencia);
-    }
-
-    private VentanaVueloSimulada calcularVentanaActivaVuelo(Vuelo vuelo, int minutoReferencia) {
-        int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-        int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
-
-        while (llegadaBase <= salidaBase) {
-            llegadaBase += VueloCancelacionService.MINUTOS_DIA;
-        }
-
-        int durationMinutes = Math.max(1, llegadaBase - salidaBase);
-        int diaReferencia = Math.floorDiv(Math.max(0, minutoReferencia), VueloCancelacionService.MINUTOS_DIA);
-        int salida = salidaBase + diaReferencia * VueloCancelacionService.MINUTOS_DIA;
-        int llegada = salida + durationMinutes;
-
-        while (salida > minutoReferencia && salida - VueloCancelacionService.MINUTOS_DIA >= 0) {
-            salida -= VueloCancelacionService.MINUTOS_DIA;
-            llegada -= VueloCancelacionService.MINUTOS_DIA;
-        }
-
-        while (llegada <= minutoReferencia) {
-            salida += VueloCancelacionService.MINUTOS_DIA;
-            llegada += VueloCancelacionService.MINUTOS_DIA;
-        }
-
-        if (salida <= minutoReferencia && minutoReferencia < llegada) {
-            return new VentanaVueloSimulada(salida, llegada, durationMinutes);
-        }
-
-        return null;
-    }
-
-    private List<MapaSimulacionEstado.CancelacionVueloMapa> construirCancelacionesRecientesMapa() {
-        if (punteroConsumoMinutos == null || cancelacionesVuelosSimulados.isEmpty()) {
-            return List.of();
-        }
-
-        int ventanaMinutos = Math.max(
-                VENTANA_CANCELACIONES_MAPA_MIN,
-                scMinutos != null ? scMinutos * 2 : 0
-        );
-        int desdeMinuto = Math.max(0, punteroConsumoMinutos - ventanaMinutos);
-
-        return cancelacionesVuelosSimulados.values().stream()
-                .filter(cancelacion -> cancelacion.cancelacionMinuto() >= desdeMinuto)
-                .filter(cancelacion -> cancelacion.cancelacionMinuto() <= punteroConsumoMinutos)
-                .map(cancelacion -> {
-                    Vuelo vuelo = vuelosSimulados.get(cancelacion.idVuelo());
-                    if (vuelo == null || vuelo.getDesde() == null) {
-                        return null;
-                    }
-
-                    return new MapaSimulacionEstado.CancelacionVueloMapa(
-                            "sim-cancel-" + cancelacion.idVuelo()
-                                    + "-" + cancelacion.salidaMinuto()
-                                    + "-" + cancelacion.cancelacionMinuto(),
-                            vuelo.getDesde().getCodigo(),
-                            String.valueOf(cancelacion.idVuelo())
-                    );
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
     }
 
     private PlanificadorGenetico crearPlanificador(Grafo grafo) {
@@ -1481,13 +1340,6 @@ public class SimulacionService {
             int bolsas,
             int salidaMinuto,
             int llegadaMinuto
-    ) {
-    }
-
-    private record VentanaVueloSimulada(
-            int salidaMinuto,
-            int llegadaMinuto,
-            int durationMinutes
     ) {
     }
 

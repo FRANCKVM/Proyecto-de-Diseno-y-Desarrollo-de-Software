@@ -13,7 +13,6 @@ interface ShipmentOverviewDrawerProps {
   shipments: BackendSolicitudEnvio[];
   idSimulacion?: number | null;
   referenceMinute?: number | null;
-  simulationStart?: string | null;
 }
 
 type ShipmentStatus = "planificados" | "en-curso" | "entregados";
@@ -53,29 +52,6 @@ const parseShipmentUtcMinute = (shipment: BackendSolicitudEnvio): number => {
   return Number(hour) * 60 + Number(minute);
 };
 
-const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
-};
-
-const getShipmentStartMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): number => {
-  const simulationStartMs = parseLocalDateTimeMs(simulationStart);
-  const shipmentMs = parseLocalDateTimeMs(`${shipment.fecha}T${shipment.hora}`);
-
-  if (simulationStartMs === null || shipmentMs === null) {
-    return parseShipmentUtcMinute(shipment);
-  }
-
-  return Math.max(0, Math.floor((shipmentMs - simulationStartMs) / 60_000));
-};
-
 const getNextFlightWindow = (
   earliestMinute: number,
   departureMinute: number | null | undefined,
@@ -102,8 +78,7 @@ const getNextFlightWindow = (
 };
 
 const getShipmentTimeline = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
+  shipment: BackendSolicitudEnvio
 ): { firstDeparture: number | null; lastArrival: number | null } => {
   const routeGroups = getShipmentRouteGroups(shipment);
 
@@ -115,7 +90,7 @@ const getShipmentTimeline = (
   let lastArrival: number | null = null;
 
   for (const group of routeGroups) {
-    let earliestMinute = getShipmentStartMinute(shipment, simulationStart);
+    let earliestMinute = parseShipmentUtcMinute(shipment);
 
     for (const flight of group.ruta?.vuelos ?? []) {
       const window = getNextFlightWindow(
@@ -192,30 +167,23 @@ const getShipmentKey = (shipment: BackendSolicitudEnvio): string =>
     ? `envio-${shipment.idEnvio}`
     : `${shipment.fecha}-${shipment.hora}-${shipment.origen.codigo}-${shipment.destino.codigo}-${shipment.contarBolsas}`;
 
-const getFirstDepartureMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): number | null => {
-  return getShipmentTimeline(shipment, simulationStart).firstDeparture;
+const getFirstDepartureMinute = (shipment: BackendSolicitudEnvio): number | null => {
+  return getShipmentTimeline(shipment).firstDeparture;
 };
 
-const getLastArrivalMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): number | null => {
-  return getShipmentTimeline(shipment, simulationStart).lastArrival;
+const getLastArrivalMinute = (shipment: BackendSolicitudEnvio): number | null => {
+  return getShipmentTimeline(shipment).lastArrival;
 };
 
 const resolveDerivedShipmentStatus = (
   shipment: BackendSolicitudEnvio,
-  referenceMinute: number,
-  simulationStart?: string | null
+  referenceMinute: number
 ): ShipmentStatus => {
   if (shipment.estado === "COMPLETADO") {
     return "entregados";
   }
 
-  const timeline = getShipmentTimeline(shipment, simulationStart);
+  const timeline = getShipmentTimeline(shipment);
 
   if (timeline.lastArrival !== null && referenceMinute >= timeline.lastArrival) {
     return "entregados";
@@ -236,31 +204,16 @@ const ShipmentOverviewDrawer = ({
   shipments,
   idSimulacion,
   referenceMinute,
-  simulationStart,
 }: ShipmentOverviewDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
   const [mode, setMode] = useState<ShipmentViewMode>("todos");
   const [deliveredHours, setDeliveredHours] = useState(6);
-  const [airportFilter, setAirportFilter] = useState("todos");
   const getReferenceMinuteForShipment = (shipment: BackendSolicitudEnvio) =>
     referenceMinute ?? getUtcMinutesSinceShipmentDay(shipment);
 
-  const airportOptions = Array.from(
-    new Set(
-      shipments.flatMap((shipment) => [
-        shipment.origen.codigo,
-        shipment.destino.codigo,
-      ])
-    )
-  ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
-
   const shipmentStatus = (shipment: BackendSolicitudEnvio) =>
-    resolveDerivedShipmentStatus(
-      shipment,
-      getReferenceMinuteForShipment(shipment),
-      simulationStart
-    );
+    resolveDerivedShipmentStatus(shipment, getReferenceMinuteForShipment(shipment));
   const inProgressShipments = shipments.filter(
     (shipment) => shipmentStatus(shipment) === "en-curso"
   );
@@ -270,26 +223,18 @@ const ShipmentOverviewDrawer = ({
     }
 
     const elapsed = getElapsedMinutes(
-      getLastArrivalMinute(shipment, simulationStart),
+      getLastArrivalMinute(shipment),
       getReferenceMinuteForShipment(shipment)
     );
 
     return elapsed !== null && elapsed < deliveredHours * 60;
   });
-  const visibleShipmentsByMode =
+  const visibleShipments =
     mode === "todos"
       ? shipments
       : mode === "en-curso"
         ? inProgressShipments
         : deliveredShipments;
-  const visibleShipments =
-    airportFilter === "todos"
-      ? visibleShipmentsByMode
-      : visibleShipmentsByMode.filter(
-          (shipment) =>
-            shipment.origen.codigo === airportFilter ||
-            shipment.destino.codigo === airportFilter
-        );
 
   const handleHoursChange = (value: string) => {
     const nextValue = Number(value);
@@ -310,8 +255,7 @@ const ShipmentOverviewDrawer = ({
         idSimulacion,
         ...resolveShipmentFocusTarget(
           shipment,
-          getReferenceMinuteForShipment(shipment),
-          simulationStart
+          getReferenceMinuteForShipment(shipment)
         ),
         shipmentRouteSegments: buildShipmentRouteSegments(shipment),
       }
@@ -319,7 +263,11 @@ const ShipmentOverviewDrawer = ({
   };
 
   return (
-    <DrawerBase title="Panel de envios" onClose={close}>
+    <DrawerBase
+      eyebrow="Envios"
+      title={`Panel de envios (${visibleShipments.length})`}
+      onClose={close}
+    >
       <div className="grid grid-cols-3 gap-2 mb-4">
         <button
           type="button"
@@ -360,7 +308,7 @@ const ShipmentOverviewDrawer = ({
         <div className="mb-5">
           <label
             htmlFor="delivered-hours"
-            className="block text-label-sm text-text-primary mb-1"
+            className="block text-label-sm text-text-tertiary mb-1"
           >
             Ultimas horas
           </label>
@@ -376,30 +324,8 @@ const ShipmentOverviewDrawer = ({
         </div>
       )}
 
-      <div className="mb-5">
-        <label
-          htmlFor="shipment-airport-filter"
-          className="block text-label-sm text-text-primary mb-1"
-        >
-          Filtrar por aeropuerto
-        </label>
-        <select
-          id="shipment-airport-filter"
-          value={airportFilter}
-          onChange={(event) => setAirportFilter(event.target.value)}
-          className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
-        >
-          <option value="todos">Todos</option>
-          {airportOptions.map((icao) => (
-            <option key={icao} value={icao}>
-              {icao}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {visibleShipments.length === 0 ? (
-        <p className="text-body text-text-primary">
+        <p className="text-body text-text-tertiary">
           No hay envios para esta vista.
         </p>
       ) : (
@@ -412,16 +338,10 @@ const ShipmentOverviewDrawer = ({
             const derivedStatus = shipmentStatus(shipment);
             const timeLabel =
               derivedStatus === "planificados"
-                ? `Salida: ${formatUtcMinute(
-                    getFirstDepartureMinute(shipment, simulationStart)
-                  )}`
+                ? `Salida: ${formatUtcMinute(getFirstDepartureMinute(shipment))}`
                 : derivedStatus === "en-curso"
-                  ? `Llegada estimada: ${formatUtcMinute(
-                      getLastArrivalMinute(shipment, simulationStart)
-                    )}`
-                : `Entrega: ${formatUtcMinute(
-                    getLastArrivalMinute(shipment, simulationStart)
-                  )}`;
+                  ? `Llegada estimada: ${formatUtcMinute(getLastArrivalMinute(shipment))}`
+                : `Entrega: ${formatUtcMinute(getLastArrivalMinute(shipment))}`;
 
             return (
               <li
@@ -442,13 +362,13 @@ const ShipmentOverviewDrawer = ({
                       {getShipmentCodeLabel(shipment)}
                     </p>
                   )}
-                  <span className="text-secondary text-text-primary">
+                  <span className="text-secondary text-text-secondary">
                     {shipment.origen.codigo} &gt; {shipment.destino.codigo}
                   </span>
-                  <span className="text-secondary text-text-primary block">
+                  <span className="text-secondary text-text-tertiary block">
                     Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
                   </span>
-                  <span className="text-secondary text-text-primary block">
+                  <span className="text-secondary text-text-tertiary block">
                     {timeLabel}
                   </span>
                 </div>
@@ -462,7 +382,7 @@ const ShipmentOverviewDrawer = ({
                         ? "Completado"
                         : ESTADO_LABEL[shipment.estado]}
                   </Tag>
-                  <span className="text-secondary text-text-primary">
+                  <span className="text-secondary text-text-tertiary">
                     {shipment.contarBolsas} maletas
                   </span>
                 </div>

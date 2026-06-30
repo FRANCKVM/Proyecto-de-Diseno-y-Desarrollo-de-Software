@@ -1,8 +1,4 @@
-import type {
-  BackendRuta,
-  BackendSolicitudEnvio,
-  BackendVuelo,
-} from "@/types/backendSimulation.types";
+import type { BackendSolicitudEnvio, BackendVuelo } from "@/types/backendSimulation.types";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 
 const DAY_MINUTES = 24 * 60;
@@ -25,34 +21,6 @@ const getCurrentUtcMinute = (): number => {
 
 const normalizeMinute = (minute: number): number =>
   ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
-
-const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
-};
-
-const parseShipmentUtcMinute = (shipment: BackendSolicitudEnvio): number => {
-  const [hour = "0", minute = "0"] = (shipment.hora ?? "00:00").split(":");
-  return Number(hour) * 60 + Number(minute);
-};
-
-const getShipmentStartMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): number => {
-  const simulationStartMs = parseLocalDateTimeMs(simulationStart);
-  const shipmentMs = parseLocalDateTimeMs(`${shipment.fecha}T${shipment.hora}`);
-
-  if (simulationStartMs === null || shipmentMs === null) {
-    return parseShipmentUtcMinute(shipment);
-  }
-
-  return Math.max(0, Math.floor((shipmentMs - simulationStartMs) / 60_000));
-};
 
 const buildFlightWindow = (
   flight: BackendVuelo,
@@ -80,8 +48,7 @@ const buildFlightWindow = (
 
 export const resolveShipmentFocusTarget = (
   shipment: BackendSolicitudEnvio,
-  referenceMinute?: number | null,
-  simulationStart?: string | null
+  referenceMinute?: number | null
 ): ShipmentFocusTarget => {
   if (shipment.estado === "INGRESADO") {
     return {
@@ -109,7 +76,7 @@ export const resolveShipmentFocusTarget = (
 
   const reference = referenceMinute ?? getCurrentUtcMinute();
   let previousAirportIcao = shipment.origen.codigo;
-  let earliestMinute = getShipmentStartMinute(shipment, simulationStart);
+  let earliestMinute = 0;
 
   for (const flight of focusRouteFlights) {
     const window = buildFlightWindow(flight, earliestMinute);
@@ -158,20 +125,4 @@ export const buildShipmentRouteSegments = (
       toIcao: shipment.destino.codigo,
     },
   ];
-};
-
-export const buildRouteSegments = (
-  route: BackendRuta | null | undefined,
-  fallback?: { fromIcao: string; toIcao: string }
-): ShipmentRouteSegment[] => {
-  const flights = route?.vuelos ?? [];
-
-  if (flights.length > 0) {
-    return flights.map((flight) => ({
-      fromIcao: flight.desde.codigo,
-      toIcao: flight.hasta.codigo,
-    }));
-  }
-
-  return fallback ? [fallback] : [];
 };

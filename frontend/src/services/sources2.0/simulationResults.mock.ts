@@ -11,7 +11,7 @@ import type {
 export const RESULTADO_PERIODO_MOCK: ResultadoPeriodo = {
   id: "demo-periodo",
   tipo: "semanal",
-  rango: "Semanal 07-13/09/2026",
+  rango: "Semanal 07-13/04/2026",
   totalMaletas: 4230,
   cumplimiento: 100,
   vuelosEjecutados: 124,
@@ -23,7 +23,7 @@ export const RESULTADO_PERIODO_MOCK: ResultadoPeriodo = {
     { icao: "SBBR", nombre: "Sao Paulo", recibidas: 380, enviadas: 340, ocupacionPromedio: 62, ocupacionMaxima: 78, estado: "elevado" },
     { icao: "EDDI", nombre: "Madrid", recibidas: 650, enviadas: 640, ocupacionPromedio: 50, ocupacionMaxima: 65, estado: "elevado" },
     { icao: "EHAM", nombre: "Frankfurt", recibidas: 520, enviadas: 530, ocupacionPromedio: 38, ocupacionMaxima: 50, estado: "normal" },
-    { icao: "VIDP", nombre: "Tokio", recibidas: 480, enviadas: 450, ocupacionPromedio: 70, ocupacionMaxima: 92, estado: "critico" },
+    { icao: "VIDP", nombre: "Tokio", recibidas: 480, enviadas: 450, ocupacionPromedio: 70, ocupacionMaxima: 89, estado: "critico" },
     { icao: "OPKC", nombre: "Shanghai", recibidas: 350, enviadas: 340, ocupacionPromedio: 60, ocupacionMaxima: 76, estado: "elevado" },
     { icao: "OMDB", nombre: "Dubai", recibidas: 280, enviadas: 290, ocupacionPromedio: 45, ocupacionMaxima: 58, estado: "normal" },
     { icao: "OAKB", nombre: "Singapur", recibidas: 200, enviadas: 210, ocupacionPromedio: 30, ocupacionMaxima: 40, estado: "normal" },
@@ -38,14 +38,14 @@ export const RESULTADO_PERIODO_MOCK: ResultadoPeriodo = {
     duracionMinutos: 67,
   },
   conclusion:
-    "Simulacion de 7 dias completada con 100% de cumplimiento. Se ejecutaron 2 replanificaciones por cancelacion de vuelos. El aeropuerto VIDP alcanzo ocupacion critica (92%) durante el dia 5. Se recomienda evaluar redistribucion de rutas Asia.",
+    "Simulacion de 7 dias completada con 100% de cumplimiento. Se ejecutaron 2 replanificaciones por cancelacion de vuelos. El aeropuerto VIDP alcanzo ocupacion critica (89%) durante el dia 5. Se recomienda evaluar redistribucion de rutas Asia.",
   atencion:
-    "VIDP alcanzo 92% de ocupacion maxima el dia 5. Evaluar capacidad de almacenes en Asia para proximas simulaciones.",
+    "VIDP alcanzo 89% de ocupacion maxima el dia 5. Evaluar capacidad de almacenes en Asia para proximas simulaciones.",
 };
 
 export const RESULTADO_COLAPSO_MOCK: ResultadoColapso = {
   id: "demo-colapso",
-  rango: "Colapso 07-19/09/2026",
+  rango: "Colapso 07-19/04/2026",
   diasHastaColapso: 12,
   maletasProcesadas: 12450,
   plazosIncumplidos: 12,
@@ -64,11 +64,11 @@ export const RESULTADO_COLAPSO_MOCK: ResultadoColapso = {
     { icao: "EHAM", nombre: "Amsterdam", ocupacionMaxima: 95 },
     { icao: "LOWW", nombre: "Viena", ocupacionMaxima: 92 },
     { icao: "EKCH", nombre: "Copenhague", ocupacionMaxima: 91 },
-    { icao: "EBCI", nombre: "Bruselas", ocupacionMaxima: 93 },
-    { icao: "VIDP", nombre: "Delhi", ocupacionMaxima: 92 },
-    { icao: "OMDB", nombre: "Dubai", ocupacionMaxima: 91 },
-    { icao: "OAKB", nombre: "Kabul", ocupacionMaxima: 90 },
-    { icao: "SKBO", nombre: "Bogota", ocupacionMaxima: 90 },
+    { icao: "EBCI", nombre: "Bruselas", ocupacionMaxima: 88 },
+    { icao: "VIDP", nombre: "Delhi", ocupacionMaxima: 87 },
+    { icao: "OMDB", nombre: "Dubai", ocupacionMaxima: 86 },
+    { icao: "OAKB", nombre: "Kabul", ocupacionMaxima: 85 },
+    { icao: "SKBO", nombre: "Bogota", ocupacionMaxima: 85 },
   ],
   sugerencia:
     "Los hubs europeos son el cuello de botella. Evaluar redistribucion de rutas intercontinentales.",

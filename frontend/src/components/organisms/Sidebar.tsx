@@ -86,7 +86,7 @@ const Sidebar = ({ collapsed }: SidebarProps) => {
           <h1 className="text-drawer-title text-text-inverse leading-tight">
             Tasf.B2B
           </h1>
-          <p className="text-secondary-xs text-text-inverse/55 mt-0.5">
+          <p className="text-secondary-xs text-text-tertiary mt-0.5">
             Logistics Platform
           </p>
         </div>
@@ -111,13 +111,13 @@ const Sidebar = ({ collapsed }: SidebarProps) => {
         <div className="px-3 py-3 border-t border-sidebar-hover space-y-1">
           <button
             type="button"
-            className="block w-full text-left text-nav text-text-inverse/70 hover:text-text-inverse px-2 py-1 rounded transition-colors"
+            className="block w-full text-left text-nav text-text-tertiary hover:text-text-inverse px-2 py-1 rounded transition-colors"
           >
             Configuracion
           </button>
           <button
             type="button"
-            className="block w-full text-left text-nav text-text-inverse/70 hover:text-text-inverse px-2 py-1 rounded transition-colors"
+            className="block w-full text-left text-nav text-text-tertiary hover:text-text-inverse px-2 py-1 rounded transition-colors"
           >
             Cerrar sesion
           </button>
@@ -137,7 +137,7 @@ const Sidebar = ({ collapsed }: SidebarProps) => {
             <p className="text-nav-active text-text-inverse truncate">
               {nombre}
             </p>
-            <p className="text-secondary-xs text-text-inverse/55 truncate">
+            <p className="text-secondary-xs text-text-tertiary truncate">
               {rol}
             </p>
           </div>

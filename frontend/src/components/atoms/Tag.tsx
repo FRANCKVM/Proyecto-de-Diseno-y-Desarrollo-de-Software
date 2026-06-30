@@ -19,7 +19,7 @@ const VARIANT_CLASS: Record<TagVariant, string> = {
   elevado: "bg-warning-soft text-warning",
   critico: "bg-danger-soft text-danger",
   primary: "bg-primary-soft text-primary",
-  neutral: "bg-field text-text-primary",
+  neutral: "bg-field text-text-secondary",
 };
 
 /**

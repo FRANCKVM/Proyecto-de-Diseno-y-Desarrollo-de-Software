@@ -29,7 +29,7 @@ const NavItem = ({ letra, label, to, collapsed, esActivo }: NavItemProps) => (
   <NavLink
     to={to}
     className={cn(
-      "group relative flex items-center gap-3 px-3 py-2 transition-colors",
+      "relative flex items-center gap-3 px-3 py-2 transition-colors",
       collapsed && "justify-center",
       esActivo ? "bg-sidebar-hover" : "hover:bg-sidebar-hover"
     )}
@@ -54,7 +54,7 @@ const NavItem = ({ letra, label, to, collapsed, esActivo }: NavItemProps) => (
         className={cn(
           esActivo
             ? "text-nav-active text-text-inverse"
-            : "text-nav text-text-inverse/70 group-hover:text-text-inverse"
+            : "text-nav text-text-tertiary"
         )}
       >
         {label}

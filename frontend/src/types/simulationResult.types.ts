@@ -66,7 +66,7 @@ export interface ResumenOperativo {
 export interface ResultadoPeriodo {
   id: string;
   tipo: TipoSimulacion;
-  /** Rango de fechas en formato legible (ej: "Semanal 07-13/09/2026"). */
+  /** Rango de fechas en formato legible (ej: "Semanal 07-13/04/2026"). */
   rango: string;
   totalMaletas: number;
   /** Porcentaje de cumplimiento de plazos (0-100). */

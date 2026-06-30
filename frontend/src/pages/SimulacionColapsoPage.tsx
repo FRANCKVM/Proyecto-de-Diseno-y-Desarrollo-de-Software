@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/organisms/TopBar";
 import WorldMap from "@/components/map/WorldMap";
 import DrawerHost from "@/components/organisms/DrawerHost";
-import MapQuickActions from "@/components/organisms/MapQuickActions";
 import { OCCUPANCY_COLAPSO } from "@/services/sources2.0/demoOccupancy.mock";
 import { useAirports } from "@/hooks/useAirports";
 import { useFlightSimulation } from "@/hooks/useFlightSimulation";
@@ -15,16 +14,11 @@ import {
   USE_MOCK_DATA,
 } from "@/utils/constants";
 import { resolveSimulationResultsRoute } from "@/utils/routes";
-import { mergeMapFlights } from "@/utils/mapFlightHelpers";
 import { useSimulationConfigStore } from "@/store/simulationConfigStore";
 import {
   formatDuration,
   resolveSimulationClockData,
 } from "@/utils/simulationClock";
-import {
-  getFlightOccupancyMetric,
-  getWarehouseOccupancyMetric,
-} from "@/utils/capacityMetrics";
 
 /**
  * Pantalla de simulacion al colapso.
@@ -44,9 +38,7 @@ const SimulacionColapsoPage = () => {
     tipoSimulacion,
     occupancyByIcao,
     estado,
-    mapa,
     envios,
-    flights: backendMapFlights,
   } = useLiveSimulation({ autoStart: true, enablePolling: true });
 
   useEffect(() => {
@@ -67,7 +59,7 @@ const SimulacionColapsoPage = () => {
       ? estado.scMinutos / (backendBlockIntervalMs / 1000)
       : undefined;
 
-  const animatedFlights = useFlightSimulation({
+  const flights = useFlightSimulation({
     baseFlightCount: 25,
     scaleByDemand: true,
     backendShipments: USE_MOCK_DATA ? undefined : envios,
@@ -81,25 +73,13 @@ const SimulacionColapsoPage = () => {
       ? undefined
       : backendSimMinutesPerSecond,
   });
-  const flights = useMemo(
-    () => mergeMapFlights(animatedFlights, backendMapFlights),
-    [animatedFlights, backendMapFlights]
-  );
   const occupancy = USE_MOCK_DATA ? OCCUPANCY_COLAPSO : occupancyByIcao;
-  const capacityKpis = useMemo(
-    () => ({
-      ocupacionAviones: getFlightOccupancyMetric(flights, rangosSemaforo),
-      ocupacionAlmacenes: getWarehouseOccupancyMetric(occupancy, rangosSemaforo),
-    }),
-    [flights, occupancy, rangosSemaforo]
-  );
 
   const { simulatedDay, demandFactor } = useSimulationControlStore();
   const openAirport = useDrawerStore((s) => s.openAirport);
   const openFlight = useDrawerStore((s) => s.openFlight);
   const openWarehouseList = useDrawerStore((s) => s.openWarehouseList);
   const openShipmentsPanel = useDrawerStore((s) => s.openShipmentsPanel);
-  const openBaggagePanel = useDrawerStore((s) => s.openBaggagePanel);
   const openActiveFlightsPanel = useDrawerStore((s) => s.openActiveFlightsPanel);
   const focusedAirportIcao = useDrawerStore((s) => s.focusedAirportIcao);
   const focusedFlightId = useDrawerStore((s) => s.focusedFlightId);
@@ -115,12 +95,12 @@ const SimulacionColapsoPage = () => {
   );
   const activeFlightOnlyId = useDrawerStore((s) => s.activeFlightOnlyId);
   const shipmentRouteSegments = useDrawerStore((s) => s.shipmentRouteSegments);
+  const porcentajeResueltas = estado?.porcentajeResueltas ?? 0;
+  const totalSolicitudes = estado?.totalSolicitudes ?? 0;
   const {
     elapsedRealMs,
     elapsedSimulatedMs,
     inicioSimulacion,
-    fechaHoraActual,
-    fechaSimulacionActual,
     horaActual,
     horaSimulacion,
   } = resolveSimulationClockData({
@@ -131,9 +111,6 @@ const SimulacionColapsoPage = () => {
     useMockData: USE_MOCK_DATA,
     backendBlockIntervalMs,
   });
-  const liveReferenceMinute = USE_MOCK_DATA
-    ? undefined
-    : Math.floor(elapsedSimulatedMs / 60_000);
 
   useEffect(() => {
     if (
@@ -157,8 +134,6 @@ const SimulacionColapsoPage = () => {
           variant="colapso"
           reloj={{
             inicioSimulacion,
-            fechaHoraActual,
-            fechaSimulacionActual,
             horaActual,
             horaSimulacion,
             tiempoRealTranscurrido: formatDuration(elapsedRealMs),
@@ -166,8 +141,14 @@ const SimulacionColapsoPage = () => {
           }}
           diaSimulado={USE_MOCK_DATA ? simulatedDay : estado?.bloquesProcesados ?? 0}
           demanda={USE_MOCK_DATA ? `x ${demandFactor.toFixed(1)}` : `k=${estado?.k ?? 1}`}
+          enviosTotales={USE_MOCK_DATA ? 12450 : totalSolicitudes}
+          cumplimiento={
+            USE_MOCK_DATA ? "88 %" : `${Math.round(porcentajeResueltas)} %`
+          }
           estado={USE_MOCK_DATA ? "COLAPSO" : estado?.activa ? "ACTIVA" : "DETENIDA"}
-          kpis={capacityKpis}
+          onOpenWarehouses={openWarehouseList}
+          onOpenShipments={openShipmentsPanel}
+          onOpenActiveFlights={openActiveFlightsPanel}
         />
         {!isLoading && (
           <WorldMap
@@ -182,18 +163,11 @@ const SimulacionColapsoPage = () => {
             activeFlightRegionFilter={activeFlightRegionFilter}
             activeFlightSemaphoreFilter={activeFlightSemaphoreFilter}
             activeFlightOnlyId={activeFlightOnlyId}
-            flightCancellationEvents={mapa?.cancelacionesRecientes ?? []}
             shipmentRouteSegments={shipmentRouteSegments}
             onAirportClick={(a) => openAirport(a.icao)}
             onFlightClick={(id) => openFlight(id, { idSimulacion })}
           />
         )}
-        <MapQuickActions
-          onOpenActiveFlights={openActiveFlightsPanel}
-          onOpenWarehouses={openWarehouseList}
-          onOpenShipments={openShipmentsPanel}
-          onOpenBaggage={openBaggagePanel}
-        />
 
         <DrawerHost
           occupancyByIcao={occupancy}
@@ -202,8 +176,7 @@ const SimulacionColapsoPage = () => {
           idSimulacion={idSimulacion}
           shipments={envios}
           activeFlights={flights}
-          referenceMinute={liveReferenceMinute}
-          simulationStart={estado?.fechaHoraInicioSimulacion}
+          referenceMinute={estado?.punteroConsumoMinutos}
         />
       </main>
     </>

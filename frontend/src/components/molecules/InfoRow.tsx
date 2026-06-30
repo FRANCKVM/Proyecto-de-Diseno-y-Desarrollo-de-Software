@@ -10,13 +10,13 @@ interface InfoRowProps {
 
 /**
  * Fila clave-valor para drawers.
- * Estandar 61, seccion 4.12: label secundario a la izquierda,
- * valor principal a la derecha.
+ * Estandar 61, seccion 4.12: label gris secundario a la izquierda,
+ * valor en text-primary a la derecha.
  */
 const InfoRow = ({ label, value, valueClass }: InfoRowProps) => (
   <div className="flex items-center justify-between py-1.5 text-body">
-    <span className="text-text-primary">{label}</span>
-    <span className={cn("font-medium", valueClass ?? "text-text-primary")}>
+    <span className="text-text-secondary">{label}</span>
+    <span className={cn("text-text-primary font-medium", valueClass)}>
       {value}
     </span>
   </div>

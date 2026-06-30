@@ -16,12 +16,6 @@ const START_FORMATTER = new Intl.DateTimeFormat("es-PE", {
   hour12: false,
 });
 
-const DATE_FORMATTER = new Intl.DateTimeFormat("es-PE", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
 export const parseLocalDateTime = (
   value: string | null | undefined
 ): Date | null => {
@@ -74,9 +68,6 @@ export const formatClock = (date: Date | null): string =>
 
 export const formatStartDateTime = (date: Date | null): string =>
   date ? START_FORMATTER.format(date) : "--/--/---- --:--";
-
-export const formatDate = (date: Date | null): string =>
-  date ? DATE_FORMATTER.format(date) : "--/--/----";
 
 export const formatDuration = (durationMs: number): string => {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
@@ -137,19 +128,17 @@ export const resolveSimulationClockData = ({
       ? elapsedRealMs * simulatedMsPerRealMs
       : Math.max(0, (estado?.punteroConsumoMinutos ?? 0) * 60_000);
 
-  const fechaActualSimulacion = fechaInicioSimulacion
-    ? new Date(fechaInicioSimulacion.getTime() + elapsedSimulatedMs)
-    : null;
   const horaActual = formatClock(new Date(nowMs));
-  const fechaHoraActual = formatStartDateTime(new Date(nowMs));
-  const horaSimulacion = formatClock(fechaActualSimulacion);
+  const horaSimulacion = formatClock(
+    fechaInicioSimulacion
+      ? new Date(fechaInicioSimulacion.getTime() + elapsedSimulatedMs)
+      : null
+  );
 
   return {
     elapsedRealMs,
     elapsedSimulatedMs,
     inicioSimulacion: formatStartDateTime(fechaInicioSimulacion),
-    fechaHoraActual,
-    fechaSimulacionActual: formatDate(fechaActualSimulacion),
     horaActual,
     horaSimulacion,
   };

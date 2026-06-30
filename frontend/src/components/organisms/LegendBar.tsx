@@ -1,9 +1,5 @@
 import { cn } from "@/utils/cn";
 import StatusDot from "@/components/atoms/StatusDot";
-import {
-  UMBRAL_SEMAFORO_AMBAR_DEFAULT,
-  UMBRAL_SEMAFORO_VERDE_DEFAULT,
-} from "@/utils/constants";
 
 type LegendBarVariant = "simulacion" | "dia-a-dia" | "colapso";
 
@@ -38,21 +34,21 @@ const LegendBar = ({ variant }: LegendBarProps) => {
         <div className="flex items-center gap-1.5">
           <StatusDot variant="normal" size="sm" />
           <span className="text-secondary text-text-secondary">
-            Normal (&lt;{UMBRAL_SEMAFORO_VERDE_DEFAULT}%)
+            Normal (&lt;60%)
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <StatusDot variant="elevado" size="sm" />
           <span className="text-secondary text-text-secondary">
-            Elevado ({UMBRAL_SEMAFORO_VERDE_DEFAULT}-{UMBRAL_SEMAFORO_AMBAR_DEFAULT}%)
+            Elevado (60-85%)
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <StatusDot variant="critico" size="sm" />
           <span className="text-secondary text-text-secondary">
-            Critico (&gt;{UMBRAL_SEMAFORO_AMBAR_DEFAULT}%)
+            Critico (&gt;85%)
           </span>
         </div>
 

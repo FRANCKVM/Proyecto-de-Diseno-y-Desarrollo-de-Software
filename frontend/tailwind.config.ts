@@ -30,8 +30,8 @@ const config: Config = {
         },
         text: {
           primary: "#181B27",
-          secondary: "#181B27",
-          tertiary: "#181B27",
+          secondary: "#6B707D",
+          tertiary: "#969AA5",
           inverse: "#FFFFFF",
         },
         map: {
@@ -47,16 +47,16 @@ const config: Config = {
           soft: "#EBF1FD",
         },
         success: {
-          DEFAULT: "#16A34A",
-          soft: "#DCFCE7",
+          DEFAULT: "#229651",
+          soft: "#E7F9EE",
         },
         warning: {
-          DEFAULT: "#D97706",
-          soft: "#FEF3C7",
+          DEFAULT: "#DA9615",
+          soft: "#FFF6E2",
         },
         danger: {
-          DEFAULT: "#DC2626",
-          soft: "#FEE2E2",
+          DEFAULT: "#D53030",
+          soft: "#FDE9E9",
         },
       },
 
@@ -103,7 +103,7 @@ const config: Config = {
       spacing: {
         "sidebar-expanded": "220px",
         "sidebar-collapsed": "56px",
-        drawer: "342px",
+        drawer: "380px",
         topbar: "48px",
         "topbar-sm": "44px",
         legend: "40px",
