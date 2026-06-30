@@ -17,8 +17,8 @@ export const VUELOS_DETALLE_MOCK: VueloDetalle[] = [
     ocupacion: 350,
     origenIcao: "EDDI",
     destinoIcao: "VIDP",
-    fechaSalida: "2026-04-09T10:00:00Z",
-    fechaLlegadaEstimada: "2026-04-10T10:00:00Z",
+    fechaSalida: "2026-09-09T10:00:00Z",
+    fechaLlegadaEstimada: "2026-09-10T10:00:00Z",
     envios: [
       {
         codigo: "ENV-042",
@@ -58,8 +58,8 @@ export const VUELOS_DETALLE_MOCK: VueloDetalle[] = [
     ocupacion: 0,
     origenIcao: "VIDP",
     destinoIcao: "OPKC",
-    fechaSalida: "2026-04-09T18:00:00Z",
-    fechaLlegadaEstimada: "2026-04-09T22:00:00Z",
+    fechaSalida: "2026-09-09T18:00:00Z",
+    fechaLlegadaEstimada: "2026-09-09T22:00:00Z",
     envios: [],
   },
   {
@@ -70,8 +70,8 @@ export const VUELOS_DETALLE_MOCK: VueloDetalle[] = [
     ocupacion: 0,
     origenIcao: "VIDP",
     destinoIcao: "OAKB",
-    fechaSalida: "2026-04-09T20:00:00Z",
-    fechaLlegadaEstimada: "2026-04-10T00:30:00Z",
+    fechaSalida: "2026-09-09T20:00:00Z",
+    fechaLlegadaEstimada: "2026-09-10T00:30:00Z",
     envios: [],
   },
 ];

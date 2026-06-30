@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class OperacionesService {
@@ -43,6 +44,7 @@ public class OperacionesService {
     private static final int ESCALAS_INTERMEDIAS_MAX = 4;
     private static final double PLAZO_INTRACONTINENTAL_DIAS = 1.0;
     private static final double PLAZO_INTERCONTINENTAL_DIAS = 2.0;
+    private static final long VENTANA_CANCELACIONES_MAPA_REAL_MIN = 5;
 
     private final GrafoService grafoService;
     private final AeropuertoRepository aeropuertoRepository;
@@ -158,9 +160,7 @@ public class OperacionesService {
         }
 
         LocalDateTime ahora = LocalDateTime.now();
-        if (!fechaHoraSalida.isAfter(ahora)) {
-            throw new IllegalArgumentException("Solo se puede cancelar un vuelo programado.");
-        }
+        fechaHoraSalida = resolverFechaHoraSalidaCancelable(fechaHoraSalida, ahora);
 
         VueloCancelacion cancelacionExistente = vueloCancelacionRepository
                 .findByVuelo_IdVueloAndFechaHoraSalida(idVuelo, fechaHoraSalida)
@@ -178,6 +178,20 @@ public class OperacionesService {
         ));
         replanificarEnviosAfectadosOperacion(cancelacion);
         return cancelacion;
+    }
+
+    private LocalDateTime resolverFechaHoraSalidaCancelable(
+            LocalDateTime fechaHoraSalida,
+            LocalDateTime ahora
+    ) {
+        LocalDateTime limiteCancelacion = ahora.plusMinutes(VueloCancelacionService.MINUTOS_AVISO_MIN);
+        LocalDateTime fechaCancelable = fechaHoraSalida;
+
+        while (fechaCancelable.isBefore(limiteCancelacion)) {
+            fechaCancelable = fechaCancelable.plusDays(1);
+        }
+
+        return fechaCancelable;
     }
 
     @Transactional(readOnly = true)
@@ -266,8 +280,33 @@ public class OperacionesService {
         return new MapaSimulacionEstado(
                 0,
                 construirOcupacionPorAeropuertoOperacion(envios),
-                construirVuelosMapaOperacion(envios)
+                construirVuelosMapaOperacion(envios),
+                construirCancelacionesRecientesMapaOperacion()
         );
+    }
+
+    private List<MapaSimulacionEstado.CancelacionVueloMapa> construirCancelacionesRecientesMapaOperacion() {
+        LocalDateTime ahora = LocalDateTime.now();
+        return vueloCancelacionRepository
+                .findByFechaHoraCancelacionBetween(
+                        ahora.minusMinutes(VENTANA_CANCELACIONES_MAPA_REAL_MIN),
+                        ahora.plusSeconds(10)
+                )
+                .stream()
+                .map(cancelacion -> {
+                    Vuelo vuelo = cancelacion.getVuelo();
+                    if (vuelo == null || vuelo.getDesde() == null) {
+                        return null;
+                    }
+
+                    return new MapaSimulacionEstado.CancelacionVueloMapa(
+                            "op-cancel-" + cancelacion.getIdCancelacion(),
+                            vuelo.getDesde().getCodigo(),
+                            String.valueOf(vuelo.getIdVuelo())
+                    );
+                })
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     private List<SolicitudEnvio> normalizarSolicitudes(List<SolicitudEnvio> solicitudesEntrantes) {

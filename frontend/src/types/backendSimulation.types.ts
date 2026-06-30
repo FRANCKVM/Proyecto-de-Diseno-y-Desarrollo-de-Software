@@ -99,15 +99,27 @@ export interface BackendEstadoSimulacion {
 
 export interface BackendMapaVuelo {
   id: string;
+  code?: string | null;
   fromIcao: string;
   toIcao: string;
   progress: number;
+  occupancyPct?: number | null;
+  departureMinute?: number | null;
+  arrivalMinute?: number | null;
+  durationMinutes?: number | null;
+}
+
+export interface BackendMapaCancelacionVuelo {
+  id: string;
+  airportIcao: string;
+  flightCode: string;
 }
 
 export interface BackendMapaSimulacionEstado {
   idSimulacion: number;
   ocupacionPorAeropuerto: Record<string, number>;
   vuelos: BackendMapaVuelo[];
+  cancelacionesRecientes?: BackendMapaCancelacionVuelo[];
 }
 
 export interface BackendEstadoOperacion {

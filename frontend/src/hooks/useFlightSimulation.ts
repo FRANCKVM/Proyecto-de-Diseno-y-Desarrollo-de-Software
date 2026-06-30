@@ -17,6 +17,7 @@ import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
  * "cada +1.0 de demanda anade ~5 vuelos al pool activo".
  */
 const FLIGHTS_PER_DEMAND_UNIT = 5;
+const FLIGHT_SNAPSHOT_INTERVAL_MS = 250;
 
 const getCurrentUtcMinute = (): number => {
   const now = new Date();
@@ -115,6 +116,7 @@ const calculateOccupancyPct = (
 interface ActiveFlightAggregate {
   idVuelo: number;
   departure: number;
+  arrival: number;
   segmentIndex: number;
   fromIcao: string;
   toIcao: string;
@@ -131,7 +133,9 @@ const buildFlightsFromShipments = (
   shipments: BackendSolicitudEnvio[],
   currentMinute: number,
   simulationStartMs: number | null,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  progressUpdatedAtMs: number = performance.now(),
+  simMinutesPerSecond: number | null = null
 ): AnimatedFlight[] => {
   const activeFlightsByOccurrence = new Map<string, ActiveFlightAggregate>();
 
@@ -186,6 +190,7 @@ const buildFlightsFromShipments = (
         activeFlightsByOccurrence.set(occurrenceKey, {
           idVuelo: flight.idVuelo,
           departure,
+          arrival,
           segmentIndex: groupIndex * 100 + segmentIndex,
           fromIcao: flight.desde.codigo,
           toIcao: flight.hasta.codigo,
@@ -216,7 +221,12 @@ const buildFlightsFromShipments = (
       toIcao: flight.toIcao,
       progress: flight.progress,
       occupancyPct: calculateOccupancyPct(usedCapacity, flight.capacity),
+      departureMinute: flight.departure,
+      arrivalMinute: flight.arrival,
       durationSeconds: flight.durationMinutes * 60,
+      progressVelocityPerSecond:
+        (simMinutesPerSecond ?? 1 / 60) / flight.durationMinutes,
+      progressUpdatedAtMs,
     };
   });
 };
@@ -267,9 +277,18 @@ export const useFlightSimulation = (
   const backendSimMinutesPerSecondRef = useRef({
     value: backendSimMinutesPerSecond,
   });
+  const hasReceivedBackendClockRef = useRef(
+    backendClockMinutes !== null && backendClockMinutes !== undefined
+  );
 
   useEffect(() => {
     if (backendClockMinutes !== null && backendClockMinutes !== undefined) {
+      if (!hasReceivedBackendClockRef.current) {
+        backendMinuteRef.current = backendClockMinutes;
+        hasReceivedBackendClockRef.current = true;
+        return;
+      }
+
       backendMinuteRef.current = Math.max(
         backendMinuteRef.current,
         backendClockMinutes
@@ -284,6 +303,8 @@ export const useFlightSimulation = (
   useEffect(() => {
     if (backendSimulationStartRef.current !== backendSimulationStart) {
       backendMinuteRef.current = backendClockMinutes ?? getCurrentUtcMinute();
+      hasReceivedBackendClockRef.current =
+        backendClockMinutes !== null && backendClockMinutes !== undefined;
     }
 
     backendSimulationStartRef.current = backendSimulationStart;
@@ -300,6 +321,7 @@ export const useFlightSimulation = (
     if (hasBackendShipments) {
       let rafId = 0;
       let lastTimestamp = performance.now();
+      let lastSnapshotTimestamp = 0;
 
       const tick = (now: number) => {
         const dtMs = now - lastTimestamp;
@@ -309,19 +331,28 @@ export const useFlightSimulation = (
         const simMinutesPerSecond =
           backendSimMinutesPerSecondRef.current.value ?? 0;
         const shipments = backendShipmentsRef.current ?? [];
+        const simulationStartMs = parseLocalDateTimeMs(
+          backendSimulationStartRef.current
+        );
 
         const currentMinute =
           backendMinuteRef.current + dtSeconds * speed * simMinutesPerSecond;
 
         backendMinuteRef.current = currentMinute;
 
-        const nextFlights = buildFlightsFromShipments(
-          shipments,
-          currentMinute,
-          parseLocalDateTimeMs(backendSimulationStartRef.current)
-        );
-        flightsRef.current = nextFlights;
-        setFlights(nextFlights);
+        if (now - lastSnapshotTimestamp >= FLIGHT_SNAPSHOT_INTERVAL_MS) {
+          const nextFlights = buildFlightsFromShipments(
+            shipments,
+            currentMinute,
+            simulationStartMs,
+            Date.now(),
+            now,
+            simulationStartMs === null ? null : simMinutesPerSecond * speed
+          );
+          flightsRef.current = nextFlights;
+          lastSnapshotTimestamp = now;
+          setFlights(nextFlights);
+        }
 
         rafId = requestAnimationFrame(tick);
       };
@@ -334,7 +365,10 @@ export const useFlightSimulation = (
       const initialFlights = buildFlightsFromShipments(
         backendShipmentsRef.current ?? [],
         initialMinute,
-        parseLocalDateTimeMs(backendSimulationStartRef.current)
+        parseLocalDateTimeMs(backendSimulationStartRef.current),
+        Date.now(),
+        performance.now(),
+        backendSimMinutesPerSecondRef.current.value ?? null
       );
       flightsRef.current = initialFlights;
       setFlights(initialFlights);
@@ -345,6 +379,7 @@ export const useFlightSimulation = (
 
     let rafId = 0;
     let lastTimestamp = performance.now();
+    let lastSnapshotTimestamp = 0;
 
     const tick = (now: number) => {
       const dtMs = now - lastTimestamp;
@@ -362,6 +397,7 @@ export const useFlightSimulation = (
         : baseFlightCount;
 
       const pool = flightsRef.current;
+      let shouldPublishSnapshot = now - lastSnapshotTimestamp >= FLIGHT_SNAPSHOT_INTERVAL_MS;
 
       // Avance del progress y respawn de vuelos completados.
       for (let i = 0; i < pool.length; i++) {
@@ -371,12 +407,23 @@ export const useFlightSimulation = (
 
         if (nextProgress >= 1) {
           // Respawn: mismo id, nuevo trayecto, progress 0.
-          pool[i] = generateFlight(f.id, 0);
+          const nextFlight = generateFlight(f.id, 0);
+          pool[i] = {
+            ...nextFlight,
+            progressVelocityPerSecond: speed / nextFlight.durationSeconds,
+            progressUpdatedAtMs: now,
+          };
+          shouldPublishSnapshot = true;
         } else {
           // Avanza in-place. Mutamos el objeto porque el array completo
           // se clona al hacer setState; los componentes hijos comparan
           // por shallow y reciben referencias nuevas.
-          pool[i] = { ...f, progress: nextProgress };
+          pool[i] = {
+            ...f,
+            progress: nextProgress,
+            progressVelocityPerSecond: speed / f.durationSeconds,
+            progressUpdatedAtMs: now,
+          };
         }
       }
 
@@ -384,15 +431,27 @@ export const useFlightSimulation = (
       if (pool.length < targetCount) {
         // Anadimos vuelos nuevos hasta alcanzar el target.
         for (let i = pool.length; i < targetCount; i++) {
-          pool.push(generateFlight(`SIM-${String(i).padStart(3, "0")}`, Math.random()));
+          const flight = generateFlight(
+            `SIM-${String(i).padStart(3, "0")}`,
+            Math.random()
+          );
+          pool.push({
+            ...flight,
+            progressVelocityPerSecond: speed / flight.durationSeconds,
+            progressUpdatedAtMs: now,
+          });
         }
+        shouldPublishSnapshot = true;
       } else if (pool.length > targetCount) {
         // Recortamos los excedentes desde el final.
         pool.length = targetCount;
+        shouldPublishSnapshot = true;
       }
 
-      // Push al state. Clonamos para forzar re-render.
-      setFlights([...pool]);
+      if (shouldPublishSnapshot) {
+        lastSnapshotTimestamp = now;
+        setFlights([...pool]);
+      }
 
       rafId = requestAnimationFrame(tick);
     };

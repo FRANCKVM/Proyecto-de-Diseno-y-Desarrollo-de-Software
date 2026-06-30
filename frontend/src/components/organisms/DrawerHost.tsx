@@ -6,6 +6,7 @@ import ShipmentFormDrawer from "@/components/drawers/ShipmentFormDrawer";
 import ShipmentOverviewDrawer from "@/components/drawers/ShipmentOverviewDrawer";
 import WarehouseListDrawer from "@/components/drawers/WarehouseListDrawer";
 import ActiveFlightsDrawer from "@/components/drawers/ActiveFlightsDrawer";
+import BaggageDrawer from "@/components/drawers/BaggageDrawer";
 import type { MapFlight } from "@/components/map/WorldMap";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
@@ -23,6 +24,7 @@ interface DrawerHostProps {
   shipments?: BackendSolicitudEnvio[];
   activeFlights?: MapFlight[];
   referenceMinute?: number | null;
+  simulationStart?: string | null;
   onShipmentCreated?: () => Promise<void> | void;
 }
 
@@ -47,6 +49,7 @@ const DrawerHost = ({
   shipments = [],
   activeFlights = [],
   referenceMinute,
+  simulationStart,
   onShipmentCreated,
 }: DrawerHostProps) => {
   const selection = useDrawerStore((s) => s.selection);
@@ -76,6 +79,7 @@ const DrawerHost = ({
           shipments={shipments}
           showFlights={false}
           referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "shipments-panel":
@@ -85,6 +89,17 @@ const DrawerHost = ({
           shipments={shipments}
           idSimulacion={idSimulacion}
           referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
+        />
+      );
+    case "baggage-panel":
+      return (
+        <BaggageDrawer
+          key="baggage-panel"
+          shipments={shipments}
+          idSimulacion={idSimulacion}
+          referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "active-flights-panel":
@@ -95,6 +110,9 @@ const DrawerHost = ({
           airports={airports}
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
+          shipments={shipments}
+          referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "airport":
@@ -108,6 +126,7 @@ const DrawerHost = ({
           shipments={shipments}
           showFlights
           referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "flight":

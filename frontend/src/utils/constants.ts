@@ -17,8 +17,8 @@ export const MAX_TIEMPO_ENTREGA_INTERCONTINENTAL = 2;
 // Umbrales por defecto de ocupacion de almacen (porcentaje).
 // Configurables por el operador en la pantalla de configuracion.
 // ============================================================================
-export const UMBRAL_SEMAFORO_VERDE_DEFAULT = 60;
-export const UMBRAL_SEMAFORO_AMBAR_DEFAULT = 85;
+export const UMBRAL_SEMAFORO_VERDE_DEFAULT = 40;
+export const UMBRAL_SEMAFORO_AMBAR_DEFAULT = 70;
 
 export const COLOR_SEMAFORO_VERDE = COLORS.success.base;
 export const COLOR_SEMAFORO_AMBAR = COLORS.warning.base;
@@ -54,7 +54,7 @@ export const DURACION_SIMULACION_SEMANAL_DIAS = 5;
  * Intervalo usado como fallback si el estado del backend aun no incluye
  * `intervaloRealMs`.
  */
-export const BACKEND_SIMULATION_BLOCK_INTERVAL_MS = 30000;
+export const BACKEND_SIMULATION_BLOCK_INTERVAL_MS = 40000;
 
 /** Velocidades disponibles del reloj de simulacion. */
 export const VELOCIDADES_SIMULACION = [0.5, 1, 2, 4] as const;

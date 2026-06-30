@@ -20,6 +20,10 @@ export interface AnimatedFlight {
   toIcao: string;
   /** Porcentaje de ocupacion del vuelo para semaforo visual. */
   occupancyPct?: number;
+  /** Minuto absoluto de salida dentro de la linea de tiempo usada por el mapa. */
+  departureMinute?: number;
+  /** Minuto absoluto de llegada dentro de la linea de tiempo usada por el mapa. */
+  arrivalMinute?: number;
   /**
    * Avance entre 0 (acaba de despegar) y 1 (esta aterrizando).
    * Cuando alcanza 1, el motor lo respawnea con nuevos extremos.
@@ -32,6 +36,14 @@ export interface AnimatedFlight {
    * a tiempo real.
    */
   durationSeconds: number;
+  /**
+   * Velocidad visual del avance en unidades de progress por segundo real.
+   * Permite que Leaflet interpole entre snapshots sin forzar renders React
+   * en cada frame del navegador.
+   */
+  progressVelocityPerSecond?: number;
+  /** Timestamp performance.now() en que se calculo `progress`. */
+  progressUpdatedAtMs?: number;
 }
 
 /**

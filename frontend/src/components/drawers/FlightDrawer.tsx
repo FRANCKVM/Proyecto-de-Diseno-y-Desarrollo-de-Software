@@ -18,6 +18,8 @@ interface FlightDrawerProps {
   referenceMinute?: number | null;
 }
 
+const PANEL_REFRESH_MS_SIMULATION = 1500;
+const PANEL_REFRESH_MS_OPERATION = 5000;
 const ISO_WITH_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
@@ -119,32 +121,52 @@ const FlightDrawer = ({
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setNotFound(false);
 
-    getFlightByCode(codigo, idSimulacion)
-      .then((data) => {
+    const refreshMs =
+      idSimulacion != null
+        ? PANEL_REFRESH_MS_SIMULATION
+        : PANEL_REFRESH_MS_OPERATION;
+
+    const loadFlight = async (showLoading: boolean, forceRefresh: boolean) => {
+      if (showLoading) {
+        setIsLoading(true);
+        setNotFound(false);
+      }
+
+      try {
+        const data = await getFlightByCode(codigo, idSimulacion, {
+          forceRefresh,
+        });
+
         if (cancelled) return;
         setFlight(data);
         setNotFound(!data);
-        setIsLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) {
+      } catch {
+        if (!cancelled && showLoading) {
           setNotFound(true);
+        }
+      } finally {
+        if (!cancelled && showLoading) {
           setIsLoading(false);
         }
-      });
+      }
+    };
+
+    void loadFlight(true, false);
+    const intervalId = window.setInterval(() => {
+      void loadFlight(false, true);
+    }, refreshMs);
 
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, [codigo, idSimulacion]);
 
   if (isLoading) {
     return (
       <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
-        <p className="text-body text-text-tertiary">Cargando informacion...</p>
+        <p className="text-body text-text-primary">Cargando informacion...</p>
       </DrawerBase>
     );
   }
@@ -152,7 +174,7 @@ const FlightDrawer = ({
   if (notFound || !flight) {
     return (
       <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
-        <p className="text-body text-text-tertiary">
+        <p className="text-body text-text-primary">
           No se encontro informacion para este vuelo.
         </p>
       </DrawerBase>
@@ -249,7 +271,7 @@ const FlightDrawer = ({
             label={`Destino (${flight.destinoIcao})`}
             sublabel={`${formatFecha(flight.fechaLlegadaEstimada)} — Llegada est.`}
             status="Pendiente"
-            statusColor="text-text-tertiary"
+            statusColor="text-text-primary"
             isLast
           />
         </div>
@@ -262,7 +284,7 @@ const FlightDrawer = ({
           {flight.envios.length > 0 && ` (${flight.envios.length})`}
         </h3>
         {flight.envios.length === 0 ? (
-          <p className="text-body text-text-tertiary">
+          <p className="text-body text-text-primary">
             Sin envios asignados todavia.
           </p>
         ) : (
@@ -280,11 +302,11 @@ const FlightDrawer = ({
                   >
                     {e.codigo}
                   </button>
-                  <span className="text-secondary text-text-secondary">
+                  <span className="text-secondary text-text-primary">
                     {e.origenIcao} &gt; {e.destinoIcao}
                   </span>
                 </div>
-                <span className="text-secondary text-text-secondary">
+                <span className="text-secondary text-text-primary">
                   {e.maletasOcupadas} / {e.maletasTotales} mal.
                 </span>
               </li>
@@ -338,7 +360,7 @@ const TimelineStep = ({
         <span className={`text-secondary ${statusColor}`}>{status}</span>
       </div>
       {sublabel && (
-        <p className="text-secondary text-text-secondary">{sublabel}</p>
+        <p className="text-secondary text-text-primary">{sublabel}</p>
       )}
       {isMiddle && (
         <p className="text-secondary text-primary mt-0.5">En transito</p>

@@ -21,8 +21,8 @@ interface DrawerBaseProps {
  * Contenedor base para los drawers del sistema.
  *
  * Estandar 61, seccion 4.12 y 8:
- *   - Ancho fijo 380px.
- *   - Posicionado fixed a la derecha, full-height.
+ *   - Ancho fijo segun token w-drawer.
+ *   - Posicionado fixed pegado a la derecha debajo de la botonera del mapa.
  *   - Slide-in de 200ms desde la derecha.
  *   - Sombra suave hacia la izquierda.
  *   - Header con eyebrow + titulo + boton X para cerrar.
@@ -41,7 +41,7 @@ const DrawerBase = ({
 }: DrawerBaseProps) => (
   <aside
     className={cn(
-      "fixed top-0 right-0 h-screen w-drawer bg-card border-l border-border shadow-drawer z-[1100] flex flex-col",
+      "fixed right-0 top-11 h-[calc(100vh-2.75rem)] w-drawer rounded-none bg-card border border-r-0 border-border shadow-drawer z-[950] flex flex-col",
       "drawer-enter drawer-enter-active"
     )}
     role="dialog"
@@ -51,7 +51,7 @@ const DrawerBase = ({
     <header className="px-5 pt-5 pb-4 border-b border-border-subtle flex items-start gap-3">
       <div className="flex-1 min-w-0">
         {eyebrow && (
-          <p className="text-secondary text-text-secondary mb-1">{eyebrow}</p>
+          <p className="text-secondary text-text-primary mb-1">{eyebrow}</p>
         )}
         <h2 className="text-drawer-title-lg text-text-primary truncate">
           {title}
@@ -60,7 +60,7 @@ const DrawerBase = ({
       <button
         type="button"
         onClick={onClose}
-        className="text-text-tertiary hover:text-text-primary transition-colors flex items-center gap-1 text-secondary"
+        className="text-text-primary hover:text-primary transition-colors flex items-center gap-1 text-secondary"
         aria-label="Cerrar"
       >
         <X size={14} />

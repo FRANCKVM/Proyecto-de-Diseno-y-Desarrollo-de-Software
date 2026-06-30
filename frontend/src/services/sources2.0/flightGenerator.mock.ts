@@ -62,7 +62,14 @@ const FLIGHT_DURATION_SECONDS: Record<"intra" | "inter", number> = {
   inter: 60,
 };
 
-const randomOccupancyPct = (): number => 20 + Math.round(Math.random() * 75);
+const randomOccupancyPct = (): number => {
+  if (Math.random() < 0.15) {
+    return 0;
+  }
+
+  return 10 + Math.round(Math.random() * 85);
+};
+const randomDepartureMinute = (): number => Math.floor(Math.random() * 24 * 60);
 
 /**
  * Pool de ICAOs ponderado segun HUB_WEIGHT / NORMAL_WEIGHT.
@@ -139,13 +146,17 @@ export const generateFlight = (
   initialProgress = 0
 ): AnimatedFlight => {
   const { from, to } = pickFromTo();
+  const durationSeconds = durationFor(from, to);
+  const departureMinute = randomDepartureMinute();
   return {
     id,
     fromIcao: from,
     toIcao: to,
     progress: initialProgress,
     occupancyPct: randomOccupancyPct(),
-    durationSeconds: durationFor(from, to),
+    departureMinute,
+    arrivalMinute: departureMinute + durationSeconds,
+    durationSeconds,
   };
 };
 
@@ -159,7 +170,8 @@ export const generateFlight = (
 export const generateFlightPool = (count: number): AnimatedFlight[] => {
   const flights: AnimatedFlight[] = [];
   for (let i = 0; i < count; i++) {
-    flights.push(generateFlight(`SIM-${String(i).padStart(3, "0")}`, Math.random()));
+    const flight = generateFlight(`SIM-${String(i).padStart(3, "0")}`, Math.random());
+    flights.push(i % 7 === 0 ? { ...flight, occupancyPct: 0 } : flight);
   }
   return flights;
 };

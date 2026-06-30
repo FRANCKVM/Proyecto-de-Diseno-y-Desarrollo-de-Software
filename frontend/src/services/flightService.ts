@@ -30,7 +30,8 @@ import type { VueloDetalle } from "@/types/flight.types";
  */
 export const getFlightByCode = async (
   codigo: string,
-  idSimulacion?: number | null
+  idSimulacion?: number | null,
+  options?: { forceRefresh?: boolean }
 ): Promise<VueloDetalle | null> => {
   if (idSimulacion != null) {
     const simulatedFlight = await fetchFlightDetailReferenceData(
@@ -43,7 +44,7 @@ export const getFlightByCode = async (
     }
   }
 
-  const cachedFlight = getCachedFlightByCode(codigo);
+  const cachedFlight = options?.forceRefresh ? null : getCachedFlightByCode(codigo);
   if (cachedFlight) {
     return cachedFlight;
   }
@@ -54,7 +55,11 @@ export const getFlightByCode = async (
     // Continuamos con fallback puntual por vuelo si la precarga falla.
   }
 
-  return fetchFlightDetailReferenceData(codigo);
+  const flight = await fetchFlightDetailReferenceData(codigo);
+  if (flight) {
+    cacheFlightDetail(flight);
+  }
+  return flight;
 };
 
 /**
@@ -66,7 +71,8 @@ export const getFlightByCode = async (
  */
 export const listFlightsByAirport = async (
   icao: string,
-  idSimulacion?: number | null
+  idSimulacion?: number | null,
+  options?: { forceRefresh?: boolean }
 ): Promise<VueloDetalle[]> => {
   if (idSimulacion != null) {
     try {
@@ -76,7 +82,7 @@ export const listFlightsByAirport = async (
     }
   }
 
-  if (hasCachedFlightsByAirport(icao)) {
+  if (!options?.forceRefresh && hasCachedFlightsByAirport(icao)) {
     return getCachedFlightsByAirport(icao);
   }
 
@@ -86,7 +92,7 @@ export const listFlightsByAirport = async (
     // Si falla la precarga global, cargamos solo el aeropuerto solicitado.
   }
 
-  if (hasCachedFlightsByAirport(icao)) {
+  if (!options?.forceRefresh && hasCachedFlightsByAirport(icao)) {
     return getCachedFlightsByAirport(icao);
   }
 

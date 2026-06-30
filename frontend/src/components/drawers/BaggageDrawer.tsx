@@ -2,14 +2,16 @@ import { useState } from "react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import Tag from "@/components/atoms/Tag";
 import { useDrawerStore } from "@/store/drawerStore";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import {
+  buildRouteSegments,
   buildShipmentRouteSegments,
   resolveShipmentFocusTarget,
+  type ShipmentRouteSegment,
 } from "@/utils/shipmentFocus";
-import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
-interface ShipmentOverviewDrawerProps {
+interface BaggageDrawerProps {
   shipments: BackendSolicitudEnvio[];
   idSimulacion?: number | null;
   referenceMinute?: number | null;
@@ -27,6 +29,14 @@ const ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
   EN_PROCESO: "En proceso",
   COMPLETADO: "Completado",
 };
+
+const formatShipmentCode = (idEnvio: number): string =>
+  `ENV-${String(idEnvio).padStart(3, "0")}`;
+
+const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
+  shipment.idEnvio !== null
+    ? formatShipmentCode(shipment.idEnvio)
+    : `Envio ${shipment.origen.codigo}-${shipment.destino.codigo}`;
 
 const getCurrentUtcMinute = (): number => {
   const now = new Date();
@@ -141,70 +151,17 @@ const getElapsedMinutes = (
   eventMinute: number | null,
   referenceMinute: number
 ): number | null => {
-  if (eventMinute === null) {
-    return null;
-  }
-
-  if (referenceMinute < eventMinute) {
+  if (eventMinute === null || referenceMinute < eventMinute) {
     return null;
   }
 
   return referenceMinute - eventMinute;
 };
 
-const formatUtcMinute = (minute: number | null): string => {
-  if (minute === null) {
-    return "Sin hora";
-  }
-
-  const normalized = normalizeMinute(minute);
-  const hour = String(Math.floor(normalized / 60)).padStart(2, "0");
-  const minutes = String(normalized % 60).padStart(2, "0");
-  return `${hour}:${minutes} UTC`;
-};
-
-const formatShipmentDateTime = (fecha: string, hora: string): string => {
-  const iso = `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}Z`;
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) {
-    return `${fecha} ${hora}`;
-  }
-
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-
-  return `${day}/${month} ${hour}:${minute}`;
-};
-
-const formatShipmentCode = (idEnvio: number): string =>
-  `ENV-${String(idEnvio).padStart(3, "0")}`;
-
-const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
-  shipment.idEnvio !== null
-    ? formatShipmentCode(shipment.idEnvio)
-    : `Envio ${shipment.origen.codigo}-${shipment.destino.codigo}`;
-
-const getShipmentKey = (shipment: BackendSolicitudEnvio): string =>
-  shipment.idEnvio !== null
-    ? `envio-${shipment.idEnvio}`
-    : `${shipment.fecha}-${shipment.hora}-${shipment.origen.codigo}-${shipment.destino.codigo}-${shipment.contarBolsas}`;
-
-const getFirstDepartureMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): number | null => {
-  return getShipmentTimeline(shipment, simulationStart).firstDeparture;
-};
-
 const getLastArrivalMinute = (
   shipment: BackendSolicitudEnvio,
   simulationStart?: string | null
-): number | null => {
-  return getShipmentTimeline(shipment, simulationStart).lastArrival;
-};
+): number | null => getShipmentTimeline(shipment, simulationStart).lastArrival;
 
 const resolveDerivedShipmentStatus = (
   shipment: BackendSolicitudEnvio,
@@ -232,28 +189,129 @@ const resolveDerivedShipmentStatus = (
   return "planificados";
 };
 
-const ShipmentOverviewDrawer = ({
+const getStatusLabel = (
+  shipment: BackendSolicitudEnvio,
+  status: ShipmentStatus
+): string => {
+  if (status === "en-curso") {
+    return "En curso";
+  }
+
+  if (status === "entregados") {
+    return "Completado";
+  }
+
+  return ESTADO_LABEL[shipment.estado];
+};
+
+const countBags = (shipments: BackendSolicitudEnvio[]): number =>
+  shipments.reduce((total, shipment) => total + (shipment.contarBolsas ?? 0), 0);
+
+interface VirtualBaggageItem {
+  id: string;
+  shipment: BackendSolicitudEnvio;
+  shipmentCode: string;
+  bagIndex: number;
+  routeLabel: string;
+  routeSegments: ShipmentRouteSegment[];
+  assigned: boolean;
+  status: ShipmentStatus;
+}
+
+const formatBagCode = (shipment: BackendSolicitudEnvio, bagIndex: number): string => {
+  const shipmentCode =
+    shipment.idEnvio !== null
+      ? formatShipmentCode(shipment.idEnvio)
+      : `ENV-${shipment.origen.codigo}-${shipment.destino.codigo}`;
+
+  return `${shipmentCode}-BAG-${String(bagIndex).padStart(3, "0")}`;
+};
+
+const buildRouteLabel = (
+  segments: ShipmentRouteSegment[],
+  shipment: BackendSolicitudEnvio
+): string => {
+  if (segments.length === 0) {
+    return `${shipment.origen.codigo} > ${shipment.destino.codigo}`;
+  }
+
+  const points = [segments[0].fromIcao, ...segments.map((segment) => segment.toIcao)];
+  return points.join(" > ");
+};
+
+const buildVirtualBaggageItems = (
+  shipments: BackendSolicitudEnvio[],
+  getStatus: (shipment: BackendSolicitudEnvio) => ShipmentStatus
+): VirtualBaggageItem[] => {
+  const items: VirtualBaggageItem[] = [];
+
+  shipments.forEach((shipment) => {
+    const shipmentCode = getShipmentCodeLabel(shipment);
+    const totalBags = shipment.contarBolsas ?? 0;
+    const groups = getShipmentRouteGroups(shipment);
+    const status = getStatus(shipment);
+    let nextBagIndex = 1;
+
+    groups.forEach((group) => {
+      const quantity = Math.max(0, group.cantidadBolsas ?? 0);
+      const start = nextBagIndex;
+      const end = Math.min(totalBags, nextBagIndex + quantity - 1);
+      const routeSegments = buildRouteSegments(group.ruta, {
+        fromIcao: shipment.origen.codigo,
+        toIcao: shipment.destino.codigo,
+      });
+      const routeLabel = buildRouteLabel(routeSegments, shipment);
+
+      for (let bagIndex = start; bagIndex <= end; bagIndex++) {
+        items.push({
+          id: formatBagCode(shipment, bagIndex),
+          shipment,
+          shipmentCode,
+          bagIndex,
+          routeLabel,
+          routeSegments,
+          assigned: true,
+          status,
+        });
+      }
+
+      nextBagIndex = end + 1;
+    });
+
+    for (let bagIndex = nextBagIndex; bagIndex <= totalBags; bagIndex++) {
+      items.push({
+        id: formatBagCode(shipment, bagIndex),
+        shipment,
+        shipmentCode,
+        bagIndex,
+        routeLabel: `${shipment.origen.codigo} > ${shipment.destino.codigo}`,
+        routeSegments: [],
+        assigned: false,
+        status,
+      });
+    }
+  });
+
+  return items;
+};
+
+const BaggageDrawer = ({
   shipments,
   idSimulacion,
   referenceMinute,
   simulationStart,
-}: ShipmentOverviewDrawerProps) => {
+}: BaggageDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
+  const focusShipmentRouteSegments = useDrawerStore(
+    (s) => s.focusShipmentRouteSegments
+  );
   const [mode, setMode] = useState<ShipmentViewMode>("todos");
   const [deliveredHours, setDeliveredHours] = useState(6);
   const [airportFilter, setAirportFilter] = useState("todos");
+
   const getReferenceMinuteForShipment = (shipment: BackendSolicitudEnvio) =>
     referenceMinute ?? getUtcMinutesSinceShipmentDay(shipment);
-
-  const airportOptions = Array.from(
-    new Set(
-      shipments.flatMap((shipment) => [
-        shipment.origen.codigo,
-        shipment.destino.codigo,
-      ])
-    )
-  ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
 
   const shipmentStatus = (shipment: BackendSolicitudEnvio) =>
     resolveDerivedShipmentStatus(
@@ -261,6 +319,7 @@ const ShipmentOverviewDrawer = ({
       getReferenceMinuteForShipment(shipment),
       simulationStart
     );
+
   const inProgressShipments = shipments.filter(
     (shipment) => shipmentStatus(shipment) === "en-curso"
   );
@@ -282,6 +341,14 @@ const ShipmentOverviewDrawer = ({
       : mode === "en-curso"
         ? inProgressShipments
         : deliveredShipments;
+  const airportOptions = Array.from(
+    new Set(
+      shipments.flatMap((shipment) => [
+        shipment.origen.codigo,
+        shipment.destino.codigo,
+      ])
+    )
+  ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
   const visibleShipments =
     airportFilter === "todos"
       ? visibleShipmentsByMode
@@ -290,6 +357,7 @@ const ShipmentOverviewDrawer = ({
             shipment.origen.codigo === airportFilter ||
             shipment.destino.codigo === airportFilter
         );
+  const baggageItems = buildVirtualBaggageItems(visibleShipments, shipmentStatus);
 
   const handleHoursChange = (value: string) => {
     const nextValue = Number(value);
@@ -300,26 +368,38 @@ const ShipmentOverviewDrawer = ({
     setDeliveredHours(Math.min(23, Math.max(1, Math.floor(nextValue))));
   };
 
-  const handleOpenShipment = (
-    shipmentCode: string,
-    shipment: BackendSolicitudEnvio
-  ) => {
-    openShipment(
-      shipmentCode,
-      {
-        idSimulacion,
-        ...resolveShipmentFocusTarget(
-          shipment,
-          getReferenceMinuteForShipment(shipment),
-          simulationStart
-        ),
-        shipmentRouteSegments: buildShipmentRouteSegments(shipment),
-      }
-    );
+  const handleOpenShipment = (shipment: BackendSolicitudEnvio) => {
+    if (shipment.idEnvio === null) {
+      return;
+    }
+
+    openShipment(formatShipmentCode(shipment.idEnvio), {
+      idSimulacion,
+      ...resolveShipmentFocusTarget(
+        shipment,
+        getReferenceMinuteForShipment(shipment),
+        simulationStart
+      ),
+      shipmentRouteSegments: buildShipmentRouteSegments(shipment),
+    });
+  };
+
+  const handleFocusBag = (bag: VirtualBaggageItem) => {
+    if (bag.routeSegments.length === 0) {
+      focusShipmentRouteSegments([
+        {
+          fromIcao: bag.shipment.origen.codigo,
+          toIcao: bag.shipment.destino.codigo,
+        },
+      ]);
+      return;
+    }
+
+    focusShipmentRouteSegments(bag.routeSegments);
   };
 
   return (
-    <DrawerBase title="Panel de envios" onClose={close}>
+    <DrawerBase title="Panel de maletas" onClose={close}>
       <div className="grid grid-cols-3 gap-2 mb-4">
         <button
           type="button"
@@ -330,7 +410,7 @@ const ShipmentOverviewDrawer = ({
           }`}
           onClick={() => setMode("todos")}
         >
-          Todos ({shipments.length})
+          Todos ({countBags(shipments)})
         </button>
         <button
           type="button"
@@ -341,7 +421,7 @@ const ShipmentOverviewDrawer = ({
           }`}
           onClick={() => setMode("en-curso")}
         >
-          En curso ({inProgressShipments.length})
+          En curso ({countBags(inProgressShipments)})
         </button>
         <button
           type="button"
@@ -352,20 +432,20 @@ const ShipmentOverviewDrawer = ({
           }`}
           onClick={() => setMode("entregados")}
         >
-          Entregados ({deliveredShipments.length})
+          Entregados ({countBags(deliveredShipments)})
         </button>
       </div>
 
       {mode === "entregados" && (
         <div className="mb-5">
           <label
-            htmlFor="delivered-hours"
+            htmlFor="baggage-delivered-hours"
             className="block text-label-sm text-text-primary mb-1"
           >
             Ultimas horas
           </label>
           <input
-            id="delivered-hours"
+            id="baggage-delivered-hours"
             type="number"
             min={1}
             max={23}
@@ -378,13 +458,13 @@ const ShipmentOverviewDrawer = ({
 
       <div className="mb-5">
         <label
-          htmlFor="shipment-airport-filter"
+          htmlFor="baggage-airport-filter"
           className="block text-label-sm text-text-primary mb-1"
         >
           Filtrar por aeropuerto
         </label>
         <select
-          id="shipment-airport-filter"
+          id="baggage-airport-filter"
           value={airportFilter}
           onChange={(event) => setAirportFilter(event.target.value)}
           className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
@@ -398,73 +478,56 @@ const ShipmentOverviewDrawer = ({
         </select>
       </div>
 
-      {visibleShipments.length === 0 ? (
+      {baggageItems.length === 0 ? (
         <p className="text-body text-text-primary">
-          No hay envios para esta vista.
+          No hay maletas registradas para esta vista.
         </p>
       ) : (
         <ul className="space-y-2">
-          {visibleShipments.map((shipment) => {
-            const shipmentCode =
-              shipment.idEnvio !== null
-                ? formatShipmentCode(shipment.idEnvio)
-                : null;
-            const derivedStatus = shipmentStatus(shipment);
-            const timeLabel =
-              derivedStatus === "planificados"
-                ? `Salida: ${formatUtcMinute(
-                    getFirstDepartureMinute(shipment, simulationStart)
-                  )}`
-                : derivedStatus === "en-curso"
-                  ? `Llegada estimada: ${formatUtcMinute(
-                      getLastArrivalMinute(shipment, simulationStart)
-                    )}`
-                : `Entrega: ${formatUtcMinute(
-                    getLastArrivalMinute(shipment, simulationStart)
-                  )}`;
+          {baggageItems.map((bag) => {
+            const canOpen = bag.shipment.idEnvio !== null;
+            const legs = bag.routeSegments.length;
 
             return (
               <li
-                key={getShipmentKey(shipment)}
-                className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
+                key={bag.id}
+                className="rounded-input border border-border bg-card px-3 py-3"
               >
-                <div>
-                  {shipmentCode ? (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
                     <button
                       type="button"
-                      className="text-button text-primary hover:underline block"
-                      onClick={() => handleOpenShipment(shipmentCode, shipment)}
+                      className="block text-button text-primary hover:underline"
+                      onClick={() => handleFocusBag(bag)}
                     >
-                      {getShipmentCodeLabel(shipment)}
+                      {bag.id}
                     </button>
-                  ) : (
-                    <p className="text-button text-text-primary">
-                      {getShipmentCodeLabel(shipment)}
+                    <p className="mt-1 text-secondary text-text-primary">
+                      {bag.routeLabel}
                     </p>
-                  )}
-                  <span className="text-secondary text-text-primary">
-                    {shipment.origen.codigo} &gt; {shipment.destino.codigo}
-                  </span>
-                  <span className="text-secondary text-text-primary block">
-                    Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
-                  </span>
-                  <span className="text-secondary text-text-primary block">
-                    {timeLabel}
-                  </span>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Tag
-                    variant={derivedStatus === "entregados" ? "normal" : "primary"}
-                  >
-                    {derivedStatus === "en-curso"
-                      ? "En curso"
-                      : derivedStatus === "entregados"
-                        ? "Completado"
-                        : ESTADO_LABEL[shipment.estado]}
-                  </Tag>
-                  <span className="text-secondary text-text-primary">
-                    {shipment.contarBolsas} maletas
-                  </span>
+                    <p className="mt-1 text-secondary text-text-primary">
+                      {bag.assigned ? `${legs} tramo(s) de ruta` : "Sin ruta asignada"}
+                    </p>
+                    {canOpen ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-secondary text-primary hover:underline"
+                        onClick={() => handleOpenShipment(bag.shipment)}
+                      >
+                        Ver envio completo ({bag.shipmentCode})
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <Tag
+                      variant={bag.status === "entregados" ? "normal" : "primary"}
+                    >
+                      {getStatusLabel(bag.shipment, bag.status)}
+                    </Tag>
+                    <span className="text-secondary text-text-primary">
+                      #{bag.bagIndex.toLocaleString("es-PE")}
+                    </span>
+                  </div>
                 </div>
               </li>
             );
@@ -475,4 +538,4 @@ const ShipmentOverviewDrawer = ({
   );
 };
 
-export default ShipmentOverviewDrawer;
+export default BaggageDrawer;

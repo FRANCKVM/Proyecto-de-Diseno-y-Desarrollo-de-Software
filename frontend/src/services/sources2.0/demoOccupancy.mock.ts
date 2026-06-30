@@ -15,23 +15,23 @@
  * Usado por las pantallas de simulacion en ejecucion y operacion dia a dia.
  */
 export const OCCUPANCY_NORMAL: Record<string, number> = {
-  // Verde (< 60%)
+  // Verde (< 40%)
   SKBO: 38,
+  SEQM: 32,
+  SUAA: 35,
+  // Ambar (40-70%)
+  SCEL: 41,
+  SVMI: 42,
   SBBR: 45,
   EHAM: 48,
-  SEQM: 32,
-  SCEL: 41,
-  SUAA: 35,
   SLLP: 50,
-  SVMI: 42,
-  // Ambar (60-85%)
-  SPIM: 65,
-  EDDI: 72,
   OMDB: 60,
-  VIDP: 78,
+  SPIM: 65,
   LATI: 68,
+  // Rojo (>= 70%)
   EBCI: 70,
-  // Rojo (>= 85%)
+  EDDI: 72,
+  VIDP: 78,
   OAKB: 89,
   OPKC: 91,
 };

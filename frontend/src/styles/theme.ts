@@ -34,8 +34,8 @@ export const COLORS = {
   },
   text: {
     primary: "#181B27",
-    secondary: "#6B707D",
-    tertiary: "#969AA5",
+    secondary: "#181B27",
+    tertiary: "#181B27",
     inverse: "#FFFFFF",
   },
   primary: {
@@ -43,16 +43,16 @@ export const COLORS = {
     soft: "#EBF1FD",
   },
   success: {
-    base: "#229651",
-    soft: "#E7F9EE",
+    base: "#16A34A",
+    soft: "#DCFCE7",
   },
   warning: {
-    base: "#DA9615",
-    soft: "#FFF6E2",
+    base: "#D97706",
+    soft: "#FEF3C7",
   },
   danger: {
-    base: "#D53030",
-    soft: "#FDE9E9",
+    base: "#DC2626",
+    soft: "#FEE2E2",
   },
 } as const;
 
@@ -79,7 +79,7 @@ export const LAYOUT = {
   },
   topbar: 48,
   legend: 40,
-  drawer: 380,
+  drawer: 342,
   reference: { width: 1440, height: 900 },
 } as const;
 

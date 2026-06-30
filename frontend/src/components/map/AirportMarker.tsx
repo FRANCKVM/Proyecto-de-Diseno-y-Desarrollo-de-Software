@@ -15,13 +15,19 @@ interface AirportMarkerProps {
   onClick?: (airport: AirportWithCoords) => void;
 }
 
+const WAREHOUSE_PATHS = `
+  <path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z"/>
+  <path d="M6 18h12"/>
+  <path d="M6 14h12"/>
+  <rect width="12" height="12" x="6" y="10"/>
+`;
+
 /**
- * Construye el HTML del divIcon con los tres circulos concentricos
- * del estandar 61 (seccion 4.6) y la etiqueta debajo.
+ * Construye el HTML del divIcon con halo semaforo + icono de almacen
+ * logistico y la etiqueta debajo.
  *
- * El color de los circulos varia por estado de semaforo.
- * El color del texto es uniforme (text-primary del estandar) para
- * legibilidad nativa sobre el mapa claro CartoDB Positron.
+ * El halo conserva el estado de ocupacion. El icono evita que el
+ * aeropuerto se lea como un punto generico en el mapa.
  */
 const buildIconHtml = (
   icao: string,
@@ -29,7 +35,7 @@ const buildIconHtml = (
   ocupacion?: number,
   selected = false
 ): string => {
-  const { glow, ring, core } = AIRPORT_MARKER;
+  const { glow, ring } = AIRPORT_MARKER;
   const totalSize = glow.size; // ancho del SVG
   const center = totalSize / 2;
   const ocupacionLabel =
@@ -47,7 +53,12 @@ const buildIconHtml = (
         }
         <circle cx="${center}" cy="${center}" r="${glow.size / 2}" fill="${color}" opacity="${glow.opacity}"/>
         <circle cx="${center}" cy="${center}" r="${ring.size / 2}" fill="${color}" opacity="${ring.opacity}"/>
-        <circle cx="${center}" cy="${center}" r="${core.size / 2}" fill="${color}" opacity="${core.opacity}"/>
+        <circle cx="${center}" cy="${center}" r="10" fill="${COLORS.background.card}" stroke="${color}" stroke-width="2"/>
+        <g transform="translate(${center - 7} ${center - 7}) scale(0.58)"
+           fill="none" stroke="${COLORS.text.primary}" stroke-width="2.4"
+           stroke-linecap="round" stroke-linejoin="round">
+          ${WAREHOUSE_PATHS}
+        </g>
       </svg>
       <span class="tasf-airport-label" style="${selected ? `background:${COLORS.primary.base}; color:${COLORS.text.inverse}; padding:1px 5px; border-radius:6px;` : ""}">${icao}</span>
       ${ocupacionLabel}
@@ -58,8 +69,7 @@ const buildIconHtml = (
 /**
  * Marcador de aeropuerto en el mapa.
  *
- * Estandar 61, seccion 4.6: tres circulos concentricos (glow, ring, core)
- * con opacidades 0.15 / 0.35 / 1, color segun estado de semaforo.
+ * Halo semaforo + icono de almacen logistico.
  * Etiqueta debajo con codigo ICAO + porcentaje en color text-primary.
  */
 const AirportMarker = ({

@@ -1,12 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer as LeafletMap,
   TileLayer,
-  ZoomControl,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
-import type { LatLngBoundsExpression } from "leaflet";
+import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
@@ -14,7 +13,9 @@ import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { COLORS } from "@/styles/theme";
 import AirportMarker from "@/components/map/AirportMarker";
 import FlightMarker from "@/components/map/FlightMarker";
+import FlightCancellationAlertMarker from "@/components/map/FlightCancellationAlertMarker";
 import RouteLine from "@/components/map/RouteLine";
+import { useCancellationAnimationStore } from "@/store/cancellationAnimationStore";
 
 /**
  * Vuelo en formato consumible por el mapa.
@@ -28,6 +29,17 @@ export interface MapFlight {
   toIcao: string;
   progress: number;
   occupancyPct?: number;
+  departureMinute?: number;
+  arrivalMinute?: number;
+  durationSeconds?: number;
+  progressVelocityPerSecond?: number;
+  progressUpdatedAtMs?: number;
+}
+
+export interface MapFlightCancellationEvent {
+  id: string;
+  airportIcao: string;
+  flightCode?: string | null;
 }
 
 type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
@@ -46,6 +58,7 @@ interface WorldMapProps {
   activeFlightRegionFilter?: string;
   activeFlightSemaphoreFilter?: ActiveFlightSemaphoreFilter;
   activeFlightOnlyId?: string | null;
+  flightCancellationEvents?: MapFlightCancellationEvent[];
   shipmentRouteSegments?: ShipmentRouteSegment[];
   onAirportClick?: (airport: AirportWithCoords) => void;
   onFlightClick?: (flightId: string) => void;
@@ -82,7 +95,12 @@ const TILE_ATTRIBUTION =
  */
 const INITIAL_CENTER: [number, number] = [20, 0];
 const INITIAL_ZOOM = 3;
+const OVERVIEW_MAX_ZOOM = 4.25;
+const OVERVIEW_PADDING: [number, number] = [48, 48];
 const REF_ZOOM = 0;
+const CANCELLATION_ALERT_DURATION_MS = 4_800;
+const SEEN_CANCELLATION_STORAGE_KEY = "tasf-seen-cancellation-alert-ids";
+const MAX_STORED_CANCELLATION_IDS = 500;
 
 interface FocusedMapFlight {
   id: string;
@@ -90,6 +108,43 @@ interface FocusedMapFlight {
   from: AirportWithCoords;
   to: AirportWithCoords;
 }
+
+interface VisibleCancellationAlert extends MapFlightCancellationEvent {
+  renderId: string;
+}
+
+const readSeenCancellationIds = (): Set<string> => {
+  if (typeof window === "undefined") {
+    return new Set();
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(
+      SEEN_CANCELLATION_STORAGE_KEY
+    );
+    const parsed = rawValue ? JSON.parse(rawValue) : [];
+
+    return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const persistSeenCancellationIds = (ids: Set<string>) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const boundedIds = Array.from(ids).slice(-MAX_STORED_CANCELLATION_IDS);
+    window.sessionStorage.setItem(
+      SEEN_CANCELLATION_STORAGE_KEY,
+      JSON.stringify(boundedIds)
+    );
+  } catch {
+    // El almacenamiento puede estar deshabilitado; el Set en memoria sigue cubriendo la sesion actual.
+  }
+};
 
 const MapFocusController = ({
   airport,
@@ -130,6 +185,84 @@ const MapFocusController = ({
   return null;
 };
 
+const MapAutoFitController = ({
+  positions,
+  disabled,
+  fitKey,
+}: {
+  positions: LatLngExpression[];
+  disabled: boolean;
+  fitKey: string;
+}) => {
+  const map = useMap();
+  const isAutoFittingRef = useRef(false);
+  const hasAutoFitRef = useRef(false);
+  const userHasInteractedRef = useRef(false);
+
+  useEffect(() => {
+    hasAutoFitRef.current = false;
+    userHasInteractedRef.current = false;
+  }, [fitKey]);
+
+  useEffect(() => {
+    const markUserInteraction = () => {
+      if (!isAutoFittingRef.current) {
+        userHasInteractedRef.current = true;
+      }
+    };
+
+    map.on("zoomstart", markUserInteraction);
+    map.on("dragstart", markUserInteraction);
+
+    return () => {
+      map.off("zoomstart", markUserInteraction);
+      map.off("dragstart", markUserInteraction);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (
+      disabled ||
+      hasAutoFitRef.current ||
+      userHasInteractedRef.current ||
+      positions.length === 0
+    ) {
+      return;
+    }
+
+    isAutoFittingRef.current = true;
+    hasAutoFitRef.current = true;
+    map.invalidateSize();
+
+    if (positions.length === 1) {
+      map.setView(positions[0], OVERVIEW_MAX_ZOOM, { animate: false });
+      window.setTimeout(() => {
+        isAutoFittingRef.current = false;
+      }, 0);
+      return;
+    }
+
+    const bounds = L.latLngBounds(positions);
+    if (!bounds.isValid()) {
+      isAutoFittingRef.current = false;
+      hasAutoFitRef.current = false;
+      return;
+    }
+
+    map.fitBounds(bounds, {
+      animate: false,
+      maxZoom: OVERVIEW_MAX_ZOOM,
+      padding: OVERVIEW_PADDING,
+    });
+
+    window.setTimeout(() => {
+      isAutoFittingRef.current = false;
+    }, 0);
+  }, [disabled, fitKey, map, positions]);
+
+  return null;
+};
+
 /**
  * Mapa mundial operativo del sistema Tasf.B2B.
  *
@@ -157,10 +290,55 @@ const WorldMap = ({
   activeFlightRegionFilter = "todos",
   activeFlightSemaphoreFilter = "todos",
   activeFlightOnlyId,
+  flightCancellationEvents = [],
   shipmentRouteSegments = [],
   onAirportClick,
   onFlightClick,
 }: WorldMapProps) => {
+  const manualCancellationEvents = useCancellationAnimationStore((s) => s.events);
+  const [visibleCancellationAlerts, setVisibleCancellationAlerts] = useState<
+    VisibleCancellationAlert[]
+  >([]);
+  const seenCancellationIdsRef = useRef(readSeenCancellationIds());
+  const cancellationAlertTimersRef = useRef<number[]>([]);
+
+  const allCancellationEvents = useMemo(
+    () => [...flightCancellationEvents, ...manualCancellationEvents],
+    [flightCancellationEvents, manualCancellationEvents]
+  );
+
+  useEffect(() => {
+    allCancellationEvents.forEach((event) => {
+      if (!event.airportIcao || seenCancellationIdsRef.current.has(event.id)) {
+        return;
+      }
+
+      seenCancellationIdsRef.current.add(event.id);
+      persistSeenCancellationIds(seenCancellationIdsRef.current);
+      const renderId = `${event.id}-${Date.now()}`;
+      setVisibleCancellationAlerts((current) => [
+        ...current,
+        { ...event, renderId },
+      ]);
+
+      const timerId = window.setTimeout(() => {
+        setVisibleCancellationAlerts((current) =>
+          current.filter((alert) => alert.renderId !== renderId)
+        );
+      }, CANCELLATION_ALERT_DURATION_MS);
+
+      cancellationAlertTimersRef.current.push(timerId);
+    });
+  }, [allCancellationEvents]);
+
+  useEffect(() => {
+    return () => {
+      cancellationAlertTimersRef.current.forEach((timerId) =>
+        window.clearTimeout(timerId)
+      );
+    };
+  }, []);
+
   // Lookup O(1) de aeropuertos por ICAO para resolver origen/destino
   // de cada vuelo sin recorrer el array en cada render.
   const airportsByIcao = useMemo(
@@ -235,9 +413,27 @@ const WorldMap = ({
     () => new Set(visibleAirports.map((airport) => airport.icao)),
     [visibleAirports]
   );
+  const shipmentRouteKey = useMemo(
+    () =>
+      shipmentRouteSegments
+        .map((segment) => `${segment.fromIcao}:${segment.toIcao}`)
+        .join("|"),
+    [shipmentRouteSegments]
+  );
+  const shipmentRouteFlightKeys = useMemo(
+    () =>
+      new Set(
+        shipmentRouteSegments.map(
+          (segment) => `${segment.fromIcao}:${segment.toIcao}`
+        )
+      ),
+    [shipmentRouteSegments]
+  );
   const warehouseFilteredFlights =
     shipmentRouteSegments.length > 0
-      ? []
+      ? flights.filter((flight) =>
+          shipmentRouteFlightKeys.has(`${flight.fromIcao}:${flight.toIcao}`)
+        )
       : warehouseRegionFilter === "todos"
       ? flights
       : flights.filter(
@@ -248,14 +444,18 @@ const WorldMap = ({
               focusedFlightId !== undefined &&
               (flight.id === focusedFlightId || flight.code === focusedFlightId))
         );
-  const activeFilterBaseFlights = activeFlightOnlyId
+  const activeOnlyFlights = activeFlightOnlyId
     ? flights.filter(
         (flight) =>
           flight.id === activeFlightOnlyId || flight.code === activeFlightOnlyId
       )
-    : warehouseFilteredFlights;
+    : [];
+  const activeFilterBaseFlights =
+    activeFlightOnlyId && activeOnlyFlights.length > 0
+      ? activeOnlyFlights
+      : warehouseFilteredFlights;
   const visibleFlights = activeFilterBaseFlights.filter((flight) => {
-    if (activeFlightOnlyId) {
+    if (activeFlightOnlyId && activeOnlyFlights.length > 0) {
       return true;
     }
 
@@ -280,6 +480,25 @@ const WorldMap = ({
 
     return matchesRegion && matchesSemaphore;
   });
+  const overviewPositions = useMemo(() => {
+    const positions: LatLngExpression[] = visibleAirports.map((airport) => [
+      airport.lat,
+      airport.lng,
+    ]);
+
+    visibleFlights.forEach((flight) => {
+      const from = airportsByIcao.get(flight.fromIcao);
+      const to = airportsByIcao.get(flight.toIcao);
+      if (!from || !to) {
+        return;
+      }
+
+      positions.push([from.lat, from.lng], [to.lat, to.lng]);
+    });
+
+    return positions;
+  }, [airportsByIcao, visibleAirports, visibleFlights]);
+  const hasFocusedMapItem = Boolean(focusedAirport || focusedFlight);
 
   return (
     <LeafletMap
@@ -287,6 +506,8 @@ const WorldMap = ({
       zoom={INITIAL_ZOOM}
       minZoom={2}
       maxZoom={6}
+      zoomSnap={0.25}
+      zoomDelta={0.5}
       zoomControl={false}
       maxBounds={WORLD_BOUNDS}
       maxBoundsViscosity={1}
@@ -299,7 +520,11 @@ const WorldMap = ({
         attribution={TILE_ATTRIBUTION}
         detectRetina
       />
-      <ZoomControl position="topright" />
+      <MapAutoFitController
+        positions={overviewPositions}
+        disabled={hasFocusedMapItem}
+        fitKey={shipmentRouteKey || "overview"}
+      />
       <MapFocusController airport={focusedAirport} flight={focusedFlight} />
 
       {/* Capa 1: rutas (al fondo) */}
@@ -315,6 +540,7 @@ const WorldMap = ({
             progress={1}
             full
             color={COLORS.primary.base}
+            directional
           />
         );
       })}
@@ -329,6 +555,8 @@ const WorldMap = ({
             from={from}
             to={to}
             progress={f.progress}
+            progressVelocityPerSecond={f.progressVelocityPerSecond}
+            progressUpdatedAtMs={f.progressUpdatedAtMs}
           />
         );
       })}
@@ -372,9 +600,26 @@ const WorldMap = ({
             fromAirport={from}
             toAirport={to}
             progress={f.progress}
+            durationSeconds={f.durationSeconds}
+            progressVelocityPerSecond={f.progressVelocityPerSecond}
+            progressUpdatedAtMs={f.progressUpdatedAtMs}
+            occupancyPct={f.occupancyPct}
             estado={flightEstado}
             selected={selected}
             onClick={onFlightClick}
+          />
+        );
+      })}
+
+      {visibleCancellationAlerts.map((event) => {
+        const airport = airportsByIcao.get(event.airportIcao);
+        if (!airport) return null;
+
+        return (
+          <FlightCancellationAlertMarker
+            key={event.renderId}
+            airport={airport}
+            flightCode={event.flightCode}
           />
         );
       })}

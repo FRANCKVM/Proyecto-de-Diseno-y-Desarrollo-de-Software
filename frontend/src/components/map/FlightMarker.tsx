@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import { Marker, useMap } from "react-leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
@@ -12,6 +12,10 @@ interface FlightMarkerProps {
   toAirport: AirportWithCoords;
   /** Avance del vuelo entre 0 y 1. */
   progress: number;
+  durationSeconds?: number;
+  progressVelocityPerSecond?: number;
+  progressUpdatedAtMs?: number;
+  occupancyPct?: number;
   /**
    * Color del avion segun estado del semaforo del vuelo.
    * Si no se provee, se pinta en text-primary (oscuro), el patron por
@@ -63,6 +67,20 @@ const PLANE_CENTER = {
   cy: 12,
   r: 3.2,
 } as const;
+const EMPTY_FLIGHT_COLOR = "#6B7280";
+
+const formatOccupancy = (value?: number): string =>
+  value === undefined
+    ? "Sin dato"
+    : `${Math.round(value).toLocaleString("es-PE")}%`;
+
+const buildTooltipHtml = (
+  occupancyPct: number | undefined,
+  color: string
+): string =>
+  `<span class="tasf-flight-tooltip-content" style="color:${color};">${formatOccupancy(
+    occupancyPct
+  )}</span>`;
 
 /**
  * Construye el HTML del divIcon del avion.
@@ -120,13 +138,17 @@ const FlightMarker = ({
   fromAirport,
   toAirport,
   progress,
+  progressVelocityPerSecond,
+  progressUpdatedAtMs,
+  occupancyPct,
   estado,
   selected = false,
   onClick,
 }: FlightMarkerProps) => {
   const map = useMap();
+  const markerRef = useRef<L.Marker | null>(null);
 
-  const { position, displayBearing } = useMemo(() => {
+  const { fromPx, toPx, position, displayBearing } = useMemo(() => {
     const fromLatLng: [number, number] = [fromAirport.lat, fromAirport.lng];
     const toLatLng: [number, number] = [toAirport.lat, toAirport.lng];
 
@@ -154,6 +176,8 @@ const FlightMarker = ({
     const display = (geoBearing + ICON_BEARING_OFFSET + 360) % 360;
 
     return {
+      fromPx,
+      toPx,
       position: [pos.lat, pos.lng] as [number, number],
       displayBearing: display,
     };
@@ -165,8 +189,92 @@ const FlightMarker = ({
     toAirport.lng,
     progress,
   ]);
+  const progressSnapshot = progress;
+  const progressTimestamp = progressUpdatedAtMs ?? performance.now();
+  const progressVelocity = progressVelocityPerSecond ?? 0;
 
-  const centerColor = estado ? ESTADO_COLOR_HEX[estado] : null;
+  useEffect(() => {
+    const marker = markerRef.current;
+    if (!marker) {
+      return;
+    }
+
+    let rafId = 0;
+
+    const setMarkerPosition = (nextProgress: number) => {
+      const clampedProgress = Math.max(0, Math.min(1, nextProgress));
+      const currentPx = L.point(
+        fromPx.x + (toPx.x - fromPx.x) * clampedProgress,
+        fromPx.y + (toPx.y - fromPx.y) * clampedProgress
+      );
+      const currentPosition = map.unproject(currentPx, REF_ZOOM);
+      marker.setLatLng(currentPosition);
+    };
+
+    const tick = (now: number) => {
+      const elapsedSeconds = (now - progressTimestamp) / 1000;
+      const nextProgress =
+        progressSnapshot + elapsedSeconds * progressVelocity;
+
+      setMarkerPosition(nextProgress);
+
+      if (nextProgress < 1 && progressVelocity > 0) {
+        rafId = requestAnimationFrame(tick);
+      }
+    };
+
+    setMarkerPosition(progressSnapshot);
+
+    if (progressSnapshot < 1 && progressVelocity > 0) {
+      rafId = requestAnimationFrame(tick);
+    }
+
+    return () => cancelAnimationFrame(rafId);
+  }, [
+    fromPx.x,
+    fromPx.y,
+    map,
+    progressSnapshot,
+    progressTimestamp,
+    progressVelocity,
+    toPx.x,
+    toPx.y,
+  ]);
+
+  useEffect(() => {
+    const marker = markerRef.current;
+    if (!marker) {
+      return;
+    }
+
+    const tooltip = marker.getTooltip();
+    const color =
+      occupancyPct === 0
+        ? EMPTY_FLIGHT_COLOR
+        : estado
+          ? ESTADO_COLOR_HEX[estado]
+          : COLORS.text.primary;
+    const content = buildTooltipHtml(occupancyPct, color);
+
+    if (tooltip) {
+      tooltip.setContent(content);
+      return;
+    }
+
+    marker.bindTooltip(content, {
+      direction: "top",
+      offset: L.point(0, -12),
+      opacity: 1,
+      className: "tasf-flight-tooltip",
+    });
+  }, [estado, occupancyPct]);
+
+  const centerColor =
+    occupancyPct === 0
+      ? EMPTY_FLIGHT_COLOR
+      : estado
+        ? ESTADO_COLOR_HEX[estado]
+        : null;
   const bodyColor = COLORS.text.primary;
 
   const icon = useMemo(
@@ -182,11 +290,14 @@ const FlightMarker = ({
 
   return (
     <Marker
+      ref={markerRef}
       position={position}
       icon={icon}
       zIndexOffset={selected ? 1200 : 0}
       eventHandlers={{
         click: () => onClick?.(flightId),
+        mouseover: (event) => event.target.openTooltip(),
+        mouseout: (event) => event.target.closeTooltip(),
       }}
     />
   );

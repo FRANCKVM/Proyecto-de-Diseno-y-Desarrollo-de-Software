@@ -4,6 +4,7 @@ import AlertBanner from "@/components/molecules/AlertBanner";
 import KpiCard from "@/components/molecules/KpiCard";
 import { getCollapseResult } from "@/services/simulationService";
 import { useLiveSimulationStore } from "@/store/liveSimulationStore";
+import { UMBRAL_SEMAFORO_AMBAR_DEFAULT } from "@/utils/constants";
 import { ROUTES } from "@/utils/routes";
 import type { ResultadoColapso } from "@/types/simulationResult.types";
 
@@ -127,7 +128,9 @@ const ResultadosColapsoPage = () => {
                   </td>
                   <td
                     className={`py-2 text-right font-semibold ${
-                      a.ocupacionMaxima >= 85 ? "text-danger" : "text-warning"
+                      a.ocupacionMaxima >= UMBRAL_SEMAFORO_AMBAR_DEFAULT
+                        ? "text-danger"
+                        : "text-warning"
                     }`}
                   >
                     {a.ocupacionMaxima}%

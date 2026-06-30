@@ -5,6 +5,9 @@ import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 export type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 export type WarehouseSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 
+const DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER: ActiveFlightSemaphoreFilter =
+  "normal";
+
 /**
  * Tipos discriminados de drawer abierto.
  * El payload mantiene la entidad clave (icao, codigo) que cada drawer
@@ -15,6 +18,7 @@ export type DrawerSelection =
   | { type: "warehouse-list" }
   | { type: "warehouse-airport"; icao: string }
   | { type: "shipments-panel" }
+  | { type: "baggage-panel" }
   | { type: "active-flights-panel" }
   | { type: "airport"; icao: string }
   | { type: "flight"; codigo: string; idSimulacion?: number | null }
@@ -35,9 +39,11 @@ interface DrawerState {
   setWarehouseSemaphoreFilter: (filter: WarehouseSemaphoreFilter) => void;
   setActiveFlightRegionFilter: (region: string) => void;
   setActiveFlightSemaphoreFilter: (filter: ActiveFlightSemaphoreFilter) => void;
+  focusShipmentRouteSegments: (segments: ShipmentRouteSegment[]) => void;
   openWarehouseList: () => void;
   openWarehouseAirport: (icao: string) => void;
   openShipmentsPanel: () => void;
+  openBaggagePanel: () => void;
   openActiveFlightsPanel: () => void;
   openAirport: (icao: string) => void;
   openFlight: (
@@ -72,7 +78,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
   warehouseRegionFilter: "todos",
   warehouseSemaphoreFilter: "todos",
   activeFlightRegionFilter: "todos",
-  activeFlightSemaphoreFilter: "todos",
+  activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
   activeFlightOnlyId: null,
   shipmentRouteSegments: [],
   setWarehouseRegionFilter: (region) => set({ warehouseRegionFilter: region }),
@@ -82,13 +88,24 @@ export const useDrawerStore = create<DrawerState>((set) => ({
     set({ activeFlightRegionFilter: region, activeFlightOnlyId: null }),
   setActiveFlightSemaphoreFilter: (filter) =>
     set({ activeFlightSemaphoreFilter: filter, activeFlightOnlyId: null }),
+  focusShipmentRouteSegments: (segments) =>
+    set({
+      focusedAirportIcao: null,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: segments,
+    }),
   openWarehouseList: () =>
     set({
       selection: { type: "warehouse-list" },
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
@@ -99,7 +116,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedFlightId: null,
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
@@ -111,7 +128,19 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
+  openBaggagePanel: () =>
+    set({
+      selection: { type: "baggage-panel" },
+      focusedAirportIcao: null,
+      focusedFlightId: null,
+      warehouseRegionFilter: "todos",
+      warehouseSemaphoreFilter: "todos",
+      activeFlightRegionFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
@@ -123,7 +152,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
@@ -135,7 +164,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
@@ -164,7 +193,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       focusedFlightId: options?.focusedFlightId ?? null,
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: options?.shipmentRouteSegments ?? [],
     }),
@@ -176,7 +205,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
@@ -188,7 +217,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
-      activeFlightSemaphoreFilter: "todos",
+      activeFlightSemaphoreFilter: DEFAULT_ACTIVE_FLIGHT_SEMAPHORE_FILTER,
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),

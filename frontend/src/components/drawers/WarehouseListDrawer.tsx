@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import Tag from "@/components/atoms/Tag";
 import {
@@ -8,6 +8,7 @@ import {
 } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import { cn } from "@/utils/cn";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
@@ -21,7 +22,8 @@ interface WarehouseListDrawerProps {
 }
 
 type WarehouseSortMode =
-  | "ocupacion"
+  | "ocupacion-desc"
+  | "ocupacion-asc"
   | "llegada-proxima"
   | "salida-proxima";
 
@@ -36,6 +38,38 @@ const ESTADO_LABEL: Record<EstadoSemaforo, string> = {
   elevado: "Elevado",
   critico: "Critico",
 };
+
+const SEMAPHORE_FILTER_OPTIONS: Array<{
+  value: Exclude<WarehouseSemaphoreFilter, "todos">;
+  label: string;
+  className: string;
+  activeClassName: string;
+}> = [
+  {
+    value: "vacios",
+    label: "Vacios",
+    className: "border-[#4b5563] bg-[#d1d5db] hover:bg-[#9ca3af]",
+    activeClassName: "border-[#111827] bg-[#374151] shadow-card ring-2 ring-[#111827]/25",
+  },
+  {
+    value: "normal",
+    label: "Verde",
+    className: "border-[#16a34a] bg-[#bbf7d0] hover:bg-[#86efac]",
+    activeClassName: "border-[#15803d] bg-[#16a34a] shadow-card ring-2 ring-[#16a34a]/25",
+  },
+  {
+    value: "elevado",
+    label: "Ambar",
+    className: "border-[#f59e0b] bg-[#fde68a] hover:bg-[#fcd34d]",
+    activeClassName: "border-[#d97706] bg-[#f59e0b] shadow-card ring-2 ring-[#f59e0b]/25",
+  },
+  {
+    value: "critico",
+    label: "Rojo",
+    className: "border-[#ef4444] bg-[#fecaca] hover:bg-[#fca5a5]",
+    activeClassName: "border-[#dc2626] bg-[#ef4444] shadow-card ring-2 ring-[#ef4444]/25",
+  },
+];
 
 const DAY_MINUTES = 24 * 60;
 
@@ -122,7 +156,7 @@ const WarehouseListDrawer = ({
     (s) => s.setWarehouseSemaphoreFilter
   );
   const [searchCode, setSearchCode] = useState("");
-  const [sortMode, setSortMode] = useState<WarehouseSortMode>("ocupacion");
+  const [sortMode, setSortMode] = useState<WarehouseSortMode>("ocupacion-desc");
   const currentReferenceMinute = referenceMinute ?? getCurrentUtcMinute();
 
   const regionOptions = Array.from(
@@ -173,11 +207,13 @@ const WarehouseListDrawer = ({
   );
 
   const sortedAirports = [...filteredAirports].sort((a, b) => {
-    if (sortMode === "ocupacion") {
+    if (sortMode === "ocupacion-desc" || sortMode === "ocupacion-asc") {
       const occupancyA = occupancyByIcao?.[a.icao] ?? -1;
       const occupancyB = occupancyByIcao?.[b.icao] ?? -1;
       if (occupancyA !== occupancyB) {
-        return occupancyB - occupancyA;
+        return sortMode === "ocupacion-desc"
+          ? occupancyB - occupancyA
+          : occupancyA - occupancyB;
       }
     }
 
@@ -205,11 +241,10 @@ const WarehouseListDrawer = ({
 
   return (
     <DrawerBase
-      eyebrow="Almacenes"
-      title={`Red global (${sortedAirports.length}/${airports.length})`}
+      title="Panel de almacenes"
       onClose={close}
     >
-      <p className="text-body text-text-tertiary mb-5">
+      <p className="text-body text-text-primary mb-5">
         Selecciona un almacen para revisar sus envios entrantes o salientes.
       </p>
 
@@ -217,7 +252,7 @@ const WarehouseListDrawer = ({
         <div>
           <label
             htmlFor="warehouse-code-search"
-            className="block text-label-sm text-text-tertiary mb-1"
+            className="block text-label-sm text-text-primary mb-1"
           >
             Buscar por codigo
           </label>
@@ -241,7 +276,7 @@ const WarehouseListDrawer = ({
         <div>
           <label
             htmlFor="warehouse-region-filter"
-            className="block text-label-sm text-text-tertiary mb-1"
+            className="block text-label-sm text-text-primary mb-1"
           >
             Filtrar por continente
           </label>
@@ -261,34 +296,52 @@ const WarehouseListDrawer = ({
         </div>
 
         <div>
-          <label
-            htmlFor="warehouse-occupancy-filter"
-            className="block text-label-sm text-text-tertiary mb-1"
-          >
+          <span className="block text-label-sm text-text-primary mb-1">
             Filtrar por semaforo
-          </label>
-          <select
-            id="warehouse-occupancy-filter"
-            value={occupancyFilter}
-            onChange={(event) =>
-              setOccupancyFilter(
-                event.target.value as WarehouseSemaphoreFilter
-              )
-            }
-            className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
-          >
-            <option value="todos">Todos</option>
-            <option value="vacios">Vacios</option>
-            <option value="normal">Verde</option>
-            <option value="elevado">Amarillo</option>
-            <option value="critico">Rojo</option>
-          </select>
+          </span>
+          <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semaforo">
+            <button
+              type="button"
+              aria-label="Mostrar todos"
+              aria-pressed={occupancyFilter === "todos"}
+              title="Mostrar todos"
+              onClick={() => setOccupancyFilter("todos")}
+              className={cn(
+                "h-9 w-9 rounded-full border-2 p-0 transition-all duration-150 focus-visible:outline-primary inline-flex items-center justify-center",
+                occupancyFilter === "todos"
+                  ? "border-[#111827] bg-white text-[#111827] shadow-card ring-2 ring-[#111827]/15"
+                  : "border-[#9ca3af] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
+              )}
+            >
+              <X size={16} aria-hidden />
+            </button>
+            {SEMAPHORE_FILTER_OPTIONS.map((option) => {
+              const isSelected = occupancyFilter === option.value;
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-label={option.label}
+                  aria-pressed={isSelected}
+                  title={option.label}
+                  onClick={() =>
+                    setOccupancyFilter(isSelected ? "todos" : option.value)
+                  }
+                  className={cn(
+                    "h-9 w-9 rounded-full border-2 p-0 transition-all duration-150 focus-visible:outline-primary",
+                    isSelected ? option.activeClassName : option.className
+                  )}
+                />
+              );
+            })}
+          </div>
         </div>
 
         <div>
           <label
             htmlFor="warehouse-sort"
-            className="block text-label-sm text-text-tertiary mb-1"
+            className="block text-label-sm text-text-primary mb-1"
           >
             Ordenar por
           </label>
@@ -300,7 +353,8 @@ const WarehouseListDrawer = ({
             }
             className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
           >
-            <option value="ocupacion">Nivel de ocupacion</option>
+            <option value="ocupacion-desc">Ocupacion: mayor a menor</option>
+            <option value="ocupacion-asc">Ocupacion: menor a mayor</option>
             <option value="llegada-proxima">Llegada de vuelo mas proxima</option>
             <option value="salida-proxima">Salida de vuelo mas proxima</option>
           </select>
@@ -308,7 +362,7 @@ const WarehouseListDrawer = ({
       </div>
 
       {sortedAirports.length === 0 ? (
-        <p className="text-body text-text-tertiary">
+        <p className="text-body text-text-primary">
           No hay almacenes que coincidan con los filtros.
         </p>
       ) : (
@@ -335,16 +389,16 @@ const WarehouseListDrawer = ({
                       <p className="text-button text-primary hover:underline">
                         {airport.icao} - {airport.name}
                       </p>
-                      <p className="text-secondary text-text-secondary">
+                      <p className="text-secondary text-text-primary">
                         {airport.country}
                       </p>
-                      <p className="text-secondary text-text-tertiary">
+                      <p className="text-secondary text-text-primary">
                         Capacidad: {airport.capacity} maletas
                       </p>
-                      <p className="text-secondary text-text-tertiary">
+                      <p className="text-secondary text-text-primary">
                         Prox. llegada: {formatUtcMinute(schedule?.nextArrival.minute ?? null)}
                       </p>
-                      <p className="text-secondary text-text-tertiary">
+                      <p className="text-secondary text-text-primary">
                         Prox. salida: {formatUtcMinute(schedule?.nextDeparture.minute ?? null)}
                       </p>
                     </div>
@@ -353,7 +407,7 @@ const WarehouseListDrawer = ({
                         <Tag variant={TAG_VARIANT_BY_ESTADO[estado]}>
                           {ESTADO_LABEL[estado]}
                         </Tag>
-                        <span className="text-secondary text-text-tertiary">
+                        <span className="text-secondary text-text-primary">
                           {Math.round(ocupacion ?? 0)}%
                         </span>
                       </div>
