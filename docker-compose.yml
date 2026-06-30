@@ -9,7 +9,7 @@ services:
       MYSQL_USER: pdds
       MYSQL_PASSWORD: pdds
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database/scripts:/docker-entrypoint-initdb.d:ro
@@ -19,27 +19,33 @@ services:
       timeout: 5s
       retries: 30
     networks:
-      - tasfb2b_network
+      tasfb2b_network:
+        ipv4_address: 172.28.1.2
 
   backend:
     build:
       context: ./backend
     container_name: tasfb2b_backend
     restart: unless-stopped
+    entrypoint: ["/bin/bash", "-c", "until (echo >/dev/tcp/mysql/3306) 2>/dev/null; do echo 'Waiting for MySQL...'; sleep 2; done && java -jar app.jar"]
     depends_on:
       mysql:
         condition: service_healthy
+    extra_hosts:
+      - "mysql:172.28.1.2"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/tasfb2b?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: pdds
       SPRING_DATASOURCE_PASSWORD: pdds
       SPRING_JPA_SHOW_SQL: "false"
       SPRING_JPA_FORMAT_SQL: "false"
-      SPRING_SQL_INIT_MODE: always
+      SPRING_SQL_INIT_MODE: never
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
     ports:
       - "8080:8080"
     networks:
-      - tasfb2b_network
+      tasfb2b_network:
+        ipv4_address: 172.28.1.3
 
   frontend:
     build:
@@ -50,10 +56,13 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    extra_hosts:
+      - "backend:172.28.1.3"
     ports:
       - "5173:80"
     networks:
-      - tasfb2b_network
+      tasfb2b_network:
+        ipv4_address: 172.28.1.4
 
 volumes:
   mysql_data:
@@ -61,3 +70,6 @@ volumes:
 networks:
   tasfb2b_network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
