@@ -8,8 +8,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
 import pucp.edu.pe.tasfb2b.controllers.dto.CancelarVueloRequest;
 import pucp.edu.pe.tasfb2b.services.SeguimientoService;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/vuelos")
@@ -21,25 +24,38 @@ public class VueloController {
         this.seguimientoService = seguimientoService;
     }
 
-    @GetMapping("/{codigo}")
-    public ResponseEntity<?> obtenerVuelo(
-            @PathVariable String codigo,
+    @GetMapping("/ocurrencias/{idOcurrencia}")
+    public ResponseEntity<?> obtenerOcurrencia(
+            @PathVariable Long idOcurrencia,
             @RequestParam(required = false) Integer idSimulacion
     ) {
         try {
-            return ResponseEntity.ok(seguimientoService.obtenerVueloDetalle(codigo, idSimulacion));
+            return ResponseEntity.ok(seguimientoService.obtenerOcurrenciaDetalle(idOcurrencia, idSimulacion));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
 
-    @PostMapping("/{codigo}/cancelar")
+    @GetMapping("/ocurrencias")
+    public ResponseEntity<?> listarOcurrencias(
+            @RequestParam(required = false) Integer idSimulacion,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha
+    ) {
+        try {
+            return ResponseEntity.ok(seguimientoService.listarOcurrencias(idSimulacion, fecha));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/ocurrencias/{idOcurrencia}/cancelar")
     public ResponseEntity<?> cancelarVuelo(
-            @PathVariable String codigo,
+            @PathVariable Long idOcurrencia,
             @RequestBody CancelarVueloRequest request
     ) {
         try {
-            return ResponseEntity.ok(seguimientoService.cancelarVuelo(codigo, request));
+            return ResponseEntity.ok(seguimientoService.cancelarOcurrencia(idOcurrencia, request));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }

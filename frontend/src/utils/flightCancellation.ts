@@ -116,7 +116,7 @@ export const resolveFlightCancellationTiming = ({
     fechaSalida: formatDateLikeInput(effectiveDepartureMs, fechaSalida),
     shiftedToNextDay,
     notice: shiftedToNextDay
-      ? "El vuelo ya esta dentro de la ultima hora antes del despegue. Se programo la cancelacion para la ocurrencia del dia siguiente."
+      ? "El vuelo actual ya salio o esta dentro de la ultima hora antes del despegue. Se cancelo la siguiente ocurrencia."
       : null,
   };
 };

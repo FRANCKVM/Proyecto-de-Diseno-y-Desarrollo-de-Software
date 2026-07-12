@@ -14,7 +14,7 @@ const ALERT_HEIGHT = 42;
 const buildAlertHtml = (flightCode?: string | null): string => `
   <div class="tasf-cancel-alert" aria-hidden="true">
     <div class="tasf-cancel-alert-tooltip">
-      <span>Vuelo ${flightCode ?? "sin dato"}</span>
+      <span>${flightCode ?? "sin dato"}</span>
       <strong>Cancelado</strong>
     </div>
   </div>

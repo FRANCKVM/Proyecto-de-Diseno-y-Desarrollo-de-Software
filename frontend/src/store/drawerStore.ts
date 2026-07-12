@@ -22,7 +22,12 @@ export type DrawerSelection =
   | { type: "active-flights-panel" }
   | { type: "airport"; icao: string }
   | { type: "flight"; codigo: string; idSimulacion?: number | null }
-  | { type: "shipment"; codigo: string; idSimulacion?: number | null }
+  | {
+      type: "shipment";
+      codigo: string;
+      idSimulacion?: number | null;
+      displayCodigo?: string;
+    }
   | { type: "shipment-form" };
 
 interface DrawerState {
@@ -40,20 +45,32 @@ interface DrawerState {
   setActiveFlightRegionFilter: (region: string) => void;
   setActiveFlightSemaphoreFilter: (filter: ActiveFlightSemaphoreFilter) => void;
   focusShipmentRouteSegments: (segments: ShipmentRouteSegment[]) => void;
+  focusFlightOnMap: (codigo: string) => void;
+  focusWarehouseOnMap: (icao: string) => void;
   openWarehouseList: () => void;
-  openWarehouseAirport: (icao: string) => void;
+  openWarehouseAirport: (
+    icao: string,
+    options?: {
+      focusOnMap?: boolean;
+    }
+  ) => void;
   openShipmentsPanel: () => void;
   openBaggagePanel: () => void;
   openActiveFlightsPanel: () => void;
   openAirport: (icao: string) => void;
   openFlight: (
     codigo: string,
-    options?: { idSimulacion?: number | null; showOnlyOnMap?: boolean }
+    options?: {
+      idSimulacion?: number | null;
+      showOnlyOnMap?: boolean;
+      focusOnMap?: boolean;
+    }
   ) => void;
   openShipment: (
     codigo: string,
     options?: {
       idSimulacion?: number | null;
+      displayCodigo?: string;
       focusedAirportIcao?: string | null;
       focusedFlightId?: string | null;
       shipmentRouteSegments?: ShipmentRouteSegment[];
@@ -99,6 +116,20 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       activeFlightOnlyId: null,
       shipmentRouteSegments: segments,
     }),
+  focusFlightOnMap: (codigo) =>
+    set({
+      focusedAirportIcao: null,
+      focusedFlightId: codigo,
+      activeFlightOnlyId: codigo,
+      shipmentRouteSegments: [],
+    }),
+  focusWarehouseOnMap: (icao) =>
+    set({
+      focusedAirportIcao: icao,
+      focusedFlightId: null,
+      activeFlightOnlyId: null,
+      shipmentRouteSegments: [],
+    }),
   openWarehouseList: () =>
     set({
       selection: { type: "warehouse-list" },
@@ -109,10 +140,10 @@ export const useDrawerStore = create<DrawerState>((set) => ({
       activeFlightOnlyId: null,
       shipmentRouteSegments: [],
     }),
-  openWarehouseAirport: (icao) =>
+  openWarehouseAirport: (icao, options) =>
     set({
       selection: { type: "warehouse-airport", icao },
-      focusedAirportIcao: icao,
+      focusedAirportIcao: options?.focusOnMap === true ? icao : null,
       focusedFlightId: null,
       warehouseSemaphoreFilter: "todos",
       activeFlightRegionFilter: "todos",
@@ -176,7 +207,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
         idSimulacion: options?.idSimulacion ?? null,
       },
       focusedAirportIcao: null,
-      focusedFlightId: codigo,
+      focusedFlightId: options?.focusOnMap === false ? null : codigo,
       warehouseRegionFilter: "todos",
       warehouseSemaphoreFilter: "todos",
       activeFlightOnlyId: options?.showOnlyOnMap ? codigo : null,
@@ -188,6 +219,7 @@ export const useDrawerStore = create<DrawerState>((set) => ({
         type: "shipment",
         codigo,
         idSimulacion: options?.idSimulacion ?? null,
+        displayCodigo: options?.displayCodigo,
       },
       focusedAirportIcao: options?.focusedAirportIcao ?? null,
       focusedFlightId: options?.focusedFlightId ?? null,

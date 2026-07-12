@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
-import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.entities.VueloOcurrencia;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Grafo;
@@ -117,7 +117,8 @@ public class PlanificadorACO {
     private void depositar(Ruta ruta) {
         double aporte = q / (ruta.getCosto() + 0.0001);
 
-        for (Vuelo v : ruta.getVuelos()) {
+        for (VueloOcurrencia ocurrencia : ruta.getOcurrencias()) {
+            var v = ocurrencia.getVuelo();
             int i = indiceAeropuertos.indexOf(v.getDesde());
             int j = indiceAeropuertos.indexOf(v.getHasta());
 

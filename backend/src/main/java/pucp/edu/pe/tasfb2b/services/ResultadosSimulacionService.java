@@ -1,19 +1,20 @@
 package pucp.edu.pe.tasfb2b.services;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pucp.edu.pe.tasfb2b.controllers.dto.HistorialSimulacionResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.ResultadoColapsoResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.ResultadoPeriodoResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
-import pucp.edu.pe.tasfb2b.entities.AsignacionEnvio;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
-import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
+import pucp.edu.pe.tasfb2b.entities.ResultadoSimulacion;
 import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
-import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
+import pucp.edu.pe.tasfb2b.repositories.ResultadoSimulacionRepository;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -33,29 +34,29 @@ public class ResultadosSimulacionService {
     private static final double UMBRAL_CRITICO = 85.0;
 
     private final SimulacionRepository simulacionRepository;
-    private final SolicitudEnvioRepository solicitudEnvioRepository;
-    private final AsignacionEnvioRepository asignacionEnvioRepository;
+    private final ResultadoSimulacionRepository resultadoSimulacionRepository;
+    private final ObjectMapper objectMapper;
 
     public ResultadosSimulacionService(
             SimulacionRepository simulacionRepository,
-            SolicitudEnvioRepository solicitudEnvioRepository,
-            AsignacionEnvioRepository asignacionEnvioRepository
+            ResultadoSimulacionRepository resultadoSimulacionRepository,
+            ObjectMapper objectMapper
     ) {
         this.simulacionRepository = simulacionRepository;
-        this.solicitudEnvioRepository = solicitudEnvioRepository;
-        this.asignacionEnvioRepository = asignacionEnvioRepository;
+        this.resultadoSimulacionRepository = resultadoSimulacionRepository;
+        this.objectMapper = objectMapper;
     }
 
     public ResultadoPeriodoResponse obtenerResultadoPeriodo(Integer idSimulacion) {
-        Simulacion simulacion = obtenerSimulacion(idSimulacion);
-        List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
-        return construirResultadoPeriodo(simulacion, envios, agruparAsignacionesPorEnvio(envios));
+        ResultadoSimulacion snapshot = resultadoSimulacionRepository.findBySimulacion_IdSimulacion(idSimulacion)
+                .orElseThrow(() -> new IllegalArgumentException("La simulacion aun no tiene un resultado final."));
+        return leer(snapshot.getResultadoPeriodoJson(), ResultadoPeriodoResponse.class);
     }
 
     private ResultadoPeriodoResponse construirResultadoPeriodo(
             Simulacion simulacion,
             List<SolicitudEnvio> envios,
-            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
+            Map<Integer, List<RutaAsignada>> asignacionesPorEnvio
     ) {
         Map<String, AeropuertoStats> statsPorAeropuerto = construirStatsPorAeropuerto(
                 simulacion,
@@ -77,14 +78,14 @@ public class ResultadosSimulacionService {
         int vuelosEjecutados = envios.stream()
                 .flatMap(envio -> obtenerRutasAsignadas(envio, asignacionesPorEnvio).stream())
                 .map(RutaAsignada::ruta)
-                .filter(ruta -> ruta != null && ruta.getVuelos() != null)
-                .mapToInt(ruta -> ruta.getVuelos().size())
+                .filter(ruta -> ruta != null)
+                .mapToInt(ruta -> ruta.getOcurrencias().size())
                 .sum();
         int cancelaciones = valor(simulacion.getCancelacionesVuelos());
         int replanificaciones = (int) envios.stream()
                 .flatMap(envio -> obtenerRutasAsignadas(envio, asignacionesPorEnvio).stream())
                 .map(RutaAsignada::ruta)
-                .filter(ruta -> ruta != null && ruta.getVuelos() != null && ruta.getVuelos().size() > 1)
+                .filter(ruta -> ruta != null && ruta.getOcurrencias().size() > 1)
                 .count();
 
         ResultadoPeriodoResponse.ResumenOperativoResponse resumen = construirResumenOperativo(
@@ -119,10 +120,58 @@ public class ResultadosSimulacionService {
     }
 
     public ResultadoColapsoResponse obtenerResultadoColapso(Integer idSimulacion) {
-        Simulacion simulacion = obtenerSimulacion(idSimulacion);
-        List<SolicitudEnvio> envios = solicitudEnvioRepository.findBySimulacion_IdSimulacionOrderByIdEnvioAsc(idSimulacion);
-        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios, agruparAsignacionesPorEnvio(envios));
-        return construirResultadoColapso(periodo);
+        ResultadoSimulacion snapshot = resultadoSimulacionRepository.findBySimulacion_IdSimulacion(idSimulacion)
+                .orElseThrow(() -> new IllegalArgumentException("La simulacion aun no tiene un resultado final."));
+        ResultadoColapsoResponse colapso = leer(snapshot.getResultadoColapsoJson(), ResultadoColapsoResponse.class);
+        if (colapso.duracionMinutos() != null) {
+            return colapso;
+        }
+
+        ResultadoPeriodoResponse periodo = leer(snapshot.getResultadoPeriodoJson(), ResultadoPeriodoResponse.class);
+        return new ResultadoColapsoResponse(
+                colapso.id(),
+                colapso.rango(),
+                colapso.diasHastaColapso(),
+                colapso.maletasProcesadas(),
+                periodo.resumen().duracionMinutos(),
+                colapso.plazosIncumplidos(),
+                colapso.almacenesSaturados(),
+                colapso.factorDemandaMax(),
+                colapso.analisis(),
+                colapso.aeropuertosCriticos(),
+                colapso.sugerencia()
+        );
+    }
+
+    @Transactional
+    public void guardarResultadoFinal(Simulacion simulacion, List<SolicitudEnvio> enviosVolatiles) {
+        Map<Integer, List<RutaAsignada>> rutas = agruparAsignacionesVolatiles(enviosVolatiles);
+        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, enviosVolatiles, rutas);
+        ResultadoColapsoResponse colapso = construirResultadoColapso(periodo);
+        try {
+            String periodoJson = objectMapper.writeValueAsString(periodo);
+            String colapsoJson = objectMapper.writeValueAsString(colapso);
+            ResultadoSimulacion resultado = resultadoSimulacionRepository
+                    .findBySimulacion_IdSimulacion(simulacion.getIdSimulacion())
+                    .orElseGet(() -> new ResultadoSimulacion(
+                            simulacion,
+                            periodoJson,
+                            colapsoJson
+                    ));
+            resultado.setResultadoPeriodoJson(periodoJson);
+            resultado.setResultadoColapsoJson(colapsoJson);
+            resultadoSimulacionRepository.save(resultado);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("No se pudo persistir el resultado final de la simulacion.", e);
+        }
+    }
+
+    private <T> T leer(String json, Class<T> tipo) {
+        try {
+            return objectMapper.readValue(json, tipo);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("El resultado persistido no es valido.", e);
+        }
     }
 
     private ResultadoColapsoResponse construirResultadoColapso(ResultadoPeriodoResponse periodo) {
@@ -169,6 +218,7 @@ public class ResultadosSimulacionService {
                 periodo.rango(),
                 Math.max(1, (int) Math.ceil(periodo.resumen().duracionMinutos() / (double) (24 * 60))),
                 periodo.totalMaletas(),
+                periodo.resumen().duracionMinutos(),
                 plazosIncumplidos,
                 new ResultadoColapsoResponse.AlmacenesSaturadosResponse(
                         saturados,
@@ -184,17 +234,12 @@ public class ResultadosSimulacionService {
     }
 
     public List<HistorialSimulacionResponse> listarHistorialSimulaciones() {
-        Map<Integer, List<SolicitudEnvio>> enviosPorSimulacion = agruparEnviosPorSimulacion();
-
         return simulacionRepository.findAll().stream()
                 .sorted(Comparator.comparing(
                         Simulacion::getFechaInicio,
                         Comparator.nullsLast(Comparator.naturalOrder())
                 ).reversed())
-                .map(simulacion -> mapearHistorialSimulacion(
-                        simulacion,
-                        enviosPorSimulacion.getOrDefault(simulacion.getIdSimulacion(), List.of())
-                ))
+                .map(this::mapearHistorialSimulacion)
                 .toList();
     }
 
@@ -203,64 +248,41 @@ public class ResultadosSimulacionService {
                 .orElseThrow(() -> new IllegalArgumentException("No existe una simulacion con id " + idSimulacion + "."));
     }
 
-    private Map<Integer, List<SolicitudEnvio>> agruparEnviosPorSimulacion() {
-        Map<Integer, List<SolicitudEnvio>> enviosPorSimulacion = new HashMap<>();
-
-        for (SolicitudEnvio envio : solicitudEnvioRepository.findAllConRelacionesDeSimulacion()) {
-            Integer idSimulacion = envio.getIdSimulacion();
-            if (idSimulacion == null) {
+    private Map<Integer, List<RutaAsignada>> agruparAsignacionesVolatiles(List<SolicitudEnvio> envios) {
+        Map<Integer, List<RutaAsignada>> resultado = new HashMap<>();
+        for (SolicitudEnvio envio : envios) {
+            if (envio.getIdEnvio() == null || envio.getAsignaciones() == null) {
                 continue;
             }
-
-            enviosPorSimulacion.computeIfAbsent(idSimulacion, ignored -> new ArrayList<>())
-                    .add(envio);
-        }
-
-        return enviosPorSimulacion;
-    }
-
-    private Map<Integer, List<AsignacionEnvio>> agruparAsignacionesPorEnvio(List<SolicitudEnvio> envios) {
-        Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio = new HashMap<>();
-
-        if (envios == null || envios.isEmpty()) {
-            return asignacionesPorEnvio;
-        }
-
-        for (AsignacionEnvio asignacion : asignacionEnvioRepository
-                .findByEnvioInOrderByEnvio_IdEnvioAscIdAsignacionAsc(envios)) {
-            if (asignacion.getEnvio() == null || asignacion.getEnvio().getIdEnvio() == null) {
-                continue;
-            }
-
-            asignacionesPorEnvio
-                    .computeIfAbsent(asignacion.getEnvio().getIdEnvio(), ignored -> new ArrayList<>())
-                    .add(asignacion);
-        }
-
-        return asignacionesPorEnvio;
-    }
-
-    private List<RutaAsignada> obtenerRutasAsignadas(
-            SolicitudEnvio envio,
-            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
-    ) {
-        if (envio == null) {
-            return List.of();
-        }
-
-        List<AsignacionEnvio> asignaciones = asignacionesPorEnvio.getOrDefault(
-                envio.getIdEnvio(),
-                List.of()
-        );
-
-        if (!asignaciones.isEmpty()) {
-            return asignaciones.stream()
+            List<RutaAsignada> rutas = envio.getAsignaciones().stream()
                     .filter(asignacion -> asignacion.getRuta() != null)
                     .map(asignacion -> new RutaAsignada(
                             asignacion.getRuta(),
                             valor(asignacion.getCantidadBolsas())
                     ))
                     .toList();
+            if (!rutas.isEmpty()) {
+                resultado.put(envio.getIdEnvio(), rutas);
+            }
+        }
+        return resultado;
+    }
+
+    private List<RutaAsignada> obtenerRutasAsignadas(
+            SolicitudEnvio envio,
+            Map<Integer, List<RutaAsignada>> asignacionesPorEnvio
+    ) {
+        if (envio == null) {
+            return List.of();
+        }
+
+        List<RutaAsignada> asignaciones = asignacionesPorEnvio.getOrDefault(
+                envio.getIdEnvio(),
+                List.of()
+        );
+
+        if (!asignaciones.isEmpty()) {
+            return asignaciones;
         }
 
         if (envio.getRuta() == null) {
@@ -270,15 +292,23 @@ public class ResultadosSimulacionService {
         return List.of(new RutaAsignada(envio.getRuta(), valor(envio.getContarBolsas())));
     }
 
-    private HistorialSimulacionResponse mapearHistorialSimulacion(
-            Simulacion simulacion,
-            List<SolicitudEnvio> envios
-    ) {
+    private HistorialSimulacionResponse mapearHistorialSimulacion(Simulacion simulacion) {
         String tipo = inferirTipo(simulacion);
-        ResultadoPeriodoResponse periodo = construirResultadoPeriodo(simulacion, envios, agruparAsignacionesPorEnvio(envios));
+        ResultadoSimulacion snapshot = resultadoSimulacionRepository
+                .findBySimulacion_IdSimulacion(simulacion.getIdSimulacion())
+                .orElse(null);
+        if (snapshot == null) {
+            return new HistorialSimulacionResponse(
+                    simulacion.getIdSimulacion(), tipo, simulacion.getK(), simulacion.getActiva(),
+                    simulacion.getFechaInicio(), simulacion.getFechaFin(), "En ejecucion", 0, null,
+                    0, valor(simulacion.getCancelacionesVuelos()), 0, null, null, null,
+                    "La simulacion aun no tiene un resultado final."
+            );
+        }
+        ResultadoPeriodoResponse periodo = leer(snapshot.getResultadoPeriodoJson(), ResultadoPeriodoResponse.class);
 
         if ("colapso".equals(tipo)) {
-            ResultadoColapsoResponse colapso = construirResultadoColapso(periodo);
+            ResultadoColapsoResponse colapso = leer(snapshot.getResultadoColapsoJson(), ResultadoColapsoResponse.class);
             return new HistorialSimulacionResponse(
                     simulacion.getIdSimulacion(),
                     tipo,
@@ -322,7 +352,7 @@ public class ResultadosSimulacionService {
     private Map<String, AeropuertoStats> construirStatsPorAeropuerto(
             Simulacion simulacion,
             List<SolicitudEnvio> envios,
-            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
+            Map<Integer, List<RutaAsignada>> asignacionesPorEnvio
     ) {
         Map<String, AeropuertoStats> stats = new LinkedHashMap<>();
 
@@ -380,13 +410,13 @@ public class ResultadosSimulacionService {
         int minutoSolicitud = calcularMinutoSimulacion(simulacion, envio);
 
         for (RutaAsignada rutaAsignada : rutasAsignadas) {
-            if (rutaAsignada.ruta() == null || rutaAsignada.ruta().getVuelos() == null) {
+            if (rutaAsignada.ruta() == null) {
                 continue;
             }
 
             List<VentanaVuelo> ventanas = calcularVentanasRuta(
-                    rutaAsignada.ruta(),
-                    minutoSolicitud
+                    simulacion,
+                    rutaAsignada.ruta()
             );
 
             if (ventanas.isEmpty()) {
@@ -404,29 +434,15 @@ public class ResultadosSimulacionService {
         }
     }
 
-    private List<VentanaVuelo> calcularVentanasRuta(Ruta ruta, int minutoInicio) {
+    private List<VentanaVuelo> calcularVentanasRuta(Simulacion simulacion, Ruta ruta) {
         List<VentanaVuelo> ventanas = new ArrayList<>();
-        int minutoReferencia = Math.max(0, minutoInicio);
-
-        for (Vuelo vuelo : ruta.getVuelos()) {
-            int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-            int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
-
-            while (llegadaBase <= salidaBase) {
-                llegadaBase += 24 * 60;
-            }
-
-            int diaReferencia = Math.floorDiv(minutoReferencia, 24 * 60);
-            int salida = salidaBase + diaReferencia * 24 * 60;
-            int llegada = llegadaBase + diaReferencia * 24 * 60;
-
-            while (salida < minutoReferencia) {
-                salida += 24 * 60;
-                llegada += 24 * 60;
-            }
-
-            ventanas.add(new VentanaVuelo(vuelo, salida, llegada));
-            minutoReferencia = llegada;
+        if (simulacion == null || simulacion.getFechaInicio() == null) {
+            return ventanas;
+        }
+        for (var ocurrencia : ruta.getOcurrencias()) {
+            int salida = (int) Duration.between(simulacion.getFechaInicio(), ocurrencia.getFechaHoraSalida()).toMinutes();
+            int llegada = (int) Duration.between(simulacion.getFechaInicio(), ocurrencia.getFechaHoraLlegada()).toMinutes();
+            ventanas.add(new VentanaVuelo(ocurrencia.getVuelo(), salida, llegada));
         }
 
         return ventanas;
@@ -526,7 +542,7 @@ public class ResultadosSimulacionService {
             Simulacion simulacion,
             List<SolicitudEnvio> envios,
             Map<String, AeropuertoStats> statsPorAeropuerto,
-            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
+            Map<Integer, List<RutaAsignada>> asignacionesPorEnvio
     ) {
         int maletasIntra = 0;
         int maletasInter = 0;
@@ -604,7 +620,7 @@ public class ResultadosSimulacionService {
     private long calcularDuracionSimuladaMinutos(
             Simulacion simulacion,
             List<SolicitudEnvio> envios,
-            Map<Integer, List<AsignacionEnvio>> asignacionesPorEnvio
+            Map<Integer, List<RutaAsignada>> asignacionesPorEnvio
     ) {
         if (simulacion.getDuracionSimulacionMinutos() != null
                 && simulacion.getDuracionSimulacionMinutos() > 0) {
@@ -617,11 +633,11 @@ public class ResultadosSimulacionService {
             maxMinuto = Math.max(maxMinuto, minutoSolicitud);
 
             for (RutaAsignada rutaAsignada : obtenerRutasAsignadas(envio, asignacionesPorEnvio)) {
-                if (rutaAsignada.ruta() == null || rutaAsignada.ruta().getVuelos() == null) {
+                if (rutaAsignada.ruta() == null) {
                     continue;
                 }
 
-                List<VentanaVuelo> ventanas = calcularVentanasRuta(rutaAsignada.ruta(), minutoSolicitud);
+                List<VentanaVuelo> ventanas = calcularVentanasRuta(simulacion, rutaAsignada.ruta());
                 if (!ventanas.isEmpty()) {
                     maxMinuto = Math.max(maxMinuto, ventanas.getLast().llegadaMinuto());
                 }

@@ -47,7 +47,7 @@ const SimulacionColapsoPage = () => {
     mapa,
     envios,
     flights: backendMapFlights,
-  } = useLiveSimulation({ autoStart: true, enablePolling: true });
+  } = useLiveSimulation({ autoStart: true, pollingMode: "sse" });
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -62,24 +62,9 @@ const SimulacionColapsoPage = () => {
   const backendBlockIntervalMs =
     estado?.intervaloRealMs ?? BACKEND_SIMULATION_BLOCK_INTERVAL_MS;
 
-  const backendSimMinutesPerSecond =
-    estado?.scMinutos && backendBlockIntervalMs > 0
-      ? estado.scMinutos / (backendBlockIntervalMs / 1000)
-      : undefined;
-
   const animatedFlights = useFlightSimulation({
-    baseFlightCount: 25,
+    baseFlightCount: USE_MOCK_DATA ? 25 : 0,
     scaleByDemand: true,
-    backendShipments: USE_MOCK_DATA ? undefined : envios,
-    backendClockMinutes: USE_MOCK_DATA
-      ? undefined
-      : estado?.punteroConsumoMinutos,
-    backendSimulationStart: USE_MOCK_DATA
-      ? undefined
-      : estado?.fechaHoraInicioSimulacion,
-    backendSimMinutesPerSecond: USE_MOCK_DATA
-      ? undefined
-      : backendSimMinutesPerSecond,
   });
   const flights = useMemo(
     () => mergeMapFlights(animatedFlights, backendMapFlights),
@@ -185,7 +170,7 @@ const SimulacionColapsoPage = () => {
             flightCancellationEvents={mapa?.cancelacionesRecientes ?? []}
             shipmentRouteSegments={shipmentRouteSegments}
             onAirportClick={(a) => openAirport(a.icao)}
-            onFlightClick={(id) => openFlight(id, { idSimulacion })}
+            onFlightClick={(id) => openFlight(`occ-${id}`, { idSimulacion })}
           />
         )}
         <MapQuickActions

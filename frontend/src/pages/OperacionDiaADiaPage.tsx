@@ -19,56 +19,9 @@ import {
   getFlightOccupancyMetric,
   getWarehouseOccupancyMetric,
 } from "@/utils/capacityMetrics";
-import type {
-  BackendSolicitudEnvio,
-  BackendVuelo,
-} from "@/types/backendSimulation.types";
-
-const DAY_MINUTES = 24 * 60;
+import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 const getUtcDateKey = (date: Date): string => date.toISOString().slice(0, 10);
-
-const parseShipmentUtcMinute = (shipment: BackendSolicitudEnvio): number => {
-  const [hour = "0", minute = "0"] = (shipment.hora ?? "00:00").split(":");
-  return Number(hour) * 60 + Number(minute);
-};
-
-const getUtcMinutesSinceShipmentDay = (
-  now: Date,
-  shipment: BackendSolicitudEnvio
-): number => {
-  const shipmentDayMs = Date.parse(`${shipment.fecha}T00:00:00Z`);
-
-  if (Number.isNaN(shipmentDayMs)) {
-    return 0;
-  }
-
-  return Math.floor((now.getTime() - shipmentDayMs) / 60_000);
-};
-
-const getNextFlightWindow = (
-  earliestMinute: number,
-  flight: BackendVuelo
-): { departure: number; arrival: number } => {
-  const departureBase = flight.salidaUtcMin ?? 0;
-  let arrivalBase = flight.llegadaUtcMin ?? departureBase;
-
-  while (arrivalBase <= departureBase) {
-    arrivalBase += DAY_MINUTES;
-  }
-
-  const duration = arrivalBase - departureBase;
-  const occurrenceOffset = Math.max(
-    0,
-    Math.ceil((earliestMinute - departureBase) / DAY_MINUTES)
-  );
-  const departure = departureBase + occurrenceOffset * DAY_MINUTES;
-
-  return {
-    departure,
-    arrival: departure + duration,
-  };
-};
 
 const isShipmentDelivered = (
   shipment: BackendSolicitudEnvio,
@@ -83,17 +36,13 @@ const isShipmentDelivered = (
   let lastArrival: number | null = null;
 
   for (const group of routeGroups) {
-    let earliestDeparture = parseShipmentUtcMinute(shipment);
-
-    for (const flight of group.ruta?.vuelos ?? []) {
-      const window = getNextFlightWindow(earliestDeparture, flight);
-      earliestDeparture = window.arrival;
-      lastArrival =
-        lastArrival === null ? window.arrival : Math.max(lastArrival, window.arrival);
+    for (const occurrence of group.ruta?.ocurrencias ?? []) {
+      const arrival = Date.parse(occurrence.fechaHoraLlegada);
+      lastArrival = lastArrival === null ? arrival : Math.max(lastArrival, arrival);
     }
   }
 
-  return lastArrival !== null && getUtcMinutesSinceShipmentDay(now, shipment) >= lastArrival;
+  return lastArrival !== null && now.getTime() >= lastArrival;
 };
 
 const buildOperationKpis = (
@@ -137,17 +86,13 @@ const OperacionDiaADiaPage = () => {
   }, []);
 
   const animatedFlights = useFlightSimulation({
-    baseFlightCount: 25,
+    baseFlightCount: USE_MOCK_DATA ? 25 : 0,
     scaleByDemand: false,
-    backendShipments: USE_MOCK_DATA ? undefined : envios,
   });
   const backendMapFlights = useMemo(
     () =>
-      buildEmptyMapFlights(mapa?.vuelos ?? [], {
-        shipments: envios,
-        nowMs: systemDate.getTime(),
-      }),
-    [envios, mapa?.vuelos, systemDate]
+      buildEmptyMapFlights(mapa?.vuelos ?? []),
+    [mapa?.vuelos]
   );
   const flights = useMemo(
     () => mergeMapFlights(animatedFlights, backendMapFlights),
@@ -213,7 +158,7 @@ const OperacionDiaADiaPage = () => {
             flightCancellationEvents={mapa?.cancelacionesRecientes ?? []}
             shipmentRouteSegments={shipmentRouteSegments}
             onAirportClick={(a) => openAirport(a.icao)}
-            onFlightClick={(id) => openFlight(id)}
+            onFlightClick={(id) => openFlight(`occ-${id}`)}
           />
         )}
         <MapQuickActions

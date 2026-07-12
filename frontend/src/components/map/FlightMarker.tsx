@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import L from "leaflet";
-import { Marker, useMap } from "react-leaflet";
+import { useMap } from "react-leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { EstadoSemaforo } from "@/types/common.types";
 import { ESTADO_COLOR_HEX } from "@/utils/airportHelpers";
@@ -26,48 +26,20 @@ interface FlightMarkerProps {
   onClick?: (flightId: string) => void;
 }
 
-/**
- * Tamano del icono de avion. Estandar 61: rango 18-24px.
- * 22px destaca sobre el core del aeropuerto (10px) sin tapar el mapa.
- */
 const PLANE_SIZE = 22;
-
-/**
- * Zoom de referencia para los calculos de proyeccion.
- * Cualquier valor produce el mismo resultado relativo, pero usar 0
- * mantiene los numeros pequenos y legibles si se debuggea.
- */
 const REF_ZOOM = 0;
-
-/**
- * Offset de orientacion del icono SVG.
- *
- * El path de lucide-react `Plane` apunta naturalmente hacia el
- * cuadrante NORESTE (~45 grados desde el norte), no al norte puro
- * como cabria esperar. Compensamos restando 45 al bearing geodesico
- * para que el avion termine apuntando hacia donde realmente vuela.
- *
- * Si en el futuro se reemplaza el icono por un asset que apunte al
- * norte puro, basta con cambiar este valor a 0.
- */
 const ICON_BEARING_OFFSET = -45;
-
-/**
- * Path SVG del icono de avion (lucide-react `Plane`).
- *
- * Hardcodeado para evitar el costo de renderToString sobre el componente
- * React de lucide en cada actualizacion del divIcon. Cuando el icono
- * cambie en lucide, basta con copiar el nuevo path.
- */
 const PLANE_PATH =
   "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z";
-
 const PLANE_CENTER = {
   cx: 12,
   cy: 12,
   r: 3.2,
 } as const;
 const EMPTY_FLIGHT_COLOR = "#6B7280";
+
+const clampProgress = (value: number): number => Math.max(0, Math.min(1, value));
+const roundPixel = (value: number): number => Math.round(value * 1000) / 1000;
 
 const formatOccupancy = (value?: number): string =>
   value === undefined
@@ -82,22 +54,12 @@ const buildTooltipHtml = (
     occupancyPct
   )}</span>`;
 
-/**
- * Construye el HTML del divIcon del avion.
- *
- * Sobre fondo claro (CartoDB Positron):
- *   - cuerpo = color oscuro fijo para conservar legibilidad
- *   - centro = punto semaforo opcional segun ocupacion del vuelo
- *   - stroke = blanco como halo de definicion (1.5px)
- *
- * La rotacion del bearing se aplica en el div contenedor para no
- * deformar el viewBox del SVG.
- */
 const buildPlaneHtml = (
   bodyColor: string,
   centerColor: string | null,
   displayBearing: number,
-  selected = false
+  selected = false,
+  tooltipHtml: string
 ): string => `
   <div class="tasf-flight-marker" style="position:relative; transform: rotate(${displayBearing}deg) ${selected ? "scale(1.2)" : ""}">
     ${
@@ -120,18 +82,30 @@ const buildPlaneHtml = (
       }
     </svg>
   </div>
+  <div class="tasf-flight-overlay-tooltip tasf-flight-tooltip">
+    ${tooltipHtml}
+  </div>
 `;
+
+const calculateDisplayBearing = (
+  map: L.Map,
+  fromAirport: AirportWithCoords,
+  toAirport: AirportWithCoords
+): number => {
+  const fromPx = map.project([fromAirport.lat, fromAirport.lng], REF_ZOOM);
+  const toPx = map.project([toAirport.lat, toAirport.lng], REF_ZOOM);
+  const dx = toPx.x - fromPx.x;
+  const dy = toPx.y - fromPx.y;
+  const geoBearing = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+  return (geoBearing + ICON_BEARING_OFFSET + 360) % 360;
+};
 
 /**
  * Marcador de vuelo en transito.
  *
- * Calcula posicion y bearing en el espacio de proyeccion Mercator
- * (mismo que usa Polyline de Leaflet para dibujar las rutas), de modo
- * que el avion siempre cae exactamente sobre la linea visible y apunta
- * en la direccion visual del trayecto.
- *
- * El bearing geodesico se compone con ICON_BEARING_OFFSET para
- * compensar la orientacion natural del path SVG.
+ * El avion se monta una sola vez en el marker pane de Leaflet y se mueve con
+ * `translate3d`, evitando reproyectar y llamar `marker.setLatLng` en cada frame.
+ * Para rutas rectas esto produce un desplazamiento mas estable al hacer zoom.
  */
 const FlightMarker = ({
   flightId,
@@ -146,161 +120,187 @@ const FlightMarker = ({
   onClick,
 }: FlightMarkerProps) => {
   const map = useMap();
-  const markerRef = useRef<L.Marker | null>(null);
-
-  const { fromPx, toPx, position, displayBearing } = useMemo(() => {
-    const fromLatLng: [number, number] = [fromAirport.lat, fromAirport.lng];
-    const toLatLng: [number, number] = [toAirport.lat, toAirport.lng];
-
-    const fromPx = map.project(fromLatLng, REF_ZOOM);
-    const toPx = map.project(toLatLng, REF_ZOOM);
-
-    // Posicion: interpolacion lineal en pixeles Mercator.
-    const midPx = L.point(
-      fromPx.x + (toPx.x - fromPx.x) * progress,
-      fromPx.y + (toPx.y - fromPx.y) * progress
-    );
-    const pos = map.unproject(midPx, REF_ZOOM);
-
-    // Bearing geodesico: angulo de la linea en pixeles Mercator.
-    // En coords de pantalla, +y apunta abajo (sur), +x apunta derecha (este).
-    // atan2(dx, -dy) convierte ese sistema al convenio de bearing
-    // (0 = norte, 90 = este, etc.).
-    const dx = toPx.x - fromPx.x;
-    const dy = toPx.y - fromPx.y;
-    const geoBearing =
-      ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
-
-    // Bearing visual: compensa el offset del path SVG para que el avion
-    // apunte en la direccion correcta del trayecto.
-    const display = (geoBearing + ICON_BEARING_OFFSET + 360) % 360;
-
-    return {
-      fromPx,
-      toPx,
-      position: [pos.lat, pos.lng] as [number, number],
-      displayBearing: display,
-    };
-  }, [
-    map,
-    fromAirport.lat,
-    fromAirport.lng,
-    toAirport.lat,
-    toAirport.lng,
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef<number>(0);
+  const fromPointRef = useRef<L.Point>(L.point(0, 0));
+  const toPointRef = useRef<L.Point>(L.point(0, 0));
+  const latestRef = useRef({
+    flightId,
     progress,
-  ]);
-  const progressSnapshot = progress;
-  const progressTimestamp = progressUpdatedAtMs ?? performance.now();
-  const progressVelocity = progressVelocityPerSecond ?? 0;
+    progressVelocityPerSecond,
+    progressUpdatedAtMs,
+    onClick,
+  });
 
   useEffect(() => {
-    const marker = markerRef.current;
-    if (!marker) {
+    latestRef.current = {
+      flightId,
+      progress,
+      progressVelocityPerSecond,
+      progressUpdatedAtMs,
+      onClick,
+    };
+  }, [flightId, onClick, progress, progressUpdatedAtMs, progressVelocityPerSecond]);
+
+  useEffect(() => {
+    const pane = map.getPane("markerPane");
+    if (!pane) {
       return;
     }
 
-    let rafId = 0;
+    const element = document.createElement("div");
+    element.className = "tasf-flight-overlay-marker";
+    element.style.zIndex = selected ? "1200" : "600";
+    elementRef.current = element;
+    pane.appendChild(element);
 
-    const setMarkerPosition = (nextProgress: number) => {
-      const clampedProgress = Math.max(0, Math.min(1, nextProgress));
-      const currentPx = L.point(
-        fromPx.x + (toPx.x - fromPx.x) * clampedProgress,
-        fromPx.y + (toPx.y - fromPx.y) * clampedProgress
-      );
-      const currentPosition = map.unproject(currentPx, REF_ZOOM);
-      marker.setLatLng(currentPosition);
+    const handleClick = (event: MouseEvent) => {
+      L.DomEvent.stop(event);
+      latestRef.current.onClick?.(latestRef.current.flightId);
     };
-
-    const tick = (now: number) => {
-      const elapsedSeconds = (now - progressTimestamp) / 1000;
-      const nextProgress =
-        progressSnapshot + elapsedSeconds * progressVelocity;
-
-      setMarkerPosition(nextProgress);
-
-      if (nextProgress < 1 && progressVelocity > 0) {
-        rafId = requestAnimationFrame(tick);
+    const handleMouseOver = () => {
+      if (tooltipRef.current) {
+        tooltipRef.current.style.opacity = "1";
+      }
+    };
+    const handleMouseOut = () => {
+      if (tooltipRef.current) {
+        tooltipRef.current.style.opacity = "0";
       }
     };
 
-    setMarkerPosition(progressSnapshot);
+    element.addEventListener("click", handleClick);
+    element.addEventListener("mouseover", handleMouseOver);
+    element.addEventListener("mouseout", handleMouseOut);
 
-    if (progressSnapshot < 1 && progressVelocity > 0) {
-      rafId = requestAnimationFrame(tick);
-    }
-
-    return () => cancelAnimationFrame(rafId);
-  }, [
-    fromPx.x,
-    fromPx.y,
-    map,
-    progressSnapshot,
-    progressTimestamp,
-    progressVelocity,
-    toPx.x,
-    toPx.y,
-  ]);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      element.removeEventListener("click", handleClick);
+      element.removeEventListener("mouseover", handleMouseOver);
+      element.removeEventListener("mouseout", handleMouseOut);
+      element.remove();
+      elementRef.current = null;
+      tooltipRef.current = null;
+    };
+  }, [map]);
 
   useEffect(() => {
-    const marker = markerRef.current;
-    if (!marker) {
+    const element = elementRef.current;
+    if (!element) {
       return;
     }
 
-    const tooltip = marker.getTooltip();
     const color =
       occupancyPct === 0
         ? EMPTY_FLIGHT_COLOR
         : estado
           ? ESTADO_COLOR_HEX[estado]
           : COLORS.text.primary;
-    const content = buildTooltipHtml(occupancyPct, color);
+    const centerColor =
+      occupancyPct === 0
+        ? EMPTY_FLIGHT_COLOR
+        : estado
+          ? ESTADO_COLOR_HEX[estado]
+          : null;
+    const displayBearing = calculateDisplayBearing(map, fromAirport, toAirport);
 
-    if (tooltip) {
-      tooltip.setContent(content);
+    element.style.zIndex = selected ? "1200" : "600";
+    element.innerHTML = buildPlaneHtml(
+      COLORS.text.primary,
+      centerColor,
+      displayBearing,
+      selected,
+      buildTooltipHtml(occupancyPct, color)
+    );
+    tooltipRef.current = element.querySelector<HTMLDivElement>(
+      ".tasf-flight-overlay-tooltip"
+    );
+  }, [
+    fromAirport,
+    map,
+    occupancyPct,
+    selected,
+    estado,
+    toAirport,
+  ]);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) {
       return;
     }
 
-    marker.bindTooltip(content, {
-      direction: "top",
-      offset: L.point(0, -12),
-      opacity: 1,
-      className: "tasf-flight-tooltip",
-    });
-  }, [estado, occupancyPct]);
+    const updateEndpoints = () => {
+      fromPointRef.current = map.latLngToLayerPoint([
+        fromAirport.lat,
+        fromAirport.lng,
+      ]);
+      toPointRef.current = map.latLngToLayerPoint([
+        toAirport.lat,
+        toAirport.lng,
+      ]);
+    };
 
-  const centerColor =
-    occupancyPct === 0
-      ? EMPTY_FLIGHT_COLOR
-      : estado
-        ? ESTADO_COLOR_HEX[estado]
-        : null;
-  const bodyColor = COLORS.text.primary;
+    const setElementPosition = (nextProgress: number) => {
+      const clampedProgress = clampProgress(nextProgress);
+      const fromPoint = fromPointRef.current;
+      const toPoint = toPointRef.current;
+      const x =
+        fromPoint.x + (toPoint.x - fromPoint.x) * clampedProgress - PLANE_SIZE / 2;
+      const y =
+        fromPoint.y + (toPoint.y - fromPoint.y) * clampedProgress - PLANE_SIZE / 2;
 
-  const icon = useMemo(
-    () =>
-      L.divIcon({
-        html: buildPlaneHtml(bodyColor, centerColor, displayBearing, selected),
-        className: "",
-        iconSize: [PLANE_SIZE, PLANE_SIZE],
-        iconAnchor: [PLANE_SIZE / 2, PLANE_SIZE / 2],
-      }),
-    [bodyColor, centerColor, displayBearing, selected]
-  );
+      element.style.transform = `translate3d(${roundPixel(x)}px, ${roundPixel(y)}px, 0)`;
+    };
 
-  return (
-    <Marker
-      ref={markerRef}
-      position={position}
-      icon={icon}
-      zIndexOffset={selected ? 1200 : 0}
-      eventHandlers={{
-        click: () => onClick?.(flightId),
-        mouseover: (event) => event.target.openTooltip(),
-        mouseout: (event) => event.target.closeTooltip(),
-      }}
-    />
-  );
+    const getAnimatedProgress = (now: number) => {
+      const progressTimestamp = progressUpdatedAtMs ?? performance.now();
+      const progressVelocity = progressVelocityPerSecond ?? 0;
+      const elapsedSeconds = (now - progressTimestamp) / 1000;
+      return progress + elapsedSeconds * progressVelocity;
+    };
+
+    const refreshPosition = () => {
+      updateEndpoints();
+      setElementPosition(getAnimatedProgress(performance.now()));
+    };
+
+    const tick = (now: number) => {
+      const nextProgress = getAnimatedProgress(now);
+      setElementPosition(nextProgress);
+
+      if (nextProgress < 1 && (progressVelocityPerSecond ?? 0) > 0) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    cancelAnimationFrame(rafRef.current);
+    updateEndpoints();
+    setElementPosition(progress);
+
+    if (progress < 1 && (progressVelocityPerSecond ?? 0) > 0) {
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    map.on("move zoom viewreset zoomanim", refreshPosition);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      map.off("move zoom viewreset zoomanim", refreshPosition);
+    };
+  }, [
+    fromAirport.lat,
+    fromAirport.lng,
+    map,
+    progress,
+    progressUpdatedAtMs,
+    progressVelocityPerSecond,
+    toAirport.lat,
+    toAirport.lng,
+  ]);
+
+  return null;
 };
 
 export default FlightMarker;

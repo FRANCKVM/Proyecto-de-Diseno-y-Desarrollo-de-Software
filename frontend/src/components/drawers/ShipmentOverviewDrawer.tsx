@@ -1,12 +1,16 @@
 import { useState } from "react";
+import { Eye } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import Tag from "@/components/atoms/Tag";
 import { useDrawerStore } from "@/store/drawerStore";
 import {
   buildShipmentRouteSegments,
-  resolveShipmentFocusTarget,
 } from "@/utils/shipmentFocus";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import {
+  formatShipmentDisplayCode,
+  getShipmentApiIdentifier,
+} from "@/utils/shipmentCode";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 interface ShipmentOverviewDrawerProps {
@@ -48,11 +52,6 @@ const getUtcMinutesSinceShipmentDay = (
 const normalizeMinute = (minute: number): number =>
   ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
 
-const parseShipmentUtcMinute = (shipment: BackendSolicitudEnvio): number => {
-  const [hour = "0", minute = "0"] = (shipment.hora ?? "00:00").split(":");
-  return Number(hour) * 60 + Number(minute);
-};
-
 const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
   if (!value) {
     return null;
@@ -60,45 +59,6 @@ const parseLocalDateTimeMs = (value: string | null | undefined): number | null =
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.getTime();
-};
-
-const getShipmentStartMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): number => {
-  const simulationStartMs = parseLocalDateTimeMs(simulationStart);
-  const shipmentMs = parseLocalDateTimeMs(`${shipment.fecha}T${shipment.hora}`);
-
-  if (simulationStartMs === null || shipmentMs === null) {
-    return parseShipmentUtcMinute(shipment);
-  }
-
-  return Math.max(0, Math.floor((shipmentMs - simulationStartMs) / 60_000));
-};
-
-const getNextFlightWindow = (
-  earliestMinute: number,
-  departureMinute: number | null | undefined,
-  arrivalMinute: number | null | undefined
-): { departure: number; arrival: number } => {
-  const departureBase = normalizeMinute(departureMinute ?? 0);
-  let arrivalBase = arrivalMinute ?? departureBase;
-
-  while (arrivalBase <= departureBase) {
-    arrivalBase += DAY_MINUTES;
-  }
-
-  const duration = Math.max(1, arrivalBase - departureBase);
-  const occurrenceOffset = Math.max(
-    0,
-    Math.ceil((earliestMinute - departureBase) / DAY_MINUTES)
-  );
-  const departure = departureBase + occurrenceOffset * DAY_MINUTES;
-
-  return {
-    departure,
-    arrival: departure + duration,
-  };
 };
 
 const getShipmentTimeline = (
@@ -115,22 +75,18 @@ const getShipmentTimeline = (
   let lastArrival: number | null = null;
 
   for (const group of routeGroups) {
-    let earliestMinute = getShipmentStartMinute(shipment, simulationStart);
-
-    for (const flight of group.ruta?.vuelos ?? []) {
-      const window = getNextFlightWindow(
-        earliestMinute,
-        flight.salidaUtcMin,
-        flight.llegadaUtcMin
-      );
+    for (const occurrence of group.ruta?.ocurrencias ?? []) {
+      const baseMs = parseLocalDateTimeMs(simulationStart)
+        ?? Date.parse(`${shipment.fecha}T00:00:00Z`);
+      const departure = Math.round((Date.parse(occurrence.fechaHoraSalida) - baseMs) / 60_000);
+      const arrival = Math.round((Date.parse(occurrence.fechaHoraLlegada) - baseMs) / 60_000);
 
       firstDeparture =
         firstDeparture === null
-          ? window.departure
-          : Math.min(firstDeparture, window.departure);
+          ? departure
+          : Math.min(firstDeparture, departure);
       lastArrival =
-        lastArrival === null ? window.arrival : Math.max(lastArrival, window.arrival);
-      earliestMinute = window.arrival;
+        lastArrival === null ? arrival : Math.max(lastArrival, arrival);
     }
   }
 
@@ -160,7 +116,7 @@ const formatUtcMinute = (minute: number | null): string => {
   const normalized = normalizeMinute(minute);
   const hour = String(Math.floor(normalized / 60)).padStart(2, "0");
   const minutes = String(normalized % 60).padStart(2, "0");
-  return `${hour}:${minutes} UTC`;
+  return `${hour}:${minutes}`;
 };
 
 const formatShipmentDateTime = (fecha: string, hora: string): string => {
@@ -179,13 +135,10 @@ const formatShipmentDateTime = (fecha: string, hora: string): string => {
   return `${day}/${month} ${hour}:${minute}`;
 };
 
-const formatShipmentCode = (idEnvio: number): string =>
-  `ENV-${String(idEnvio).padStart(3, "0")}`;
-
 const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
   shipment.idEnvio !== null
-    ? formatShipmentCode(shipment.idEnvio)
-    : `Envio ${shipment.origen.codigo}-${shipment.destino.codigo}`;
+    ? formatShipmentDisplayCode(shipment.idEnvio)
+    : `Envío ${shipment.origen.codigo}-${shipment.destino.codigo}`;
 
 const getShipmentKey = (shipment: BackendSolicitudEnvio): string =>
   shipment.idEnvio !== null
@@ -240,6 +193,9 @@ const ShipmentOverviewDrawer = ({
 }: ShipmentOverviewDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
+  const focusShipmentRouteSegments = useDrawerStore(
+    (s) => s.focusShipmentRouteSegments
+  );
   const [mode, setMode] = useState<ShipmentViewMode>("todos");
   const [deliveredHours, setDeliveredHours] = useState(6);
   const [airportFilter, setAirportFilter] = useState("todos");
@@ -248,10 +204,7 @@ const ShipmentOverviewDrawer = ({
 
   const airportOptions = Array.from(
     new Set(
-      shipments.flatMap((shipment) => [
-        shipment.origen.codigo,
-        shipment.destino.codigo,
-      ])
+      shipments.map((shipment) => shipment.origen.codigo)
     )
   ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
 
@@ -286,9 +239,7 @@ const ShipmentOverviewDrawer = ({
     airportFilter === "todos"
       ? visibleShipmentsByMode
       : visibleShipmentsByMode.filter(
-          (shipment) =>
-            shipment.origen.codigo === airportFilter ||
-            shipment.destino.codigo === airportFilter
+          (shipment) => shipment.origen.codigo === airportFilter
         );
 
   const handleHoursChange = (value: string) => {
@@ -308,18 +259,17 @@ const ShipmentOverviewDrawer = ({
       shipmentCode,
       {
         idSimulacion,
-        ...resolveShipmentFocusTarget(
-          shipment,
-          getReferenceMinuteForShipment(shipment),
-          simulationStart
-        ),
-        shipmentRouteSegments: buildShipmentRouteSegments(shipment),
+        displayCodigo: getShipmentCodeLabel(shipment),
       }
     );
   };
 
+  const handleFocusShipmentRoute = (shipment: BackendSolicitudEnvio) => {
+    focusShipmentRouteSegments(buildShipmentRouteSegments(shipment));
+  };
+
   return (
-    <DrawerBase title="Panel de envios" onClose={close}>
+    <DrawerBase title="Panel de envíos" onClose={close}>
       <div className="grid grid-cols-3 gap-2 mb-4">
         <button
           type="button"
@@ -362,7 +312,7 @@ const ShipmentOverviewDrawer = ({
             htmlFor="delivered-hours"
             className="block text-label-sm text-text-primary mb-1"
           >
-            Ultimas horas
+            Últimas horas
           </label>
           <input
             id="delivered-hours"
@@ -381,7 +331,7 @@ const ShipmentOverviewDrawer = ({
           htmlFor="shipment-airport-filter"
           className="block text-label-sm text-text-primary mb-1"
         >
-          Filtrar por aeropuerto
+          Filtrar por aeropuerto de origen
         </label>
         <select
           id="shipment-airport-filter"
@@ -400,14 +350,14 @@ const ShipmentOverviewDrawer = ({
 
       {visibleShipments.length === 0 ? (
         <p className="text-body text-text-primary">
-          No hay envios para esta vista.
+          No hay envíos para esta vista.
         </p>
       ) : (
         <ul className="space-y-2">
           {visibleShipments.map((shipment) => {
             const shipmentCode =
               shipment.idEnvio !== null
-                ? formatShipmentCode(shipment.idEnvio)
+                ? getShipmentApiIdentifier(shipment.idEnvio)
                 : null;
             const derivedStatus = shipmentStatus(shipment);
             const timeLabel =
@@ -453,6 +403,15 @@ const ShipmentOverviewDrawer = ({
                   </span>
                 </div>
                 <div className="flex flex-col items-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleFocusShipmentRoute(shipment)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
+                    aria-label={`Enfocar ruta de ${getShipmentCodeLabel(shipment)} en el mapa`}
+                    title="Ver ruta en el mapa"
+                  >
+                    <Eye size={16} strokeWidth={2.2} aria-hidden />
+                  </button>
                   <Tag
                     variant={derivedStatus === "entregados" ? "normal" : "primary"}
                   >

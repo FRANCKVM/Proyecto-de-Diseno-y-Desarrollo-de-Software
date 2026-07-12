@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import {
   MapContainer as LeafletMap,
   TileLayer,
@@ -10,6 +10,10 @@ import type { AirportWithCoords } from "@/types/airport.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
+import {
+  UMBRAL_SEMAFORO_AMBAR_DEFAULT,
+  UMBRAL_SEMAFORO_VERDE_DEFAULT,
+} from "@/utils/constants";
 import { COLORS } from "@/styles/theme";
 import AirportMarker from "@/components/map/AirportMarker";
 import FlightMarker from "@/components/map/FlightMarker";
@@ -75,18 +79,11 @@ const WORLD_BOUNDS: LatLngBoundsExpression = [
 ];
 
 /**
- * Tile layer CartoDB Positron (Light All).
- *
- * Estetica gris claro minimalista, ideal para que los marcadores y rutas
- * de operacion sean los protagonistas visuales del mapa.
- *
- * Sin API key, atribucion requerida por terminos de uso de CARTO y OSM.
+ * Capa base OpenStreetMap.
+ * La base se pinta con opacidad reducida para bajar el peso visual del mapa.
  */
-const TILE_URL =
-  "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-const TILE_SUBDOMAINS = "abcd";
-const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const BASE_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const BASE_TILE_SUBDOMAINS = "abc";
 
 /**
  * Centro inicial: [20, 0] permite ver Sudamerica, Europa y Asia.
@@ -101,6 +98,15 @@ const REF_ZOOM = 0;
 const CANCELLATION_ALERT_DURATION_MS = 4_800;
 const SEEN_CANCELLATION_STORAGE_KEY = "tasf-seen-cancellation-alert-ids";
 const MAX_STORED_CANCELLATION_IDS = 500;
+const LEGEND_MARGIN = 0;
+
+const normalizeMapFlightId = (value: string | null | undefined): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return value.startsWith("occ-") ? value.slice(4) : value;
+};
 
 interface FocusedMapFlight {
   id: string;
@@ -144,6 +150,191 @@ const persistSeenCancellationIds = (ids: Set<string>) => {
   } catch {
     // El almacenamiento puede estar deshabilitado; el Set en memoria sigue cubriendo la sesion actual.
   }
+};
+
+const clampPercent = (value: number): number =>
+  Math.max(0, Math.min(100, Math.round(value)));
+
+const buildSemaphoreLegendItems = (rangosSemaforo?: RangoSemaforo) => {
+  const verde = clampPercent(
+    rangosSemaforo?.verde ?? UMBRAL_SEMAFORO_VERDE_DEFAULT
+  );
+  const ambar = clampPercent(
+    Math.max(
+      verde,
+      rangosSemaforo?.ambar ?? UMBRAL_SEMAFORO_AMBAR_DEFAULT
+    )
+  );
+
+  return [
+    {
+      key: "normal",
+      label: "Verde",
+      range: `0 - ${verde}%`,
+      colorClass: "bg-success",
+    },
+    {
+      key: "elevado",
+      label: "Ambar",
+      range: `${verde} - ${ambar}%`,
+      colorClass: "bg-warning",
+    },
+    {
+      key: "critico",
+      label: "Rojo",
+      range: `${ambar} - 100%`,
+      colorClass: "bg-danger",
+    },
+  ];
+};
+
+const SemaphoreLegendCard = ({
+  rangosSemaforo,
+}: {
+  rangosSemaforo?: RangoSemaforo;
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef({
+    pointerId: 0,
+    offsetX: 0,
+    offsetY: 0,
+  });
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(
+    null
+  );
+  const items = useMemo(
+    () => buildSemaphoreLegendItems(rangosSemaforo),
+    [rangosSemaforo]
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const card = cardRef.current;
+    if (!container || !card) {
+      return;
+    }
+
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+  }, []);
+
+  const clampPosition = (left: number, top: number) => {
+    const container = containerRef.current;
+    const card = cardRef.current;
+    if (!container || !card) {
+      return { left, top };
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+
+    return {
+      left: Math.max(
+        LEGEND_MARGIN,
+        Math.min(left, containerRect.width - cardRect.width - LEGEND_MARGIN)
+      ),
+      top: Math.max(
+        LEGEND_MARGIN,
+        Math.min(top, containerRect.height - cardRect.height - LEGEND_MARGIN)
+      ),
+    };
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    const card = cardRef.current;
+    if (!container || !card) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const left = cardRect.left - containerRect.left;
+    const top = cardRect.top - containerRect.top;
+
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - cardRect.left,
+      offsetY: event.clientY - cardRect.top,
+    };
+    setPosition(clampPosition(left, top));
+    card.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    if (!container || dragRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const containerRect = container.getBoundingClientRect();
+    const left =
+      event.clientX - containerRect.left - dragRef.current.offsetX;
+    const top = event.clientY - containerRect.top - dragRef.current.offsetY;
+
+    setPosition(clampPosition(left, top));
+  };
+
+  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current.pointerId = 0;
+    cardRef.current?.releasePointerCapture(event.pointerId);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-none absolute inset-0 z-[900]"
+    >
+      <div
+        ref={cardRef}
+        className="pointer-events-auto absolute max-w-full cursor-move select-none rounded-tl-card border border-border bg-card/95 px-3 py-2 shadow-card backdrop-blur-sm"
+        style={
+          position
+            ? { left: position.left, top: position.top }
+            : {
+                left: "50%",
+                bottom: LEGEND_MARGIN,
+                transform: "translateX(-50%)",
+              }
+        }
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className="shrink-0 text-label-sm text-text-primary">Semaforo</p>
+          {items.map((item) => (
+            <div key={item.key} className="flex items-center gap-1.5 whitespace-nowrap">
+              <span
+                className={`h-3.5 w-3.5 rounded-full ${item.colorClass}`}
+                aria-hidden
+              />
+              <span className="text-secondary text-text-primary">
+                {item.label}
+              </span>
+              <span className="text-secondary text-text-primary">
+                {item.range}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const MapFocusController = ({
@@ -358,8 +549,8 @@ const WorldMap = ({
         .find((entry): entry is FocusedMapFlight =>
           Boolean(
             entry &&
-              (entry.flight.id === focusedFlightId ||
-                entry.flight.code === focusedFlightId)
+              (normalizeMapFlightId(entry.flight.id) === normalizeMapFlightId(focusedFlightId) ||
+                normalizeMapFlightId(entry.flight.code) === normalizeMapFlightId(focusedFlightId))
           )
         )
     : undefined;
@@ -431,9 +622,14 @@ const WorldMap = ({
   );
   const warehouseFilteredFlights =
     shipmentRouteSegments.length > 0
-      ? flights.filter((flight) =>
-          shipmentRouteFlightKeys.has(`${flight.fromIcao}:${flight.toIcao}`)
-        )
+      ? focusedFlightId
+        ? flights.filter(
+            (flight) =>
+              shipmentRouteFlightKeys.has(`${flight.fromIcao}:${flight.toIcao}`) &&
+              (normalizeMapFlightId(flight.id) === normalizeMapFlightId(focusedFlightId) ||
+                normalizeMapFlightId(flight.code) === normalizeMapFlightId(focusedFlightId))
+          )
+        : []
       : warehouseRegionFilter === "todos"
       ? flights
       : flights.filter(
@@ -442,12 +638,14 @@ const WorldMap = ({
               visibleAirportIcaos.has(flight.toIcao)) ||
             (focusedFlightId !== null &&
               focusedFlightId !== undefined &&
-              (flight.id === focusedFlightId || flight.code === focusedFlightId))
+              (normalizeMapFlightId(flight.id) === normalizeMapFlightId(focusedFlightId) ||
+                normalizeMapFlightId(flight.code) === normalizeMapFlightId(focusedFlightId)))
         );
   const activeOnlyFlights = activeFlightOnlyId
     ? flights.filter(
         (flight) =>
-          flight.id === activeFlightOnlyId || flight.code === activeFlightOnlyId
+          normalizeMapFlightId(flight.id) === normalizeMapFlightId(activeFlightOnlyId) ||
+          normalizeMapFlightId(flight.code) === normalizeMapFlightId(activeFlightOnlyId)
       )
     : [];
   const activeFilterBaseFlights =
@@ -499,6 +697,7 @@ const WorldMap = ({
     return positions;
   }, [airportsByIcao, visibleAirports, visibleFlights]);
   const hasFocusedMapItem = Boolean(focusedAirport || focusedFlight);
+  const shouldShowCancellationAlerts = shipmentRouteSegments.length === 0;
 
   return (
     <LeafletMap
@@ -509,15 +708,16 @@ const WorldMap = ({
       zoomSnap={0.25}
       zoomDelta={0.5}
       zoomControl={false}
+      attributionControl={false}
       maxBounds={WORLD_BOUNDS}
       maxBoundsViscosity={1}
       worldCopyJump={false}
       className="w-full h-full bg-map-bg"
     >
       <TileLayer
-        url={TILE_URL}
-        subdomains={TILE_SUBDOMAINS}
-        attribution={TILE_ATTRIBUTION}
+        url={BASE_TILE_URL}
+        subdomains={BASE_TILE_SUBDOMAINS}
+        opacity={0.55}
         detectRetina
       />
       <MapAutoFitController
@@ -588,7 +788,8 @@ const WorldMap = ({
         const selected =
           focusedFlightId !== null &&
           focusedFlightId !== undefined &&
-          (f.id === focusedFlightId || f.code === focusedFlightId);
+          (normalizeMapFlightId(f.id) === normalizeMapFlightId(focusedFlightId) ||
+            normalizeMapFlightId(f.code) === normalizeMapFlightId(focusedFlightId));
         const flightEstado =
           f.occupancyPct !== undefined
             ? getEstadoSemaforo(f.occupancyPct, rangosSemaforo)
@@ -611,7 +812,7 @@ const WorldMap = ({
         );
       })}
 
-      {visibleCancellationAlerts.map((event) => {
+      {shouldShowCancellationAlerts && visibleCancellationAlerts.map((event) => {
         const airport = airportsByIcao.get(event.airportIcao);
         if (!airport) return null;
 
@@ -623,6 +824,8 @@ const WorldMap = ({
           />
         );
       })}
+
+      <SemaphoreLegendCard rangosSemaforo={rangosSemaforo} />
     </LeafletMap>
   );
 };

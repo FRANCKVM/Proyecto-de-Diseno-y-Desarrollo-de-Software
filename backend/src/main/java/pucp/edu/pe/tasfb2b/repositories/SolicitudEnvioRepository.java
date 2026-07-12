@@ -28,61 +28,32 @@ public interface SolicitudEnvioRepository extends JpaRepository<SolicitudEnvio, 
     List<SolicitudEnvio> findByEstado(EstadoEnvio estado);
 
     @EntityGraph(attributePaths = {
-            "simulacion",
             "origen",
             "destino",
             "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
+            "ruta.ocurrencias",
+            "ruta.ocurrencias.vuelo",
+            "ruta.ocurrencias.vuelo.desde",
+            "ruta.ocurrencias.vuelo.hasta"
     })
-    List<SolicitudEnvio> findBySimulacion_IdSimulacionOrderByIdEnvioAsc(Integer idSimulacion);
-
-    List<SolicitudEnvio> findBySimulacionIsNullOrderByIdEnvioAsc();
+    List<SolicitudEnvio> findAllByOrderByIdEnvioAsc();
 
     @EntityGraph(attributePaths = {
-            "simulacion",
             "origen",
             "destino",
             "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
-    })
-    @Query("""
-            select s
-            from SolicitudEnvio s
-            where s.simulacion is not null
-            order by s.simulacion.idSimulacion asc, s.idEnvio asc
-            """)
-    List<SolicitudEnvio> findAllConRelacionesDeSimulacion();
-
-    @Query("""
-            select distinct s
-            from SolicitudEnvio s
-            join s.ruta r
-            join r.vuelos v
-            where v.idVuelo = :idVuelo
-            order by s.idEnvio asc
-            """)
-    List<SolicitudEnvio> findByVueloId(@Param("idVuelo") Integer idVuelo);
-
-    @EntityGraph(attributePaths = {
-            "simulacion",
-            "origen",
-            "destino",
-            "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
+            "ruta.ocurrencias",
+            "ruta.ocurrencias.vuelo",
+            "ruta.ocurrencias.vuelo.desde",
+            "ruta.ocurrencias.vuelo.hasta"
     })
     @Query("""
             select distinct s
             from SolicitudEnvio s
             join s.ruta r
-            join r.vuelos v
-            where v.idVuelo in :idsVuelo
+            join r.ocurrencias o
+            where o.idOcurrencia in :idsOcurrencia
             order by s.idEnvio asc
             """)
-    List<SolicitudEnvio> findByVueloIds(@Param("idsVuelo") List<Integer> idsVuelo);
+    List<SolicitudEnvio> findByOcurrenciaIds(@Param("idsOcurrencia") List<Long> idsOcurrencia);
 }

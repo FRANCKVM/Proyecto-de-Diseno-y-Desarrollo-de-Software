@@ -47,7 +47,6 @@ const DrawerHost = ({
   rangosSemaforo,
   idSimulacion,
   shipments = [],
-  activeFlights = [],
   referenceMinute,
   simulationStart,
   onShipmentCreated,
@@ -106,11 +105,9 @@ const DrawerHost = ({
       return (
         <ActiveFlightsDrawer
           key="active-flights-panel"
-          flights={activeFlights}
           airports={airports}
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
-          shipments={shipments}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
         />
@@ -136,7 +133,6 @@ const DrawerHost = ({
           codigo={selection.codigo}
           idSimulacion={selection.idSimulacion}
           shipments={shipments}
-          referenceMinute={referenceMinute}
         />
       );
     case "shipment":
@@ -144,6 +140,7 @@ const DrawerHost = ({
         <ShipmentDrawer
           key={`shipment-${selection.codigo}-${selection.idSimulacion ?? "real"}`}
           codigo={selection.codigo}
+          displayCodigo={selection.displayCodigo}
           idSimulacion={selection.idSimulacion}
         />
       );

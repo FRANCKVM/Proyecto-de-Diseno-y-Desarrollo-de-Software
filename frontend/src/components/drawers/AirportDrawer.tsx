@@ -1,26 +1,31 @@
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Eye, Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import InfoRow from "@/components/molecules/InfoRow";
 import FlightListCard from "@/components/molecules/FlightListCard";
+import FlightCancellationPopup from "@/components/molecules/FlightCancellationPopup";
 import Tag from "@/components/atoms/Tag";
-import ProgressBar from "@/components/atoms/ProgressBar";
 import { getAirportByIcao } from "@/services/airportService";
-import { listFlightsByAirport } from "@/services/flightService";
+import {
+  listFlightsByAirport,
+  resolveFlightQueryDate,
+} from "@/services/flightService";
 import { useFlightCancellationAction } from "@/hooks/useFlightCancellationAction";
 import { useDrawerStore } from "@/store/drawerStore";
-import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import {
   buildShipmentRouteSegments,
-  resolveShipmentFocusTarget,
 } from "@/utils/shipmentFocus";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import {
+  formatShipmentDisplayCode,
+  getShipmentApiIdentifier,
+} from "@/utils/shipmentCode";
 import { cn } from "@/utils/cn";
 import { cacheFlightsForAirport } from "@/store/referenceDataStore";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoVuelo, VueloDetalle } from "@/types/flight.types";
-import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
+import type { RangoSemaforo } from "@/types/common.types";
 
 interface AirportDrawerProps {
   icao: string;
@@ -37,18 +42,6 @@ interface AirportDrawerProps {
   referenceMinute?: number | null;
   simulationStart?: string | null;
 }
-
-const TAG_VARIANT_BY_ESTADO: Record<EstadoSemaforo, "normal" | "elevado" | "critico"> = {
-  normal: "normal",
-  elevado: "elevado",
-  critico: "critico",
-};
-
-const ESTADO_LABEL: Record<EstadoSemaforo, string> = {
-  normal: "Normal",
-  elevado: "Elevado",
-  critico: "Critico",
-};
 
 const VUELO_ESTADO_LABEL: Record<string, string> = {
   programado: "Programado",
@@ -89,6 +82,69 @@ const formatFlightDateTime = (iso: string): string => {
   return `${day}/${month} ${hour}:${minute}`;
 };
 
+const parseDateTimeMs = (value: string | null | undefined): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+};
+
+const isFlightRelevantAtReference = (
+  flight: VueloDetalle,
+  simulationStart: string | null | undefined,
+  referenceMinute: number | null | undefined
+): boolean => {
+  const simulationStartMs = parseDateTimeMs(simulationStart);
+  if (simulationStartMs === null || referenceMinute == null) {
+    return true;
+  }
+
+  const referenceMs = simulationStartMs + Math.max(0, referenceMinute) * 60_000;
+  const departureMs = parseDateTimeMs(flight.fechaSalida);
+  const arrivalMs = parseDateTimeMs(flight.fechaLlegadaEstimada);
+
+  if (flight.estado === "cancelado") {
+    return departureMs === null || departureMs >= referenceMs;
+  }
+
+  return arrivalMs === null || arrivalMs > referenceMs;
+};
+
+const resolveFlightStatusAtReference = (
+  flight: VueloDetalle,
+  simulationStart: string | null | undefined,
+  referenceMinute: number | null | undefined
+): EstadoVuelo => {
+  if (flight.estado === "cancelado") {
+    return "cancelado";
+  }
+
+  const simulationStartMs = parseDateTimeMs(simulationStart);
+  if (simulationStartMs === null || referenceMinute == null) {
+    return flight.estado;
+  }
+
+  const referenceMs = simulationStartMs + Math.max(0, referenceMinute) * 60_000;
+  const departureMs = parseDateTimeMs(flight.fechaSalida);
+  const arrivalMs = parseDateTimeMs(flight.fechaLlegadaEstimada);
+
+  if (departureMs === null || arrivalMs === null || arrivalMs <= departureMs) {
+    return flight.estado;
+  }
+
+  if (referenceMs < departureMs) {
+    return "programado";
+  }
+
+  if (referenceMs < arrivalMs) {
+    return "en_vuelo";
+  }
+
+  return "completado";
+};
+
 const getFlightOccupancyPct = (flight: VueloDetalle): number | undefined => {
   if (!flight.capacidad || flight.capacidad <= 0) {
     return undefined;
@@ -124,6 +180,9 @@ const getFlightProgressPct = (flight: VueloDetalle): number => {
 const getFlightActionKey = (flight: VueloDetalle): string =>
   `${flight.codigo}-${flight.fechaSalida}`;
 
+const formatFlightDisplayCode = (flight: VueloDetalle): string =>
+  `${flight.origenIcao}>${flight.destinoIcao}-${flight.codigo}`;
+
 const formatShipmentDateTime = (fecha: string, hora: string): string => {
   const iso = `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}Z`;
   const date = new Date(iso);
@@ -145,19 +204,16 @@ const getShipmentKey = (shipment: BackendSolicitudEnvio): string =>
     ? `envio-${shipment.idEnvio}`
     : `${shipment.fecha}-${shipment.hora}-${shipment.origen.codigo}-${shipment.destino.codigo}-${shipment.contarBolsas}`;
 
-const formatShipmentCode = (idEnvio: number): string =>
-  `ENV-${String(idEnvio).padStart(3, "0")}`;
-
 const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
   shipment.idEnvio !== null
-    ? formatShipmentCode(shipment.idEnvio)
-    : `Envio ${shipment.origen.codigo}-${shipment.destino.codigo}`;
+    ? formatShipmentDisplayCode(shipment.idEnvio)
+    : `Envío ${shipment.origen.codigo}-${shipment.destino.codigo}`;
 
 type FlightFilter = "todos" | EstadoVuelo;
 type AirportViewMode = "vuelos" | "envios";
 type DirectionFilter = "todos" | "entrantes" | "salientes";
-const PANEL_REFRESH_MS_SIMULATION = 1500;
-const PANEL_REFRESH_MS_OPERATION = 5000;
+const PANEL_REFRESH_MS_SIMULATION = 5000;
+const PANEL_REFRESH_MS_OPERATION = 15000;
 
 const DIRECTION_LABEL: Record<DirectionFilter, string> = {
   todos: "Todos",
@@ -174,7 +230,7 @@ const hasIncomingShipmentAtAirport = (
   }
 
   return getShipmentRouteGroups(shipment).some((group) =>
-    group.ruta?.vuelos?.some((flight) => flight.hasta.codigo === airportIcao)
+    group.ruta?.ocurrencias?.some((occurrence) => occurrence.vuelo.hasta.codigo === airportIcao)
   );
 };
 
@@ -187,7 +243,7 @@ const hasOutgoingShipmentAtAirport = (
   }
 
   return getShipmentRouteGroups(shipment).some((group) =>
-    group.ruta?.vuelos?.some((flight) => flight.desde.codigo === airportIcao)
+    group.ruta?.ocurrencias?.some((occurrence) => occurrence.vuelo.desde.codigo === airportIcao)
   );
 };
 
@@ -203,7 +259,11 @@ const AirportDrawer = ({
 }: AirportDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openFlight = useDrawerStore((s) => s.openFlight);
+  const focusFlightOnMap = useDrawerStore((s) => s.focusFlightOnMap);
   const openShipment = useDrawerStore((s) => s.openShipment);
+  const focusShipmentRouteSegments = useDrawerStore(
+    (s) => s.focusShipmentRouteSegments
+  );
 
   const [airport, setAirport] = useState<AirportWithCoords | null>(null);
   const [flights, setFlights] = useState<VueloDetalle[]>([]);
@@ -217,11 +277,18 @@ const AirportDrawer = ({
     useState<DirectionFilter>("todos");
   const [selectedShipmentDirection, setSelectedShipmentDirection] =
     useState<DirectionFilter>("todos");
+  const queryDate = resolveFlightQueryDate(
+    idSimulacion,
+    simulationStart,
+    referenceMinute
+  );
   const {
     cancelFlight,
     cancellingFlightKey,
     cancelError,
     cancelNotice,
+    cancelPopup,
+    dismissCancelPopup,
   } = useFlightCancellationAction({
     idSimulacion,
     referenceMinute,
@@ -229,7 +296,14 @@ const AirportDrawer = ({
   });
 
   useEffect(() => {
+    if (!icao) {
+      return;
+    }
+
     let cancelled = false;
+    let requestInFlight = false;
+    const canPoll = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
 
     const refreshMs =
       idSimulacion != null
@@ -240,36 +314,50 @@ const AirportDrawer = ({
       showLoading: boolean,
       forceRefresh: boolean
     ) => {
+      if (!canPoll() || requestInFlight) return;
+      requestInFlight = true;
       if (showLoading) {
         setIsLoading(true);
       }
 
       try {
-        const [airportData, flightsData] = await Promise.all([
-          getAirportByIcao(icao),
-          listFlightsByAirport(icao, idSimulacion, { forceRefresh }),
-        ]);
+        const airportData = showLoading ? await getAirportByIcao(icao) : null;
+        const flightsData = await listFlightsByAirport(icao, idSimulacion, {
+          forceRefresh,
+          fecha: queryDate,
+        });
 
         if (cancelled) return;
-        setAirport(airportData);
+        if (airportData) setAirport(airportData);
         setFlights(flightsData);
       } finally {
+        requestInFlight = false;
         if (!cancelled && showLoading) {
           setIsLoading(false);
         }
       }
     };
 
-    void loadAirportData(true, false);
+    // La lista cacheada puede quedar desfasada respecto a la ocupación y los
+    // envíos actuales. Al abrir el almacén solicitamos los vuelos actualizados.
+    void loadAirportData(true, true);
     const intervalId = window.setInterval(() => {
       void loadAirportData(false, true);
     }, refreshMs);
+    const handleVisibilityChange = () => {
+      if (canPoll()) {
+        void loadAirportData(false, true);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [icao, idSimulacion]);
+  }, [icao, idSimulacion, queryDate]);
 
   useEffect(() => {
     setActiveView(showFlights ? "vuelos" : "envios");
@@ -279,26 +367,33 @@ const AirportDrawer = ({
     setSelectedShipmentDirection("todos");
   }, [icao, idSimulacion, showFlights]);
 
-  const estado: EstadoSemaforo =
-    ocupacion !== undefined
-      ? getEstadoSemaforo(ocupacion, rangosSemaforo)
-      : "normal";
-
   const capacity = airport?.capacity ?? 300;
   const ocupadas = ocupacion !== undefined
     ? Math.round((ocupacion / 100) * capacity)
     : 0;
+  const currentFlights = flights
+    .filter((flight) =>
+      isFlightRelevantAtReference(flight, simulationStart, referenceMinute)
+    )
+    .map((flight) => ({
+      ...flight,
+      estado: resolveFlightStatusAtReference(
+        flight,
+        simulationStart,
+        referenceMinute
+      ),
+    }));
   const availableEstados = Array.from(
-    new Set(flights.map((flight) => flight.estado))
+    new Set(currentFlights.map((flight) => flight.estado))
   ) as EstadoVuelo[];
   const filterOptions: FlightFilter[] = ["todos", ...availableEstados];
-  const incomingFlightsCount = flights.filter(
+  const incomingFlightsCount = currentFlights.filter(
     (flight) => flight.destinoIcao === icao
   ).length;
-  const outgoingFlightsCount = flights.filter(
+  const outgoingFlightsCount = currentFlights.filter(
     (flight) => flight.origenIcao === icao
   ).length;
-  const filteredFlights = flights.filter((flight) => {
+  const filteredFlights = currentFlights.filter((flight) => {
     const normalizedSearch = flightSearch.trim().toLowerCase();
     const matchesEstado =
       selectedEstado === "todos" || flight.estado === selectedEstado;
@@ -308,7 +403,8 @@ const AirportDrawer = ({
       (selectedFlightDirection === "salientes" && flight.origenIcao === icao);
     const matchesSearch =
       normalizedSearch.length === 0 ||
-      flight.codigo.toLowerCase().includes(normalizedSearch);
+      flight.codigo.toLowerCase().startsWith(normalizedSearch) ||
+      formatFlightDisplayCode(flight).toLowerCase().startsWith(normalizedSearch);
 
     return matchesEstado && matchesDirection && matchesSearch;
   });
@@ -343,13 +439,16 @@ const AirportDrawer = ({
     }
 
     openShipment(
-      formatShipmentCode(shipment.idEnvio),
-      {
-        idSimulacion,
-        ...resolveShipmentFocusTarget(shipment, referenceMinute),
-        shipmentRouteSegments: buildShipmentRouteSegments(shipment),
-      }
+      getShipmentApiIdentifier(shipment.idEnvio),
+        {
+          idSimulacion,
+          displayCodigo: getShipmentCodeLabel(shipment),
+        }
     );
+  };
+
+  const handleFocusShipmentRoute = (shipment: BackendSolicitudEnvio) => {
+    focusShipmentRouteSegments(buildShipmentRouteSegments(shipment));
   };
 
   const handleCancelFlight = async (flight: VueloDetalle) => {
@@ -357,14 +456,16 @@ const AirportDrawer = ({
 
     await cancelFlight({
       actionKey,
-      codigo: flight.codigo,
+      idOcurrencia: flight.idOcurrencia,
       fechaSalida: flight.fechaSalida,
       fallbackAirportIcao: flight.origenIcao,
       fallbackFlightCode: flight.codigo,
       onCancelled: ({ updatedFlight }) => {
         setFlights((currentFlights) => {
           const nextFlights = currentFlights.map((candidate) =>
-            candidate.codigo === updatedFlight.codigo ? updatedFlight : candidate
+            candidate.idOcurrencia === updatedFlight.idOcurrencia
+              ? updatedFlight
+              : candidate
           );
           if (idSimulacion == null) {
             cacheFlightsForAirport(icao, nextFlights);
@@ -382,7 +483,7 @@ const AirportDrawer = ({
         title={icao}
         onClose={close}
       >
-        <p className="text-body text-text-primary">Cargando informacion...</p>
+        <p className="text-body text-text-primary">Cargando información...</p>
       </DrawerBase>
     );
   }
@@ -393,62 +494,23 @@ const AirportDrawer = ({
       title={`${airport.icao} - ${airport.name}`}
       onClose={close}
     >
-      <div className="flex items-center gap-3 mb-5">
-        <Tag variant={TAG_VARIANT_BY_ESTADO[estado]}>{ESTADO_LABEL[estado]}</Tag>
-        {ocupacion !== undefined && (
-          <span className="text-button text-text-primary">
-            Ocupacion:{" "}
-            <span
-              className={
-                estado === "critico"
-                  ? "text-danger"
-                  : estado === "elevado"
-                  ? "text-warning"
-                  : "text-success"
-              }
-            >
-              {Math.round(ocupacion)}%
-            </span>
-          </span>
-        )}
-      </div>
-
+      <FlightCancellationPopup
+        message={cancelPopup?.message ?? null}
+        tone={cancelPopup?.tone}
+        onClose={dismissCancelPopup}
+      />
       <section className="mb-6">
-        <h3 className="text-section-title mb-2">Informacion general</h3>
+        <h3 className="text-section-title mb-2">Información general</h3>
         <InfoRow label="Pais" value={airport.country} />
-        <InfoRow label="Codigo IATA / ICAO" value={airport.icao} />
-        <InfoRow label="Codigo ciudad" value={airport.cityCode.toUpperCase()} />
-        <InfoRow label="Zona horaria" value={`UTC${airport.gmt >= 0 ? "+" : ""}${airport.gmt}`} />
-        <InfoRow label="Capacidad" value={`${airport.capacity} maletas`} />
+        <InfoRow label="Código IATA / ICAO" value={airport.icao} />
+        <InfoRow label="Código ciudad" value={airport.cityCode.toUpperCase()} />
+        <InfoRow label="Zona horaria" value={`${airport.gmt >= 0 ? "+" : ""}${airport.gmt}`} />
+        <InfoRow
+          label="Ocupación"
+          value={ocupacion !== undefined ? `${Math.round(ocupacion)}%` : "No disponible"}
+        />
+        <InfoRow label="Capacidad" value={`${ocupadas} / ${capacity} maletas`} />
       </section>
-
-      {ocupacion !== undefined && (
-        <section className="mb-6">
-          <h3 className="text-section-title mb-3">Almacen</h3>
-          <div className="bg-field rounded-card p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-body text-text-primary">
-                Almacen Terminal 1
-              </span>
-              <span
-                className={`text-button ${
-                  estado === "critico"
-                    ? "text-danger"
-                    : estado === "elevado"
-                    ? "text-warning"
-                    : "text-success"
-                }`}
-              >
-                {Math.round(ocupacion)}%
-              </span>
-            </div>
-            <ProgressBar valor={ocupacion} variant={estado} />
-            <p className="text-secondary text-text-primary mt-2">
-              {ocupadas} / {capacity} maletas
-            </p>
-          </div>
-        </section>
-      )}
 
       <section>
         <div className="mb-4 grid grid-cols-2 gap-2">
@@ -474,14 +536,14 @@ const AirportDrawer = ({
                 : "bg-card border-border text-text-primary hover:bg-field"
             )}
           >
-            Envios
+            Envíos
           </button>
         </div>
 
         {activeView === "vuelos" ? (
           <>
             <h3 className="text-section-title mb-3">
-              Vuelos del almacen{filteredFlights.length > 0 && ` (${filteredFlights.length})`}
+              Vuelos del almacén{filteredFlights.length > 0 && ` (${filteredFlights.length})`}
             </h3>
             <div className="mb-4 grid grid-cols-1 gap-3">
               <div>
@@ -502,7 +564,7 @@ const AirportDrawer = ({
                     type="search"
                     value={flightSearch}
                     onChange={(event) => setFlightSearch(event.target.value)}
-                    placeholder="Ej. 1024 o VUE-1024"
+                    placeholder="Inicio del ID, ej. SKBO>SPIM-23"
                     className="w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
                   />
                 </div>
@@ -523,7 +585,7 @@ const AirportDrawer = ({
                   }
                   className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
                 >
-                  <option value="todos">{DIRECTION_LABEL.todos} ({flights.length})</option>
+                  <option value="todos">{DIRECTION_LABEL.todos} ({currentFlights.length})</option>
                   <option value="entrantes">
                     {DIRECTION_LABEL.entrantes} ({incomingFlightsCount})
                   </option>
@@ -550,8 +612,8 @@ const AirportDrawer = ({
                 >
                   {filterOptions.map((estadoFiltro) => {
                     const count = estadoFiltro === "todos"
-                      ? flights.length
-                      : flights.filter((flight) => flight.estado === estadoFiltro).length;
+                      ? currentFlights.length
+                      : currentFlights.filter((flight) => flight.estado === estadoFiltro).length;
 
                     return (
                       <option key={estadoFiltro} value={estadoFiltro}>
@@ -570,7 +632,7 @@ const AirportDrawer = ({
             )}
             {filteredFlights.length === 0 ? (
               <p className="text-body text-text-primary">
-                No hay vuelos asociados a este almacen para la busqueda o filtros seleccionados.
+                No hay vuelos asociados a este almacén para la búsqueda o filtros seleccionados.
               </p>
             ) : (
               <div className="space-y-2">
@@ -581,10 +643,8 @@ const AirportDrawer = ({
 
                   return (
                     <FlightListCard
-                      key={`${v.codigo}-${v.fechaSalida}`}
-                      code={v.codigo}
-                      routeText={`${v.origenIcao} > ${v.destinoIcao}`}
-                      metaText={v.origenIcao === icao ? "Saliente" : "Entrante"}
+                      key={v.idOcurrencia}
+                      code={formatFlightDisplayCode(v)}
                       statusLabel={VUELO_ESTADO_LABEL[v.estado] ?? v.estado}
                       statusVariant={VUELO_ESTADO_TAG_VARIANT[v.estado]}
                       departureText={formatFlightDateTime(v.fechaSalida)}
@@ -592,7 +652,9 @@ const AirportDrawer = ({
                       progressPct={progressPct}
                       occupancyPct={occupancyPct}
                       rangosSemaforo={rangosSemaforo}
-                      canCancel={v.estado === "programado"}
+                      canCancel={
+                        v.estado === "programado" || v.estado === "en_vuelo"
+                      }
                       isCancelling={cancellingFlightKey === actionKey}
                       notice={
                         cancelNotice?.actionKey === actionKey
@@ -600,10 +662,15 @@ const AirportDrawer = ({
                           : null
                       }
                       onOpen={() =>
-                        openFlight(v.codigo, {
+                        openFlight(`occ-${v.idOcurrencia}`, {
                           idSimulacion,
-                          showOnlyOnMap: v.estado === "en_vuelo",
+                          focusOnMap: false,
                         })
+                      }
+                      onFocusOnMap={
+                        v.estado === "en_vuelo"
+                          ? () => focusFlightOnMap(String(v.idOcurrencia))
+                          : undefined
                       }
                       onCancel={() => {
                         void handleCancelFlight(v);
@@ -617,7 +684,7 @@ const AirportDrawer = ({
         ) : (
           <>
             <h3 className="text-section-title mb-3">
-              Envios del almacen{filteredShipmentRelations.length > 0 && ` (${filteredShipmentRelations.length})`}
+              Envíos del almacén{filteredShipmentRelations.length > 0 && ` (${filteredShipmentRelations.length})`}
             </h3>
             <div className="mb-4">
               <label
@@ -648,7 +715,7 @@ const AirportDrawer = ({
 
             {filteredShipmentRelations.length === 0 ? (
               <p className="text-body text-text-primary">
-                No hay envios asociados a este almacen para el filtro seleccionado.
+                No hay envíos asociados a este almacén para el filtro seleccionado.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -679,6 +746,15 @@ const AirportDrawer = ({
                       </span>
                     </div>
                     <div className="flex flex-col items-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleFocusShipmentRoute(shipment)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
+                        aria-label={`Enfocar ruta de ${getShipmentCodeLabel(shipment)} en el mapa`}
+                        title="Ver ruta en el mapa"
+                      >
+                        <Eye size={16} strokeWidth={2.2} aria-hidden />
+                      </button>
                       {outgoing && <Tag variant="primary">Saliente</Tag>}
                       {incoming && <Tag variant="neutral">Entrante</Tag>}
                       <Tag

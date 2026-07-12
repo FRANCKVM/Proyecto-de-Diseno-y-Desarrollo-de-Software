@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getCurrentLiveSimulationState,
   getLiveSimulationMap,
@@ -10,13 +10,29 @@ import {
 import { useSimulationConfigStore } from "@/store/simulationConfigStore";
 import { useSimulationControlStore } from "@/store/simulationControlStore";
 import { useLiveSimulationStore } from "@/store/liveSimulationStore";
+import {
+  useSimulationEvents,
+  type SimulationRealtimeEvent,
+} from "@/hooks/useSimulationEvents";
 import { USE_MOCK_DATA } from "@/utils/constants";
 import { buildEmptyMapFlights } from "@/utils/mapFlightHelpers";
+import { parseBackendRealDateTime } from "@/utils/simulationClock";
 import type { MapFlight } from "@/components/map/WorldMap";
-import type { BackendEstadoSimulacion } from "@/types/backendSimulation.types";
+import type {
+  BackendEstadoSimulacion,
+  BackendMapaSimulacionEstado,
+} from "@/types/backendSimulation.types";
 import type { TipoSimulacion } from "@/types/common.types";
 
-const POLL_INTERVAL_MS = 3000;
+const STATE_POLL_INTERVAL_MS = 3000;
+const MAP_POLL_INTERVAL_MS = 6000;
+const SHIPMENTS_POLL_INTERVAL_MS = 12000;
+const FALLBACK_STATE_POLL_INTERVAL_MS = 5000;
+const FALLBACK_MAP_POLL_INTERVAL_MS = 10000;
+const FALLBACK_SHIPMENTS_POLL_INTERVAL_MS = 20000;
+const SSE_FALLBACK_DELAY_MS = 10000;
+const SSE_REFRESH_DEBOUNCE_MS = 700;
+const SSE_SHIPMENTS_REFRESH_THROTTLE_MS = 15000;
 const DEFAULT_SIMULATION_K = 1;
 
 const K_BY_TIPO = {
@@ -48,15 +64,71 @@ const inferSimulationType = (
   return fallback;
 };
 
+const resolveLiveReferenceMinute = (
+  estado: BackendEstadoSimulacion | null
+): number | null => {
+  if (
+    !estado ||
+    !estado.fechaHoraInicioReal ||
+    !estado.scMinutos ||
+    !estado.intervaloRealMs ||
+    estado.intervaloRealMs <= 0
+  ) {
+    return estado?.punteroConsumoMinutos ?? null;
+  }
+
+  const nowMs = Date.now();
+  const realStart = parseBackendRealDateTime(estado.fechaHoraInicioReal, nowMs);
+  const fallback = Math.max(0, estado.punteroConsumoMinutos ?? 0);
+
+  if (!realStart) {
+    return fallback;
+  }
+
+  const elapsedRealMs = Math.max(0, nowMs - realStart.getTime());
+  let referenceMinute =
+    (elapsedRealMs * estado.scMinutos) / estado.intervaloRealMs;
+
+  if (estado.ultimoMinutoSimulacion !== null) {
+    referenceMinute = Math.min(
+      referenceMinute,
+      Math.max(fallback, estado.ultimoMinutoSimulacion)
+    );
+  }
+
+  return Math.max(fallback, referenceMinute);
+};
+
+const isMapSnapshotPayload = (
+  payload: unknown
+): payload is BackendMapaSimulacionEstado => {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const candidate = payload as Partial<BackendMapaSimulacionEstado>;
+  return (
+    typeof candidate.idSimulacion === "number" &&
+    typeof candidate.ocupacionPorAeropuerto === "object" &&
+    Array.isArray(candidate.vuelos)
+  );
+};
+
 interface UseLiveSimulationOptions {
   autoStart?: boolean;
   enablePolling?: boolean;
+  pollingMode?: "none" | "state-only" | "full" | "sse";
 }
 
 export const useLiveSimulation = (
   options: UseLiveSimulationOptions = {}
 ) => {
-  const { autoStart = true, enablePolling = true } = options;
+  const {
+    autoStart = true,
+    enablePolling = true,
+    pollingMode,
+  } = options;
+  const effectivePollingMode = pollingMode ?? (enablePolling ? "full" : "none");
   const tipoPeriodo = useSimulationConfigStore((s) => s.tipoPeriodo);
   const fechaInicio = useSimulationConfigStore((s) => s.fechaInicio);
   const horaInicio = useSimulationConfigStore((s) => s.horaInicio);
@@ -80,6 +152,15 @@ export const useLiveSimulation = (
   } = useLiveSimulationStore();
 
   const startedRef = useRef(false);
+  const isFetchingStateRef = useRef(false);
+  const isFetchingMapRef = useRef(false);
+  const isFetchingShipmentsRef = useRef(false);
+  const shipmentsRefreshTimerRef = useRef<number | null>(null);
+  const stateRefreshTimerRef = useRef<number | null>(null);
+  const pendingShipmentsRefreshRef = useRef(false);
+  const lastShipmentsRefreshAtRef = useRef(0);
+  const [isSseConnected, setIsSseConnected] = useState(false);
+  const [sseFallbackActive, setSseFallbackActive] = useState(false);
 
   const attachState = (data: BackendEstadoSimulacion) => {
     if (data.idSimulacion === null) {
@@ -91,6 +172,125 @@ export const useLiveSimulation = (
     setTipoSimulacion(inferSimulationType(data.k, tipoPeriodo));
     setIsRunning(Boolean(data.activa));
   };
+
+  const fetchLiveState = useCallback(async () => {
+    if (idSimulacion === null || isFetchingStateRef.current) {
+      return;
+    }
+    isFetchingStateRef.current = true;
+
+    try {
+      const estadoActual = await getLiveSimulationState(idSimulacion);
+      if (estadoActual) {
+        setEstado(estadoActual);
+        setIsRunning(Boolean(estadoActual.activa));
+      }
+    } finally {
+      isFetchingStateRef.current = false;
+    }
+  }, [idSimulacion, setEstado, setIsRunning]);
+
+  const fetchLiveMap = useCallback(async () => {
+    if (idSimulacion === null || isFetchingMapRef.current) {
+      return;
+    }
+    isFetchingMapRef.current = true;
+
+    try {
+      const mapaActual = await getLiveSimulationMap(idSimulacion);
+      if (mapaActual) {
+        setMapa(mapaActual);
+      }
+    } finally {
+      isFetchingMapRef.current = false;
+    }
+  }, [idSimulacion, setMapa]);
+
+  const fetchLiveShipments = useCallback(async () => {
+    if (idSimulacion === null || isFetchingShipmentsRef.current) {
+      return;
+    }
+    isFetchingShipmentsRef.current = true;
+
+    try {
+      const enviosActuales = await listLiveSimulationShipments(idSimulacion);
+      setEnvios(enviosActuales);
+      lastShipmentsRefreshAtRef.current = Date.now();
+    } finally {
+      isFetchingShipmentsRef.current = false;
+    }
+  }, [idSimulacion, setEnvios]);
+
+  const fetchFullSnapshot = useCallback(async () => {
+    await Promise.all([
+      fetchLiveState(),
+      fetchLiveMap(),
+      fetchLiveShipments(),
+    ]);
+  }, [fetchLiveMap, fetchLiveShipments, fetchLiveState]);
+
+  const scheduleStateRefresh = useCallback(() => {
+    if (stateRefreshTimerRef.current !== null) {
+      window.clearTimeout(stateRefreshTimerRef.current);
+    }
+
+    stateRefreshTimerRef.current = window.setTimeout(() => {
+      stateRefreshTimerRef.current = null;
+      void fetchLiveState();
+    }, SSE_REFRESH_DEBOUNCE_MS);
+  }, [fetchLiveState]);
+
+  const scheduleShipmentsRefresh = useCallback(() => {
+    pendingShipmentsRefreshRef.current = true;
+
+    if (shipmentsRefreshTimerRef.current !== null) {
+      window.clearTimeout(shipmentsRefreshTimerRef.current);
+    }
+
+    const runScheduledRefresh = () => {
+      shipmentsRefreshTimerRef.current = null;
+
+      if (!pendingShipmentsRefreshRef.current) {
+        return;
+      }
+
+      if (isFetchingShipmentsRef.current) {
+        shipmentsRefreshTimerRef.current = window.setTimeout(
+          runScheduledRefresh,
+          SSE_REFRESH_DEBOUNCE_MS
+        );
+        return;
+      }
+
+      const elapsedMs = Date.now() - lastShipmentsRefreshAtRef.current;
+      if (elapsedMs < SSE_SHIPMENTS_REFRESH_THROTTLE_MS) {
+        shipmentsRefreshTimerRef.current = window.setTimeout(
+          runScheduledRefresh,
+          SSE_SHIPMENTS_REFRESH_THROTTLE_MS - elapsedMs
+        );
+        return;
+      }
+
+      pendingShipmentsRefreshRef.current = false;
+      void fetchLiveShipments();
+    };
+
+    shipmentsRefreshTimerRef.current = window.setTimeout(
+      runScheduledRefresh,
+      SSE_REFRESH_DEBOUNCE_MS
+    );
+  }, [fetchLiveShipments]);
+
+  useEffect(() => {
+    return () => {
+      if (stateRefreshTimerRef.current !== null) {
+        window.clearTimeout(stateRefreshTimerRef.current);
+      }
+      if (shipmentsRefreshTimerRef.current !== null) {
+        window.clearTimeout(shipmentsRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (USE_MOCK_DATA || idSimulacion !== null) {
@@ -205,53 +405,177 @@ export const useLiveSimulation = (
     setIdSimulacion,
     setIsRunning,
     setTipoSimulacion,
-    tipoPeriodo,
+      tipoPeriodo,
   ]);
 
   useEffect(() => {
-    if (USE_MOCK_DATA || !enablePolling || idSimulacion === null) {
+    if (
+      USE_MOCK_DATA ||
+      effectivePollingMode !== "sse" ||
+      idSimulacion === null
+    ) {
       return;
     }
 
-    let cancelled = false;
+    void fetchFullSnapshot();
+  }, [effectivePollingMode, fetchFullSnapshot, idSimulacion]);
 
-    const poll = async () => {
-      const [estadoActual, mapaActual, enviosActuales] = await Promise.all([
-        getLiveSimulationState(idSimulacion),
-        getLiveSimulationMap(idSimulacion),
-        listLiveSimulationShipments(idSimulacion),
-      ]);
+  const handleSimulationEvent = useCallback(
+    (event: SimulationRealtimeEvent) => {
+      switch (event.type) {
+        case "connected":
+        case "heartbeat":
+          return;
+        case "map.snapshot":
+          if (isMapSnapshotPayload(event.payload)) {
+            setMapa(event.payload);
+          }
+          return;
+        case "simulation.state":
+          scheduleStateRefresh();
+          return;
+        case "simulation.finished":
+          scheduleStateRefresh();
+          return;
+        case "map.updated":
+        case "flight.updated":
+        case "flight.arrived":
+        case "flight.cancelled":
+        case "warehouse.occupancy.updated":
+          return;
+        case "shipment.updated":
+        case "shipment.replanned":
+          scheduleShipmentsRefresh();
+          return;
+        case "error":
+          scheduleStateRefresh();
+          return;
+      }
+    },
+    [scheduleShipmentsRefresh, scheduleStateRefresh, setMapa]
+  );
 
-      if (cancelled) {
+  const handleSseConnectedChange = useCallback((connected: boolean) => {
+    setIsSseConnected(connected);
+    if (connected) {
+      setSseFallbackActive(false);
+    }
+  }, []);
+
+  const handleSseError = useCallback(() => {
+    setIsSseConnected(false);
+  }, []);
+
+  useSimulationEvents(idSimulacion, {
+    enabled:
+      !USE_MOCK_DATA &&
+      effectivePollingMode === "sse" &&
+      idSimulacion !== null,
+    onConnectedChange: handleSseConnectedChange,
+    onEvent: handleSimulationEvent,
+    onError: handleSseError,
+  });
+
+  useEffect(() => {
+    if (
+      USE_MOCK_DATA ||
+      effectivePollingMode !== "sse" ||
+      idSimulacion === null ||
+      isSseConnected
+    ) {
+      setSseFallbackActive(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSseFallbackActive(true);
+    }, SSE_FALLBACK_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [effectivePollingMode, idSimulacion, isSseConnected]);
+
+  useEffect(() => {
+    if (
+      USE_MOCK_DATA ||
+      effectivePollingMode === "none" ||
+      idSimulacion === null ||
+      (effectivePollingMode === "sse" && !sseFallbackActive)
+    ) {
+      return;
+    }
+
+    const canPollHeavyData = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
+    const isFallback = effectivePollingMode === "sse" && sseFallbackActive;
+    const stateIntervalMs = isFallback
+      ? FALLBACK_STATE_POLL_INTERVAL_MS
+      : STATE_POLL_INTERVAL_MS;
+    const mapIntervalMs = isFallback
+      ? FALLBACK_MAP_POLL_INTERVAL_MS
+      : MAP_POLL_INTERVAL_MS;
+    const shipmentsIntervalMs = isFallback
+      ? FALLBACK_SHIPMENTS_POLL_INTERVAL_MS
+      : SHIPMENTS_POLL_INTERVAL_MS;
+    const shouldPollHeavyData = effectivePollingMode === "full" || isFallback;
+
+    const refreshVisibleData = () => {
+      if (!canPollHeavyData()) {
         return;
       }
 
-      if (estadoActual) {
-        setEstado(estadoActual);
-        setIsRunning(Boolean(estadoActual.activa));
-      }
+      void fetchLiveState();
 
-      if (mapaActual) {
-        setMapa(mapaActual);
+      if (shouldPollHeavyData) {
+        void fetchLiveMap();
+        void fetchLiveShipments();
       }
-
-      setEnvios(enviosActuales);
     };
 
-    poll();
-    const intervalId = window.setInterval(poll, POLL_INTERVAL_MS);
+    refreshVisibleData();
+
+    const stateIntervalId = window.setInterval(() => {
+      if (canPollHeavyData()) {
+        void fetchLiveState();
+      }
+    }, stateIntervalMs);
+    const mapIntervalId =
+      shouldPollHeavyData
+        ? window.setInterval(() => {
+            void fetchLiveMap();
+          }, mapIntervalMs)
+        : null;
+    const shipmentsIntervalId =
+      shouldPollHeavyData
+        ? window.setInterval(() => {
+            void fetchLiveShipments();
+          }, shipmentsIntervalMs)
+        : null;
+
+    const handleVisibilityChange = () => {
+      refreshVisibleData();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
+      window.clearInterval(stateIntervalId);
+      if (mapIntervalId !== null) {
+        window.clearInterval(mapIntervalId);
+      }
+      if (shipmentsIntervalId !== null) {
+        window.clearInterval(shipmentsIntervalId);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [
-    enablePolling,
+    effectivePollingMode,
+    fetchLiveMap,
+    fetchLiveShipments,
+    fetchLiveState,
     idSimulacion,
-    setEnvios,
-    setEstado,
-    setIsRunning,
-    setMapa,
+    sseFallbackActive,
   ]);
 
   const flights: MapFlight[] = useMemo(
@@ -260,24 +584,23 @@ export const useLiveSimulation = (
         estado?.scMinutos && estado.intervaloRealMs && estado.intervaloRealMs > 0
           ? estado.scMinutos / (estado.intervaloRealMs / 1000)
           : null;
+      const referenceMinute = resolveLiveReferenceMinute(estado);
 
       return buildEmptyMapFlights(mapa?.vuelos ?? [], {
-        shipments: envios,
-        referenceMinute: estado?.punteroConsumoMinutos,
-        simulationStart: estado?.fechaHoraInicioSimulacion,
+        allowBackendProgressFallback: false,
+        referenceMinute,
         simMinutesPerSecond:
           backendSimMinutesPerSecond !== null
             ? backendSimMinutesPerSecond * speed
             : null,
-        allowBackendProgressFallback: false,
       });
     },
     [
-      envios,
-      estado?.fechaHoraInicioSimulacion,
       estado?.intervaloRealMs,
+      estado?.fechaHoraInicioReal,
       estado?.punteroConsumoMinutos,
       estado?.scMinutos,
+      estado?.ultimoMinutoSimulacion,
       mapa?.vuelos,
       speed,
     ]

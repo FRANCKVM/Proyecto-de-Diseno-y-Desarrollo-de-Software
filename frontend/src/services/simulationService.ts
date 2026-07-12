@@ -200,7 +200,7 @@ export const getLiveSimulationState = async (
 };
 
 /**
- * Lista los envios persistidos de una simulacion.
+ * Lista los envios volatiles de la simulacion activa.
  * Endpoint: GET /simulacion/{id}/envios
  */
 export const listLiveSimulationShipments = async (

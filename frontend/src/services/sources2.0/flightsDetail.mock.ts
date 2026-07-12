@@ -10,6 +10,8 @@ import type { VueloDetalle } from "@/types/flight.types";
 
 export const VUELOS_DETALLE_MOCK: VueloDetalle[] = [
   {
+    idOcurrencia: 1001,
+    idVuelo: 1,
     codigo: "TB-301",
     estado: "en_vuelo",
     tipo: "intercontinental",
@@ -51,6 +53,8 @@ export const VUELOS_DETALLE_MOCK: VueloDetalle[] = [
     ],
   },
   {
+    idOcurrencia: 1002,
+    idVuelo: 2,
     codigo: "TB-501",
     estado: "programado",
     tipo: "intercontinental",
@@ -63,6 +67,8 @@ export const VUELOS_DETALLE_MOCK: VueloDetalle[] = [
     envios: [],
   },
   {
+    idOcurrencia: 1003,
+    idVuelo: 3,
     codigo: "TB-502",
     estado: "programado",
     tipo: "intercontinental",

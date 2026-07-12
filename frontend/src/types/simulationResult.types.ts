@@ -100,6 +100,8 @@ export interface ResultadoColapso {
   /** Dia en que se detecto el colapso. */
   diasHastaColapso: number;
   maletasProcesadas: number;
+  /** Duracion simulada de la corrida en minutos. */
+  duracionMinutos?: number | null;
   /** Porcentaje de plazos incumplidos al colapsar (0-100). */
   plazosIncumplidos: number;
   /** Numero y porcentaje de almacenes saturados. */

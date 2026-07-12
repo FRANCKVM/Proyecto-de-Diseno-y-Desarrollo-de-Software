@@ -61,8 +61,8 @@ const ResultadosColapsoPage = () => {
         className="mb-6"
       />
 
-      {/* 5 KPIs */}
-      <section className="grid grid-cols-5 gap-4 mb-6">
+      {/* KPIs */}
+      <section className="grid grid-cols-6 gap-4 mb-6">
         <KpiCard
           dotVariant="critico"
           label="Dias hasta colapso"
@@ -73,6 +73,11 @@ const ResultadosColapsoPage = () => {
           dotVariant="primary"
           label="Maletas procesadas"
           value={resultado.maletasProcesadas.toLocaleString("es-PE")}
+        />
+        <KpiCard
+          dotVariant="primary"
+          label="Duracion simulacion"
+          value={`${(resultado.duracionMinutos ?? 0).toLocaleString("es-PE")} min`}
         />
         <KpiCard
           dotVariant="critico"

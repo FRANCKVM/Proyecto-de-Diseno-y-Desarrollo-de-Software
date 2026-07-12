@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
-import { Marker, Polyline, useMap } from "react-leaflet";
+import { useMap } from "react-leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
 import { COLORS } from "@/styles/theme";
 
@@ -24,7 +24,6 @@ interface RouteLineProps {
 }
 
 const ROUTE_ARROW_SIZE = 18;
-const REF_ZOOM = 0;
 
 const buildRouteArrowHtml = (color: string, angle: number): string => `
   <div class="tasf-route-arrow" style="--tasf-route-arrow-color:${color}; transform: rotate(${angle}deg);">
@@ -55,88 +54,105 @@ const RouteLine = ({
   directional = false,
 }: RouteLineProps) => {
   const map = useMap();
-  const polylineRef = useRef<L.Polyline | null>(null);
-
-  const { positions, fromPx, toPx, arrowPosition, arrowAngle } = useMemo(() => {
-    const fromLatLng: [number, number] = [from.lat, from.lng];
-    const toLatLng: [number, number] = [to.lat, to.lng];
-    const fromPx = map.project(fromLatLng, REF_ZOOM);
-    const toPx = map.project(toLatLng, REF_ZOOM);
-    const angle = (Math.atan2(toPx.y - fromPx.y, toPx.x - fromPx.x) * 180) / Math.PI;
-    const arrowPx = L.point(
-      fromPx.x + (toPx.x - fromPx.x) * 0.62,
-      fromPx.y + (toPx.y - fromPx.y) * 0.62
-    );
-    const arrowLatLng = map.unproject(arrowPx, REF_ZOOM);
-
-    if (full) {
-      return {
-        positions: [
-          [from.lat, from.lng],
-          [to.lat, to.lng],
-        ] as [number, number][],
-        fromPx,
-        toPx,
-        arrowPosition: [arrowLatLng.lat, arrowLatLng.lng] as [number, number],
-        arrowAngle: angle,
-      };
-    }
-
-    if (progress <= 0 || progress >= 1) {
-      return {
-        positions: null,
-        fromPx,
-        toPx,
-        arrowPosition: [arrowLatLng.lat, arrowLatLng.lng] as [number, number],
-        arrowAngle: angle,
-      };
-    }
-
-    const currentPx = L.point(
-      fromPx.x + (toPx.x - fromPx.x) * progress,
-      fromPx.y + (toPx.y - fromPx.y) * progress
-    );
-    const currentPosition = map.unproject(currentPx, 0);
-
-    return {
-      positions: [
-        [currentPosition.lat, currentPosition.lng],
-        [to.lat, to.lng],
-      ] as [number, number][],
-      fromPx,
-      toPx,
-      arrowPosition: [arrowLatLng.lat, arrowLatLng.lng] as [number, number],
-      arrowAngle: angle,
-    };
-  }, [from.lat, from.lng, full, map, progress, to.lat, to.lng]);
+  const lineRef = useRef<HTMLDivElement | null>(null);
+  const arrowRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef<number>(0);
+  const fromLatLng = useMemo(() => L.latLng(from.lat, from.lng), [from.lat, from.lng]);
+  const toLatLng = useMemo(() => L.latLng(to.lat, to.lng), [to.lat, to.lng]);
   const progressSnapshot = progress;
   const progressTimestamp = progressUpdatedAtMs ?? performance.now();
   const progressVelocity = progressVelocityPerSecond ?? 0;
 
   useEffect(() => {
-    if (full || !positions) {
+    const routePane = map.getPanes().overlayPane;
+    const arrowPane = map.getPanes().markerPane;
+    const lineElement = document.createElement("div");
+    let arrowElement: HTMLDivElement | null = null;
+
+    lineElement.className = "tasf-route-overlay-line";
+    routePane.appendChild(lineElement);
+    lineRef.current = lineElement;
+
+    if (directional) {
+      arrowElement = document.createElement("div");
+      arrowElement.className = "tasf-route-overlay-arrow";
+      arrowPane.appendChild(arrowElement);
+      arrowRef.current = arrowElement;
+    }
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      lineElement.remove();
+      arrowElement?.remove();
+      if (lineRef.current === lineElement) {
+        lineRef.current = null;
+      }
+      if (arrowRef.current === arrowElement) {
+        arrowRef.current = null;
+      }
+    };
+  }, [directional, map]);
+
+  useEffect(() => {
+    const lineElement = lineRef.current;
+    if (!lineElement) {
       return;
     }
 
-    const polyline = polylineRef.current;
-    if (!polyline) {
+    lineElement.style.setProperty("--tasf-route-color", color);
+    lineElement.style.setProperty(
+      "--tasf-route-weight",
+      `${directional ? 2 : 1}px`
+    );
+    lineElement.style.setProperty("--tasf-route-opacity", "0.7");
+  }, [color, directional]);
+
+  useEffect(() => {
+    const lineElement = lineRef.current;
+    if (!lineElement) {
       return;
     }
 
-    let rafId = 0;
+    let isDisposed = false;
 
-    const setLinePositions = (nextProgress: number) => {
+    const setLinePosition = (nextProgress: number) => {
+      const arrowElement = arrowRef.current;
       const clampedProgress = Math.max(0, Math.min(1, nextProgress));
-      const currentPx = L.point(
-        fromPx.x + (toPx.x - fromPx.x) * clampedProgress,
-        fromPx.y + (toPx.y - fromPx.y) * clampedProgress
-      );
-      const currentPosition = map.unproject(currentPx, 0);
+      const fromPoint = map.latLngToLayerPoint(fromLatLng);
+      const toPoint = map.latLngToLayerPoint(toLatLng);
+      const visibleProgress = full ? 0 : clampedProgress;
 
-      polyline.setLatLngs([
-        [currentPosition.lat, currentPosition.lng],
-        [to.lat, to.lng],
-      ]);
+      if (!full && (visibleProgress <= 0 || visibleProgress >= 1)) {
+        lineElement.style.display = "none";
+      } else {
+        const startPoint = L.point(
+          fromPoint.x + (toPoint.x - fromPoint.x) * visibleProgress,
+          fromPoint.y + (toPoint.y - fromPoint.y) * visibleProgress
+        );
+        const dx = toPoint.x - startPoint.x;
+        const dy = toPoint.y - startPoint.y;
+        const length = Math.hypot(dx, dy);
+        const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+
+        lineElement.style.display = "block";
+        lineElement.style.width = `${length}px`;
+        lineElement.style.transform = `translate3d(${startPoint.x}px, ${startPoint.y}px, 0) rotate(${angle}deg)`;
+      }
+
+      if (arrowElement) {
+        const routeDx = toPoint.x - fromPoint.x;
+        const routeDy = toPoint.y - fromPoint.y;
+        const arrowPoint = L.point(
+          fromPoint.x + routeDx * 0.62,
+          fromPoint.y + routeDy * 0.62
+        );
+        const arrowAngle = (Math.atan2(routeDy, routeDx) * 180) / Math.PI;
+
+        arrowElement.innerHTML = buildRouteArrowHtml(color, arrowAngle);
+        arrowElement.style.transform = `translate3d(${
+          arrowPoint.x - ROUTE_ARROW_SIZE / 2
+        }px, ${arrowPoint.y - ROUTE_ARROW_SIZE / 2}px, 0)`;
+      }
     };
 
     const tick = (now: number) => {
@@ -144,72 +160,44 @@ const RouteLine = ({
       const nextProgress =
         progressSnapshot + elapsedSeconds * progressVelocity;
 
-      setLinePositions(nextProgress);
+      setLinePosition(nextProgress);
 
-      if (nextProgress < 1 && progressVelocity > 0) {
-        rafId = requestAnimationFrame(tick);
+      if (!isDisposed && nextProgress < 1 && progressVelocity > 0) {
+        rafRef.current = requestAnimationFrame(tick);
       }
     };
 
-    setLinePositions(progressSnapshot);
+    const updateOnMapMove = () => {
+      const elapsedSeconds = (performance.now() - progressTimestamp) / 1000;
+      setLinePosition(progressSnapshot + elapsedSeconds * progressVelocity);
+    };
 
-    if (progressSnapshot < 1 && progressVelocity > 0) {
-      rafId = requestAnimationFrame(tick);
+    cancelAnimationFrame(rafRef.current);
+    setLinePosition(progressSnapshot);
+
+    if (!full && progressSnapshot < 1 && progressVelocity > 0) {
+      rafRef.current = requestAnimationFrame(tick);
     }
 
-    return () => cancelAnimationFrame(rafId);
+    map.on("move zoom viewreset zoomanim", updateOnMapMove);
+
+    return () => {
+      isDisposed = true;
+      cancelAnimationFrame(rafRef.current);
+      map.off("move zoom viewreset zoomanim", updateOnMapMove);
+    };
   }, [
-    fromPx.x,
-    fromPx.y,
+    color,
+    fromLatLng,
     full,
     map,
-    positions,
     progressSnapshot,
     progressTimestamp,
     progressVelocity,
-    to.lat,
-    to.lng,
-    toPx.x,
-    toPx.y,
+    toLatLng,
   ]);
 
-  if (!positions) {
-    return null;
-  }
-
-  const arrowIcon =
-    directional && arrowPosition
-      ? L.divIcon({
-          html: buildRouteArrowHtml(color, arrowAngle),
-          className: "",
-          iconSize: [ROUTE_ARROW_SIZE, ROUTE_ARROW_SIZE],
-          iconAnchor: [ROUTE_ARROW_SIZE / 2, ROUTE_ARROW_SIZE / 2],
-        })
-      : null;
-
-  return (
-    <Fragment>
-      <Polyline
-        ref={polylineRef}
-        positions={positions}
-        pathOptions={{
-          color,
-          weight: directional ? 2 : 1,
-          opacity: 0.7,
-          dashArray: "6 8",
-        }}
-      />
-      {arrowIcon && (
-        <Marker
-          position={arrowPosition}
-          icon={arrowIcon}
-          interactive={false}
-          keyboard={false}
-          zIndexOffset={500}
-        />
-      )}
-    </Fragment>
-  );
+  return null;
 };
 
 export default RouteLine;

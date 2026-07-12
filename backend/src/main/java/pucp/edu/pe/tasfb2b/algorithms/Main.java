@@ -138,7 +138,7 @@ public class Main {
 
                     resueltas++;
                     fitnessTotal += mejorRuta.getCosto();
-                    int cantidadVuelos = mejorRuta.getVuelos().size();
+                    int cantidadVuelos = mejorRuta.getOcurrencias().size();
                     int cantidadEscalas = Math.max(0, cantidadVuelos - 1);
 
                     totalVuelosUsados += cantidadVuelos;
@@ -366,12 +366,17 @@ System.out.println("Fitness global del algoritmo: " + fitnessGlobal + "%");
 
             vuelosCargados++;
 
-            if (randomCancelacion.nextDouble() < probabilidadCancelacion) {
-                vuelo.setCancelado(true);
-                vuelosCancelados++;
+            boolean cancelado = randomCancelacion.nextDouble() < probabilidadCancelacion;
+            if (cancelado) vuelosCancelados++;
+            for (int dia = 0; dia < 7; dia++) {
+                var salida = java.time.LocalDate.now().plusDays(dia).atStartOfDay().plusMinutes(salidaUtcMin);
+                var ocurrencia = new pucp.edu.pe.tasfb2b.entities.VueloOcurrencia(
+                        vuelo, salida, salida.plusMinutes(Math.max(1, llegadaUtcMin - salidaUtcMin)), capacidad);
+                if (cancelado) {
+                    ocurrencia.setEstado(pucp.edu.pe.tasfb2b.entities.EstadoVueloOcurrencia.CANCELADO);
+                }
+                grafo.agregarOcurrencia(ocurrencia);
             }
-
-            grafo.agregarVuelo(vuelo);
         }
 
         System.out.println("Vuelos cargados: " + vuelosCargados);

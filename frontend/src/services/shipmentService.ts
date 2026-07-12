@@ -16,17 +16,22 @@ import type { EnvioDetalle } from "@/types/shipment.types";
  * Endpoint: GET /envios/{codigo}
  */
 export const getShipmentByCode = async (
-  codigo: string,
+  codigo: string | number,
   idSimulacion?: number | null
 ): Promise<EnvioDetalle | null> => {
+  const shipmentIdentifier = String(codigo);
+
   if (USE_MOCK_DATA) {
-    const found = ENVIOS_DETALLE_MOCK.find((e) => e.codigo === codigo);
+    const found = ENVIOS_DETALLE_MOCK.find((e) => e.codigo === shipmentIdentifier);
     return mockResolve<EnvioDetalle | null>(found ?? null);
   }
   try {
-    const { data } = await api.get<EnvioDetalle>(`/envios/${codigo}`, {
+    const { data } = await api.get<EnvioDetalle>(
+      `/envios/${encodeURIComponent(shipmentIdentifier)}`,
+      {
       params: idSimulacion != null ? { idSimulacion } : undefined,
-    });
+      }
+    );
     return data;
   } catch {
     return null;

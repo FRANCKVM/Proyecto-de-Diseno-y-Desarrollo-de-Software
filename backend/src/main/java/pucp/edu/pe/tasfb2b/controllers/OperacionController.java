@@ -1,6 +1,7 @@
 package pucp.edu.pe.tasfb2b.controllers;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,6 +34,10 @@ public class OperacionController {
     public ResponseEntity<?> registrarEnvio(@RequestBody RegistrarOperacionEnvioRequest request) {
         try {
             return ResponseEntity.ok(operacionesService.registrarEnvioOperacion(request));
+        } catch (ObjectOptimisticLockingFailureException e) {
+            return ResponseEntity.status(409).body(
+                    "La capacidad de uno de los vuelos cambio mientras se registraba el envio. Intente nuevamente."
+            );
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }

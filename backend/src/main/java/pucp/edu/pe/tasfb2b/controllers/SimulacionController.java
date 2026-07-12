@@ -1,12 +1,15 @@
 package pucp.edu.pe.tasfb2b.controllers;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import pucp.edu.pe.tasfb2b.controllers.dto.InicioSimulacionRequest;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.services.EstadoSimulacion;
 import pucp.edu.pe.tasfb2b.services.OperacionesService;
 import pucp.edu.pe.tasfb2b.services.SimulacionService;
+import pucp.edu.pe.tasfb2b.services.SimulationSseService;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -16,13 +19,16 @@ public class SimulacionController {
 
     private final SimulacionService simulacionService;
     private final OperacionesService operacionesService;
+    private final SimulationSseService simulationSseService;
 
     public SimulacionController(
             SimulacionService simulacionService,
-            OperacionesService operacionesService
+            OperacionesService operacionesService,
+            SimulationSseService simulationSseService
     ) {
         this.simulacionService = simulacionService;
         this.operacionesService = operacionesService;
+        this.simulationSseService = simulationSseService;
     }
 
     @PostMapping("/iniciar")
@@ -78,6 +84,15 @@ public class SimulacionController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
+    }
+
+    @GetMapping(
+            value = "/{idSimulacion}/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
+    public SseEmitter stream(@PathVariable Integer idSimulacion) {
+        simulacionService.obtenerEstado(idSimulacion);
+        return simulationSseService.subscribe(idSimulacion);
     }
 
     @PostMapping("/planificar-bloque")

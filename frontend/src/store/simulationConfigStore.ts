@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import {
+  UMBRAL_SEMAFORO_AMBAR_DEFAULT,
+  UMBRAL_SEMAFORO_VERDE_DEFAULT,
+} from "@/utils/constants";
 import type { TipoSimulacion, RangoSemaforo } from "@/types/common.types";
 
 /**
@@ -48,7 +52,10 @@ const INITIAL_STATE: Pick<
   tipoPeriodo: "semanal",
   fechaInicio: "2026-09-07",
   horaInicio: "06:00",
-  rangos: { verde: 40, ambar: 70 },
+  rangos: {
+    verde: UMBRAL_SEMAFORO_VERDE_DEFAULT,
+    ambar: UMBRAL_SEMAFORO_AMBAR_DEFAULT,
+  },
   kColapso: 200,
   csvSummary: null,
 };

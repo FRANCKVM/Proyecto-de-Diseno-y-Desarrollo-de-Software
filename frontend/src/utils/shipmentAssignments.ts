@@ -13,7 +13,7 @@ export const getShipmentRouteGroups = (
 ): ShipmentRouteGroup[] => {
   const assignments = shipment.asignaciones ?? [];
   const assignedGroups = assignments
-    .filter((assignment) => assignment.ruta?.vuelos?.length)
+    .filter((assignment) => assignment.ruta?.ocurrencias?.length)
     .map((assignment) => ({
       ruta: assignment.ruta,
       cantidadBolsas: assignment.cantidadBolsas ?? 0,
@@ -23,7 +23,7 @@ export const getShipmentRouteGroups = (
     return assignedGroups;
   }
 
-  if (shipment.ruta?.vuelos?.length) {
+  if (shipment.ruta?.ocurrencias?.length) {
     return [
       {
         ruta: shipment.ruta,

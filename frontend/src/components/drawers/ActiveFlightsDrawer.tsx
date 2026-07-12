@@ -3,28 +3,26 @@ import { X } from "lucide-react";
 import type { TagVariant } from "@/components/atoms/Tag";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import FlightListCard from "@/components/molecules/FlightListCard";
-import type { MapFlight } from "@/components/map/WorldMap";
+import FlightCancellationPopup from "@/components/molecules/FlightCancellationPopup";
 import { useFlightCancellationAction } from "@/hooks/useFlightCancellationAction";
+import {
+  listFlightOccurrences,
+  resolveFlightQueryDate,
+} from "@/services/flightService";
 import {
   useDrawerStore,
   type ActiveFlightSemaphoreFilter,
 } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { cn } from "@/utils/cn";
-import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import type { AirportWithCoords } from "@/types/airport.types";
-import type {
-  BackendSolicitudEnvio,
-  BackendVuelo,
-} from "@/types/backendSimulation.types";
 import type { RangoSemaforo } from "@/types/common.types";
+import type { VueloDetalle } from "@/types/flight.types";
 
 interface ActiveFlightsDrawerProps {
-  flights: MapFlight[];
   airports?: AirportWithCoords[];
   rangosSemaforo?: RangoSemaforo;
   idSimulacion?: number | null;
-  shipments?: BackendSolicitudEnvio[];
   referenceMinute?: number | null;
   simulationStart?: string | null;
 }
@@ -51,12 +49,6 @@ interface PanelFlight {
   departureIso?: string;
 }
 
-interface PanelFlightAggregate extends PanelFlight {
-  activeBags: number;
-  reportedUsedCapacity?: number | null;
-  capacity?: number | null;
-}
-
 const STATUS_LABEL: Record<FlightPanelStatus, string> = {
   programado: "Programado",
   en_vuelo: "En vuelo",
@@ -69,13 +61,6 @@ const STATUS_TAG_VARIANT: Record<FlightPanelStatus, TagVariant> = {
   en_vuelo: "primary",
   completado: "normal",
   cancelado: "critico",
-};
-
-const STATUS_PRIORITY: Record<FlightPanelStatus, number> = {
-  completado: 0,
-  programado: 1,
-  en_vuelo: 2,
-  cancelado: 3,
 };
 
 const STATUS_FILTER_OPTIONS: Array<{
@@ -97,7 +82,7 @@ const SEMAPHORE_FILTER_OPTIONS: Array<{
 }> = [
   {
     value: "vacios",
-    label: "Vacios",
+    label: "Vacíos",
     className: "border-[#4b5563] bg-[#d1d5db] hover:bg-[#9ca3af]",
     activeClassName: "border-[#111827] bg-[#374151] shadow-card ring-2 ring-[#111827]/25",
   },
@@ -109,7 +94,7 @@ const SEMAPHORE_FILTER_OPTIONS: Array<{
   },
   {
     value: "elevado",
-    label: "Ambar",
+    label: "Ámbar",
     className: "border-[#f59e0b] bg-[#fde68a] hover:bg-[#fcd34d]",
     activeClassName: "border-[#d97706] bg-[#f59e0b] shadow-card ring-2 ring-[#f59e0b]/25",
   },
@@ -131,9 +116,6 @@ type FlightSortMode =
 
 const DAY_MINUTES = 24 * 60;
 
-const clampProgress = (value: number): number =>
-  Math.max(0, Math.min(1, value));
-
 const normalizeMinute = (minute: number): number =>
   ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
 
@@ -146,130 +128,33 @@ const parseLocalDateTimeMs = (value: string | null | undefined): number | null =
   return Number.isNaN(date.getTime()) ? null : date.getTime();
 };
 
-const parseShipmentUtcMinute = (shipment: BackendSolicitudEnvio): number => {
-  const [hour = "0", minute = "0"] = (shipment.hora ?? "00:00").split(":");
-  return Number(hour) * 60 + Number(minute);
-};
-
-const getUtcMinutesSinceShipmentDay = (
-  shipment: BackendSolicitudEnvio,
-  nowMs: number
-): number | null => {
-  const shipmentDayMs = Date.parse(`${shipment.fecha}T00:00:00Z`);
-
-  if (Number.isNaN(shipmentDayMs)) {
-    return null;
-  }
-
-  return Math.floor((nowMs - shipmentDayMs) / 60_000);
-};
-
-const getShipmentStartMinute = (
-  shipment: BackendSolicitudEnvio,
-  simulationStartMs: number | null
-): number => {
-  if (simulationStartMs === null) {
-    return parseShipmentUtcMinute(shipment);
-  }
-
-  const shipmentMs = parseLocalDateTimeMs(`${shipment.fecha}T${shipment.hora}`);
-  if (shipmentMs === null) {
-    return parseShipmentUtcMinute(shipment);
-  }
-
-  return Math.max(0, Math.floor((shipmentMs - simulationStartMs) / 60_000));
-};
-
-const getReferenceMinute = (
-  shipment: BackendSolicitudEnvio,
-  referenceMinute: number | null | undefined,
-  simulationStartMs: number | null,
-  nowMs: number
-): number | null => {
-  if (referenceMinute !== null && referenceMinute !== undefined) {
-    return referenceMinute;
-  }
-
-  if (simulationStartMs !== null) {
-    return 0;
-  }
-
-  return getUtcMinutesSinceShipmentDay(shipment, nowMs);
-};
-
-const getNextFlightWindow = (
-  earliestMinute: number,
-  flight: BackendVuelo
-): { departure: number; arrival: number; durationMinutes: number } => {
-  const departureBase = normalizeMinute(flight.salidaUtcMin ?? 0);
-  let arrivalBase = flight.llegadaUtcMin ?? departureBase;
-
-  while (arrivalBase <= departureBase) {
-    arrivalBase += DAY_MINUTES;
-  }
-
-  const durationMinutes = Math.max(1, arrivalBase - departureBase);
-  const occurrenceOffset = Math.max(
-    0,
-    Math.ceil((earliestMinute - departureBase) / DAY_MINUTES)
-  );
-  const departure = departureBase + occurrenceOffset * DAY_MINUTES;
-
-  return {
-    departure,
-    arrival: departure + durationMinutes,
-    durationMinutes,
-  };
-};
-
-const getFlightStatus = (
-  flight: BackendVuelo,
-  referenceMinute: number,
-  departure: number,
-  arrival: number
+const resolveTemporalStatus = (
+  status: FlightPanelStatus,
+  departureMs: number,
+  arrivalMs: number,
+  referenceMs: number
 ): FlightPanelStatus => {
-  if (flight.cancelado) {
+  if (status === "cancelado") {
     return "cancelado";
   }
 
-  if (referenceMinute < departure) {
+  if (
+    !Number.isFinite(departureMs) ||
+    !Number.isFinite(arrivalMs) ||
+    arrivalMs <= departureMs
+  ) {
+    return status;
+  }
+
+  if (referenceMs < departureMs) {
     return "programado";
   }
 
-  if (referenceMinute >= arrival) {
-    return "completado";
+  if (referenceMs < arrivalMs) {
+    return "en_vuelo";
   }
 
-  return "en_vuelo";
-};
-
-const getProgressByStatus = (
-  status: FlightPanelStatus,
-  referenceMinute: number,
-  departure: number,
-  durationMinutes: number
-): number => {
-  if (status === "completado") {
-    return 1;
-  }
-
-  if (status !== "en_vuelo") {
-    return 0;
-  }
-
-  return clampProgress((referenceMinute - departure) / durationMinutes);
-};
-
-const calculateOccupancyPct = (
-  usedCapacity: number | null | undefined,
-  totalCapacity: number | null | undefined
-): number | undefined => {
-  if (!totalCapacity || totalCapacity <= 0) {
-    return undefined;
-  }
-
-  const used = Math.max(0, usedCapacity ?? 0);
-  return Math.min(100, (used * 100) / totalCapacity);
+  return "completado";
 };
 
 const formatMinuteTime = (value: number): string => {
@@ -298,23 +183,7 @@ const formatMinuteDateTime = (
   }
 
   const dayNumber = Math.floor(Math.max(0, value) / DAY_MINUTES) + 1;
-  return `Dia ${dayNumber} ${formatMinuteTime(value)}`;
-};
-
-const getDepartureIso = (
-  shipment: BackendSolicitudEnvio,
-  simulationStartMs: number | null,
-  departureMinute: number
-): string | undefined => {
-  const baseMs =
-    simulationStartMs ??
-    Date.parse(`${shipment.fecha}T00:00:00Z`);
-
-  if (Number.isNaN(baseMs)) {
-    return undefined;
-  }
-
-  return new Date(baseMs + departureMinute * 60_000).toISOString();
+  return `Día ${dayNumber} ${formatMinuteTime(value)}`;
 };
 
 const compareNullableNumber = (
@@ -340,145 +209,78 @@ const compareNullableNumber = (
   return direction === "asc" ? a - b : b - a;
 };
 
-const buildFallbackPanelFlights = (flights: MapFlight[]): PanelFlight[] =>
-  flights.map((flight) => ({
-    id: flight.id,
-    detailCode: flight.code ?? flight.id,
-    code: flight.code ?? flight.id,
-    fromIcao: flight.fromIcao,
-    toIcao: flight.toIcao,
-    progress: flight.progress,
-    estado: "en_vuelo",
-    occupancyPct: flight.occupancyPct,
-    departureMinute: flight.departureMinute,
-    arrivalMinute: flight.arrivalMinute,
-  }));
-
-const buildPanelFlightsFromShipments = (
-  shipments: BackendSolicitudEnvio[],
-  referenceMinute: number | null | undefined,
-  simulationStart: string | null | undefined,
-  nowMs: number
+const buildOccurrencePanelFlights = (
+  occurrences: VueloDetalle[],
+  simulationStart?: string | null,
+  referenceMinute?: number | null,
+  nowMs = Date.now()
 ): PanelFlight[] => {
-  if (shipments.length === 0) {
-    return [];
-  }
-
   const simulationStartMs = parseLocalDateTimeMs(simulationStart);
-  const flightsByOccurrence = new Map<string, PanelFlightAggregate>();
-
-  shipments.forEach((shipment, shipmentIndex) => {
-    const shipmentReference = getReferenceMinute(
-      shipment,
-      referenceMinute,
-      simulationStartMs,
-      nowMs
+  return occurrences.map((occurrence) => {
+    const departureMs = Date.parse(occurrence.fechaSalida);
+    const arrivalMs = Date.parse(occurrence.fechaLlegadaEstimada);
+    const durationMs = Math.max(1, arrivalMs - departureMs);
+    const referenceMs = simulationStartMs !== null && referenceMinute != null
+      ? simulationStartMs + referenceMinute * 60_000
+      : nowMs;
+    const estado = resolveTemporalStatus(
+      occurrence.estado,
+      departureMs,
+      arrivalMs,
+      referenceMs
     );
-
-    if (shipmentReference === null) {
-      return;
-    }
-
-    getShipmentRouteGroups(shipment).forEach((group, groupIndex) => {
-      let earliestDeparture = getShipmentStartMinute(shipment, simulationStartMs);
-
-      (group.ruta?.vuelos ?? []).forEach((flight, segmentIndex) => {
-        const { departure, arrival, durationMinutes } = getNextFlightWindow(
-          earliestDeparture,
-          flight
-        );
-        earliestDeparture = arrival;
-
-        const status = getFlightStatus(
-          flight,
-          shipmentReference,
-          departure,
-          arrival
-        );
-        const progress = getProgressByStatus(
-          status,
-          shipmentReference,
-          departure,
-          durationMinutes
-        );
-        const detailCode = `shipment-${shipment.idEnvio ?? shipmentIndex}-flight-${
-          flight.idVuelo
-        }-${groupIndex * 100 + segmentIndex}-${departure}`;
-        const departureIso = getDepartureIso(
-          shipment,
-          simulationStartMs,
-          departure
-        );
-        const occurrenceKey =
-          simulationStartMs === null
-            ? `${shipment.fecha}-${flight.idVuelo}-${departure}`
-            : `${flight.idVuelo}-${departure}`;
-        const existing = flightsByOccurrence.get(occurrenceKey);
-
-        if (existing) {
-          existing.activeBags += group.cantidadBolsas;
-          existing.reportedUsedCapacity = Math.max(
-            existing.reportedUsedCapacity ?? 0,
-            flight.capacidadUsada ?? 0
-          );
-
-          if (STATUS_PRIORITY[status] > STATUS_PRIORITY[existing.estado]) {
-            existing.estado = status;
-            existing.progress = progress;
-            existing.detailCode = detailCode;
-            existing.id = detailCode;
-            existing.departureIso = departureIso;
-          }
-
-          return;
-        }
-
-        flightsByOccurrence.set(occurrenceKey, {
-          id: detailCode,
-          detailCode,
-          code: String(flight.idVuelo),
-          fromIcao: flight.desde.codigo,
-          toIcao: flight.hasta.codigo,
-          progress,
-          estado: status,
-          departureMinute: departure,
-          arrivalMinute: arrival,
-          departureIso,
-          activeBags: group.cantidadBolsas,
-          reportedUsedCapacity: flight.capacidadUsada,
-          capacity: flight.capacidad,
-        });
-      });
-    });
-  });
-
-  const panelFlights = Array.from(flightsByOccurrence.values()).map((flight) => {
-    const usedCapacity =
-      flight.activeBags > 0
-        ? flight.activeBags
-        : (flight.reportedUsedCapacity ?? 0);
+    const progress = estado === "completado"
+      ? 1
+      : estado === "programado" || estado === "cancelado"
+      ? 0
+      : Math.min(0.999, Math.max(0.001, (referenceMs - departureMs) / durationMs));
+    const departureMinute = simulationStartMs !== null
+      ? Math.round((departureMs - simulationStartMs) / 60_000)
+      : new Date(departureMs).getUTCHours() * 60 + new Date(departureMs).getUTCMinutes();
+    const arrivalMinute = departureMinute + Math.max(1, Math.round(durationMs / 60_000));
 
     return {
-      ...flight,
-      occupancyPct:
-        flight.occupancyPct ?? calculateOccupancyPct(usedCapacity, flight.capacity),
+      id: String(occurrence.idOcurrencia),
+      detailCode: String(occurrence.idOcurrencia),
+      code: occurrence.codigo,
+      fromIcao: occurrence.origenIcao,
+      toIcao: occurrence.destinoIcao,
+      progress,
+      estado,
+      occupancyPct: occurrence.capacidad > 0
+        ? (occurrence.ocupacion * 100) / occurrence.capacidad
+        : 0,
+      departureMinute,
+      arrivalMinute,
+      departureIso: occurrence.fechaSalida,
     };
-  });
+  }).filter((flight) => {
+    const referenceMs = simulationStartMs !== null && referenceMinute != null
+      ? simulationStartMs + referenceMinute * 60_000
+      : nowMs;
+    const departureMs = parseLocalDateTimeMs(flight.departureIso);
 
-  return panelFlights;
+    if (flight.estado === "cancelado") {
+      return departureMs === null || departureMs >= referenceMs;
+    }
+
+    return flight.estado !== "completado";
+  });
 };
 
+const formatFlightDisplayCode = (flight: PanelFlight): string =>
+  `${flight.fromIcao}>${flight.toIcao}-${flight.code}`;
+
 const ActiveFlightsDrawer = ({
-  flights,
   airports = [],
   rangosSemaforo,
   idSimulacion,
-  shipments = [],
   referenceMinute,
   simulationStart,
 }: ActiveFlightsDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openFlight = useDrawerStore((s) => s.openFlight);
+  const focusFlightOnMap = useDrawerStore((s) => s.focusFlightOnMap);
   const selectedRegion = useDrawerStore((s) => s.activeFlightRegionFilter);
   const setSelectedRegion = useDrawerStore((s) => s.setActiveFlightRegionFilter);
   const semaphoreFilter = useDrawerStore((s) => s.activeFlightSemaphoreFilter);
@@ -493,11 +295,21 @@ const ActiveFlightsDrawer = ({
   const [cancelledFlightIds, setCancelledFlightIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [occurrences, setOccurrences] = useState<VueloDetalle[]>([]);
+  const [occurrencesLoading, setOccurrencesLoading] = useState(true);
+  const [occurrencesError, setOccurrencesError] = useState<string | null>(null);
+  const queryDate = resolveFlightQueryDate(
+    idSimulacion,
+    simulationStart,
+    referenceMinute
+  );
   const {
     cancelFlight,
     cancellingFlightKey,
     cancelError,
     cancelNotice,
+    cancelPopup,
+    dismissCancelPopup,
   } = useFlightCancellationAction({
     idSimulacion,
     referenceMinute,
@@ -514,24 +326,66 @@ const ActiveFlightsDrawer = ({
     };
   }, []);
 
-  const shipmentPanelFlights = useMemo(
-    () =>
-      buildPanelFlightsFromShipments(
-        shipments,
-        referenceMinute,
-        simulationStart,
-        nowMs
-      ),
-    [nowMs, referenceMinute, shipments, simulationStart]
+  useEffect(() => {
+    let cancelled = false;
+    let requestInFlight = false;
+    const canPoll = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
+
+    const loadOccurrences = async (showLoading: boolean) => {
+      if (!canPoll() || requestInFlight) return;
+      requestInFlight = true;
+      if (showLoading) {
+        setOccurrencesLoading(true);
+      }
+      setOccurrencesError(null);
+
+      try {
+        const data = await listFlightOccurrences(idSimulacion, queryDate);
+        if (!cancelled) {
+          setOccurrences(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setOccurrences([]);
+          setOccurrencesError("No se pudieron cargar las ocurrencias de vuelo.");
+        }
+      } finally {
+        requestInFlight = false;
+        if (!cancelled && showLoading) {
+          setOccurrencesLoading(false);
+        }
+      }
+    };
+
+    void loadOccurrences(true);
+    const intervalId = window.setInterval(() => {
+      void loadOccurrences(false);
+    }, idSimulacion != null ? 5000 : 15000);
+    const handleVisibilityChange = () => {
+      if (canPoll()) {
+        void loadOccurrences(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [idSimulacion, queryDate]);
+
+  const panelFlights = useMemo(
+    () => buildOccurrencePanelFlights(
+      occurrences,
+      simulationStart,
+      referenceMinute,
+      nowMs
+    ),
+    [nowMs, occurrences, referenceMinute, simulationStart]
   );
-  const fallbackPanelFlights = useMemo(
-    () => buildFallbackPanelFlights(flights),
-    [flights]
-  );
-  const panelFlights =
-    shipmentPanelFlights.length > 0
-      ? shipmentPanelFlights
-      : fallbackPanelFlights;
   const displayedPanelFlights = useMemo(
     () =>
       panelFlights.map((flight) =>
@@ -595,11 +449,11 @@ const ActiveFlightsDrawer = ({
           flight.toIcao === selectedAirport;
         const matchesStatus =
           statusFilter === "todos" || flight.estado === statusFilter;
+        const displayCode = formatFlightDisplayCode(flight).toLowerCase();
         const matchesSearch =
           normalizedSearch.length === 0 ||
-          flight.id.toLowerCase().includes(normalizedSearch) ||
-          flight.code.toLowerCase().includes(normalizedSearch) ||
-          flight.detailCode.toLowerCase().includes(normalizedSearch);
+          flight.code.toLowerCase().startsWith(normalizedSearch) ||
+          displayCode.startsWith(normalizedSearch);
 
         return (
           matchesRegion &&
@@ -684,7 +538,7 @@ const ActiveFlightsDrawer = ({
 
     await cancelFlight({
       actionKey: flight.detailCode,
-      codigo: flight.detailCode,
+      idOcurrencia: Number(flight.detailCode),
       fechaSalida: flight.departureIso,
       departureMinute: flight.departureMinute,
       fallbackAirportIcao: flight.fromIcao,
@@ -714,6 +568,11 @@ const ActiveFlightsDrawer = ({
         </div>
       }
     >
+      <FlightCancellationPopup
+        message={cancelPopup?.message ?? null}
+        tone={cancelPopup?.tone}
+        onClose={dismissCancelPopup}
+      />
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-3">
           <div>
@@ -728,7 +587,7 @@ const ActiveFlightsDrawer = ({
               type="search"
               value={flightSearch}
               onChange={(event) => setFlightSearch(event.target.value)}
-              placeholder="Ej. 1024 o VUE-1024"
+              placeholder="Inicio del ID, ej. SKBO>SPIM-23"
               className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
             />
           </div>
@@ -780,9 +639,9 @@ const ActiveFlightsDrawer = ({
 
           <div>
             <span className="block text-label-sm text-text-primary mb-1">
-              Filtrar por semaforo
+              Filtrar por semáforo
             </span>
-            <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semaforo">
+            <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semáforo">
               <button
                 type="button"
                 aria-label="Mostrar todos"
@@ -861,8 +720,8 @@ const ActiveFlightsDrawer = ({
               }
               className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
             >
-              <option value="ocupacion-desc">Ocupacion: mayor a menor</option>
-              <option value="ocupacion-asc">Ocupacion: menor a mayor</option>
+              <option value="ocupacion-desc">Ocupación: mayor a menor</option>
+              <option value="ocupacion-asc">Ocupación: menor a mayor</option>
               <option value="salida">Hora de salida</option>
               <option value="llegada">Hora de llegada</option>
               <option value="origen">Origen</option>
@@ -871,13 +730,21 @@ const ActiveFlightsDrawer = ({
           </div>
         </div>
 
-        {displayedPanelFlights.length === 0 ? (
+        {occurrencesLoading ? (
+          <div className="rounded-card border border-border bg-field px-4 py-6 text-center">
+            <p className="text-button text-text-primary">Cargando vuelos...</p>
+          </div>
+        ) : occurrencesError ? (
+          <div className="rounded-card border border-border bg-field px-4 py-6 text-center">
+            <p className="text-button text-danger">{occurrencesError}</p>
+          </div>
+        ) : displayedPanelFlights.length === 0 ? (
           <div className="rounded-card border border-border bg-field px-4 py-6 text-center">
             <p className="text-button text-text-primary">
               No hay vuelos registrados en este momento.
             </p>
             <p className="mt-1 text-secondary text-text-primary">
-              Cuando existan vuelos en rutas, se listaran aqui.
+              Cuando existan vuelos en rutas, se listarán aquí.
             </p>
           </div>
         ) : filteredFlights.length === 0 ? (
@@ -886,7 +753,7 @@ const ActiveFlightsDrawer = ({
               No hay vuelos que coincidan con los filtros.
             </p>
             <p className="mt-1 text-secondary text-text-primary">
-              Prueba con otro estado, continente o semaforo.
+              Prueba con otro estado, continente o semáforo.
             </p>
           </div>
         ) : (
@@ -895,19 +762,12 @@ const ActiveFlightsDrawer = ({
               <p className="text-secondary text-danger">{cancelError}</p>
             )}
             {sortedFlights.map((flight) => {
-              const from = airportsByIcao.get(flight.fromIcao);
-              const to = airportsByIcao.get(flight.toIcao);
               const progressPct = Math.round(flight.progress * 100);
 
               return (
                 <FlightListCard
                   key={flight.id}
-                  code={flight.code}
-                  routeText={`${flight.fromIcao} > ${flight.toIcao}`}
-                  metaText={
-                    [from?.region, to?.region].filter(Boolean).join(" / ") ||
-                    "Continente sin dato"
-                  }
+                  code={formatFlightDisplayCode(flight)}
                   statusLabel={STATUS_LABEL[flight.estado]}
                   statusVariant={STATUS_TAG_VARIANT[flight.estado]}
                   departureText={formatMinuteDateTime(
@@ -921,7 +781,11 @@ const ActiveFlightsDrawer = ({
                   progressPct={progressPct}
                   occupancyPct={flight.occupancyPct}
                   rangosSemaforo={rangosSemaforo}
-                  canCancel={flight.estado === "programado" && Boolean(flight.departureIso)}
+                  canCancel={
+                    (flight.estado === "programado" ||
+                      flight.estado === "en_vuelo") &&
+                    Boolean(flight.departureIso)
+                  }
                   isCancelling={cancellingFlightKey === flight.detailCode}
                   notice={
                     cancelNotice?.actionKey === flight.detailCode
@@ -929,10 +793,15 @@ const ActiveFlightsDrawer = ({
                       : null
                   }
                   onOpen={() =>
-                    openFlight(flight.detailCode, {
+                    openFlight(`occ-${flight.detailCode}`, {
                       idSimulacion,
-                      showOnlyOnMap: flight.estado === "en_vuelo",
+                      focusOnMap: false,
                     })
+                  }
+                  onFocusOnMap={
+                    flight.estado === "en_vuelo"
+                      ? () => focusFlightOnMap(flight.id)
+                      : undefined
                   }
                   onCancel={() => {
                     void handleCancelFlight(flight);

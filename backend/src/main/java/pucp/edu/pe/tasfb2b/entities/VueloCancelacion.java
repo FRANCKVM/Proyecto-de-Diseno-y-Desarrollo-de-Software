@@ -1,35 +1,17 @@
 package pucp.edu.pe.tasfb2b.entities;
 
-import jakarta.persistence.*;
-
 import java.time.LocalDateTime;
 
-@Entity
-@Table(
-        name = "vuelo_cancelacion",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uk_vuelo_cancelacion_ocurrencia",
-                columnNames = {"id_vuelo", "fecha_hora_salida"}
-        )
-)
 public class VueloCancelacion {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id_cancelacion")
     private Integer idCancelacion;
 
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "id_vuelo", nullable = false)
     private Vuelo vuelo;
 
-    @Column(name = "fecha_hora_salida", nullable = false)
     private LocalDateTime fechaHoraSalida;
 
-    @Column(name = "fecha_hora_cancelacion", nullable = false)
     private LocalDateTime fechaHoraCancelacion;
 
-    @Column(name = "fecha_hora_creacion", nullable = false)
     private LocalDateTime fechaHoraCreacion;
 
     public VueloCancelacion() {

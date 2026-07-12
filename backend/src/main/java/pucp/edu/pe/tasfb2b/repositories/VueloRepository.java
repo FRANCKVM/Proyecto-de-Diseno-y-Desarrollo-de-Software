@@ -17,8 +17,6 @@ public interface VueloRepository extends JpaRepository<Vuelo, Integer> {
 
     List<Vuelo> findByHasta_Codigo(String codigo);
 
-    List<Vuelo> findByCancelado(Boolean cancelado);
-
     List<Vuelo> findByDesde_CodigoAndHasta_Codigo(String codigoDesde, String codigoHasta);
 
     @EntityGraph(attributePaths = {"desde", "hasta"})

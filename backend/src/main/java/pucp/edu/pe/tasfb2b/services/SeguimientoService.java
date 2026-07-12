@@ -9,22 +9,21 @@ import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.entities.AsignacionEnvio;
 import pucp.edu.pe.tasfb2b.entities.EstadoEnvio;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
-import pucp.edu.pe.tasfb2b.entities.Simulacion;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.entities.VueloOcurrencia;
+import pucp.edu.pe.tasfb2b.entities.EstadoVueloOcurrencia;
 import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
-import pucp.edu.pe.tasfb2b.repositories.SimulacionRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
-import pucp.edu.pe.tasfb2b.repositories.VueloCancelacionRepository;
-import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
+import pucp.edu.pe.tasfb2b.repositories.VueloOcurrenciaRepository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -39,282 +38,230 @@ import java.util.regex.Pattern;
 public class SeguimientoService {
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
-    private static final Pattern VUELO_TB_PATTERN = Pattern.compile("^TB-(\\d+)$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern VUELO_SIM_PATTERN = Pattern.compile("vuelo-(\\d+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern VUELO_FLIGHT_PATTERN = Pattern.compile("flight-(\\d+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern VUELO_OCURRENCIA_PATTERN = Pattern.compile(
-            "shipment-(\\d+)-flight-(\\d+)-(\\d+)-(\\d+)$",
+    private static final Pattern ENVIO_PATTERN = Pattern.compile(
+            "^(?:ENV-)?(-?\\d+)$",
             Pattern.CASE_INSENSITIVE
     );
-    private static final Pattern ENVIO_PATTERN = Pattern.compile("(\\d+)$");
     private static final int TAMANO_BLOQUE_PAQUETES = 20;
-    private static final int MINUTOS_DIA = 24 * 60;
 
-    private final VueloRepository vueloRepository;
     private final AsignacionEnvioRepository asignacionEnvioRepository;
-    private final SimulacionRepository simulacionRepository;
     private final SolicitudEnvioRepository solicitudEnvioRepository;
-    private final VueloCancelacionRepository vueloCancelacionRepository;
     private final OperacionesService operacionesService;
     private final SimulacionService simulacionService;
     private final EstadoLogisticoService estadoLogisticoService;
+    private final VueloOcurrenciaRepository vueloOcurrenciaRepository;
+    private final VueloOcurrenciaService vueloOcurrenciaService;
 
     public SeguimientoService(
-            VueloRepository vueloRepository,
             AsignacionEnvioRepository asignacionEnvioRepository,
-            SimulacionRepository simulacionRepository,
             SolicitudEnvioRepository solicitudEnvioRepository,
-            VueloCancelacionRepository vueloCancelacionRepository,
             OperacionesService operacionesService,
             SimulacionService simulacionService,
-            EstadoLogisticoService estadoLogisticoService
+            EstadoLogisticoService estadoLogisticoService,
+            VueloOcurrenciaRepository vueloOcurrenciaRepository,
+            VueloOcurrenciaService vueloOcurrenciaService
     ) {
-        this.vueloRepository = vueloRepository;
         this.asignacionEnvioRepository = asignacionEnvioRepository;
-        this.simulacionRepository = simulacionRepository;
         this.solicitudEnvioRepository = solicitudEnvioRepository;
-        this.vueloCancelacionRepository = vueloCancelacionRepository;
         this.operacionesService = operacionesService;
         this.simulacionService = simulacionService;
         this.estadoLogisticoService = estadoLogisticoService;
+        this.vueloOcurrenciaRepository = vueloOcurrenciaRepository;
+        this.vueloOcurrenciaService = vueloOcurrenciaService;
     }
 
-    public VueloDetalleResponse obtenerVueloDetalle(String codigo) {
-        return obtenerVueloDetalle(codigo, null);
-    }
-
-    public VueloDetalleResponse obtenerVueloDetalle(String codigo, Integer idSimulacion) {
-        Integer idVuelo = parsearIdVuelo(codigo);
-        Vuelo vuelo = idSimulacion != null
-                ? obtenerVueloDesdeContextoSimulado(idSimulacion, idVuelo)
-                : vueloRepository.findById(idVuelo)
-                .orElseThrow(() -> new IllegalArgumentException("No existe un vuelo con codigo " + codigo + "."));
-
-        List<SolicitudEnvio> enviosAsociados = cargarEnviosAsociados(List.of(vuelo), idSimulacion);
-        Integer salidaOcurrencia = parsearSalidaOcurrenciaVuelo(codigo);
-
-        return construirVueloDetalle(vuelo, idSimulacion, enviosAsociados, salidaOcurrencia);
+    public VueloDetalleResponse obtenerOcurrenciaDetalle(Long idOcurrencia, Integer idSimulacion) {
+        VueloOcurrencia ocurrencia = idSimulacion != null
+                ? simulacionService.obtenerOcurrenciaSimulada(idSimulacion, idOcurrencia)
+                : vueloOcurrenciaRepository.findById(idOcurrencia)
+                .orElseThrow(() -> new IllegalArgumentException("No existe la ocurrencia " + idOcurrencia + "."));
+        if (idSimulacion == null) {
+            vueloOcurrenciaService.actualizarEstadoTemporal(ocurrencia, LocalDateTime.now(ZoneOffset.UTC));
+        }
+        List<SolicitudEnvio> enviosAsociados = agruparEnviosPorOcurrencia(
+                List.of(ocurrencia), idSimulacion
+        ).getOrDefault(ocurrencia.getIdOcurrencia(), List.of());
+        return construirDetalleOcurrencia(ocurrencia, enviosAsociados);
     }
 
     @Transactional
-    public VueloDetalleResponse cancelarVuelo(String codigo, CancelarVueloRequest request) {
-        if (request == null || request.fechaSalida() == null || request.fechaSalida().isBlank()) {
-            throw new IllegalArgumentException("La fecha de salida del vuelo es obligatoria.");
+    public VueloDetalleResponse cancelarOcurrencia(Long idOcurrencia, CancelarVueloRequest request) {
+        if (idOcurrencia == null || request == null) {
+            throw new IllegalArgumentException("La ocurrencia y el contexto son obligatorios.");
         }
-
-        Integer idVuelo = parsearIdVuelo(codigo);
-        LocalDateTime fechaSalida = parsearFechaHora(request.fechaSalida());
-
         if (request.idSimulacion() != null) {
-            LocalDateTime fechaInicioSimulacion = obtenerFechaInicioSimulacion(request.idSimulacion());
-            if (fechaInicioSimulacion == null) {
-                throw new IllegalArgumentException("No existe fecha de inicio para la simulacion solicitada.");
-            }
-
-            int salidaMinuto = (int) java.time.Duration.between(
-                    fechaInicioSimulacion,
-                    fechaSalida
-            ).toMinutes();
-            simulacionService.cancelarVueloSimulado(request.idSimulacion(), idVuelo, salidaMinuto);
-            return obtenerVueloDetalle(codigo, request.idSimulacion());
+            VueloOcurrencia cancelada = simulacionService.cancelarVueloSimulado(
+                    request.idSimulacion(),
+                    idOcurrencia
+            );
+            return obtenerOcurrenciaDetalle(cancelada.getIdOcurrencia(), request.idSimulacion());
         }
-
-        operacionesService.cancelarVueloOperacion(idVuelo, fechaSalida);
-        return obtenerVueloDetalle(codigo, null);
-    }
-
-    private VueloDetalleResponse construirVueloDetalle(
-            Vuelo vuelo,
-            Integer idSimulacion,
-            List<SolicitudEnvio> enviosAsociados,
-            Integer salidaOcurrencia
-    ) {
-        Integer minutoReferencia = obtenerMinutoReferenciaVuelo(enviosAsociados);
-        boolean contextoFinalizado = contextoFinalizadoVuelo(enviosAsociados);
-        LocalDateTime fechaInicioSimulacion = obtenerFechaInicioSimulacion(idSimulacion);
-        Integer minutoReferenciaFechas = obtenerMinutoReferenciaFechasVuelo(
-                idSimulacion,
-                fechaInicioSimulacion,
-                enviosAsociados
-        );
-        List<VueloDetalleResponse.EnvioEnVueloResponse> envios = filtrarEnviosPorOcurrenciaVuelo(
-                vuelo,
-                enviosAsociados,
-                idSimulacion,
-                fechaInicioSimulacion,
-                minutoReferenciaFechas,
-                salidaOcurrencia
-        ).stream()
-                .map(this::mapearEnvioEnVuelo)
-                .toList();
-        List<AsignacionEnvio> asignaciones = filtrarAsignacionesPorContexto(
-                asignacionEnvioRepository.findByVueloId(vuelo.getIdVuelo()),
-                idSimulacion
-        );
-
-        if (!asignaciones.isEmpty()) {
-            envios = asignaciones.stream()
-                    .filter(asignacion -> asignacionUsaVuelo(
-                            asignacion,
-                            vuelo.getIdVuelo(),
-                            salidaOcurrencia,
-                            idSimulacion,
-                            fechaInicioSimulacion,
-                            minutoReferenciaFechas
-                    ))
-                    .map(this::mapearAsignacionEnVuelo)
-                    .toList();
-        }
-
-        String estadoVuelo = determinarEstadoVueloDetalle(
-                vuelo,
-                idSimulacion,
-                fechaInicioSimulacion,
-                minutoReferenciaFechas,
-                salidaOcurrencia,
-                minutoReferencia,
-                contextoFinalizado
-        );
-
-        return new VueloDetalleResponse(
-                formatearCodigoVuelo(vuelo.getIdVuelo()),
-                estadoVuelo,
-                determinarTipoVuelo(vuelo.getDesde(), vuelo.getHasta()),
-                vuelo.getCapacidad(),
-                vuelo.getCapacidadUsada(),
-                vuelo.getDesde().getCodigo(),
-                vuelo.getHasta().getCodigo(),
-                formatearFechaSalidaVuelo(vuelo, fechaInicioSimulacion, minutoReferenciaFechas, salidaOcurrencia),
-                formatearFechaLlegadaVuelo(vuelo, fechaInicioSimulacion, minutoReferenciaFechas, salidaOcurrencia),
-                envios
-        );
+        VueloOcurrencia seleccionada = vueloOcurrenciaRepository.findById(idOcurrencia)
+                .orElseThrow(() -> new IllegalArgumentException("No existe la ocurrencia solicitada."));
+        var cancelacion = operacionesService.cancelarVueloOperacion(
+                seleccionada.getVuelo().getIdVuelo(), seleccionada.getFechaHoraSalida());
+        VueloOcurrencia ocurrencia = vueloOcurrenciaRepository
+                .findByVuelo_IdVueloAndFechaHoraSalida(
+                        seleccionada.getVuelo().getIdVuelo(), cancelacion.getFechaHoraSalida())
+                .orElseThrow(() -> new IllegalArgumentException("No existe la ocurrencia cancelada."));
+        return obtenerOcurrenciaDetalle(ocurrencia.getIdOcurrencia(), null);
     }
 
     public List<VueloDetalleResponse> listarVuelosPorAeropuerto(String codigoAeropuerto) {
-        return listarVuelosPorAeropuerto(codigoAeropuerto, null);
+        return listarVuelosPorAeropuerto(codigoAeropuerto, null, null);
+    }
+
+    public List<VueloDetalleResponse> listarOcurrencias(Integer idSimulacion) {
+        return listarOcurrencias(idSimulacion, null);
+    }
+
+    public List<VueloDetalleResponse> listarOcurrencias(
+            Integer idSimulacion,
+            LocalDate fecha
+    ) {
+        LocalDate fechaConsulta = resolverFechaConsulta(idSimulacion, fecha);
+        List<VueloOcurrencia> ocurrencias;
+        if (idSimulacion != null) {
+            ocurrencias = simulacionService.listarOcurrenciasSimuladas(idSimulacion, fechaConsulta);
+        } else {
+            ocurrencias = vueloOcurrenciaService.listarOperativas(
+                    fechaConsulta.atStartOfDay(),
+                    fechaConsulta.plusDays(1).atStartOfDay()
+            );
+        }
+        return ocurrencias.stream().map(this::mapearResumenOcurrencia).toList();
+    }
+
+    private VueloDetalleResponse mapearResumenOcurrencia(VueloOcurrencia ocurrencia) {
+        Vuelo vuelo = ocurrencia.getVuelo();
+        String estado = switch (ocurrencia.getEstado()) {
+            case PROGRAMADO -> "programado";
+            case EN_VUELO -> "en_vuelo";
+            case COMPLETADO -> "completado";
+            case CANCELADO -> "cancelado";
+        };
+        return new VueloDetalleResponse(
+                ocurrencia.getIdOcurrencia(),
+                vuelo.getIdVuelo(),
+                String.valueOf(vuelo.getIdVuelo()),
+                estado,
+                determinarTipoVuelo(vuelo.getDesde(), vuelo.getHasta()),
+                ocurrencia.getCapacidad(),
+                ocurrencia.getCapacidadUsada(),
+                vuelo.getDesde().getCodigo(),
+                vuelo.getHasta().getCodigo(),
+                ocurrencia.getFechaHoraSalida().format(ISO_FORMATTER),
+                ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
+                List.of()
+        );
     }
 
     public List<VueloDetalleResponse> listarVuelosPorAeropuerto(
             String codigoAeropuerto,
             Integer idSimulacion
     ) {
-        if (idSimulacion != null) {
-            List<Vuelo> vuelosSimulados = simulacionService.listarVuelosSimuladosPorAeropuerto(idSimulacion, codigoAeropuerto);
-            Map<Integer, List<SolicitudEnvio>> enviosPorVuelo = agruparEnviosPorVuelo(vuelosSimulados, idSimulacion);
+        return listarVuelosPorAeropuerto(codigoAeropuerto, idSimulacion, null);
+    }
 
-            return vuelosSimulados.stream()
-                    .map(vuelo -> construirVueloDetalle(
-                            vuelo,
-                            idSimulacion,
-                            enviosPorVuelo.getOrDefault(vuelo.getIdVuelo(), List.of()),
-                            null
-                    ))
+    public List<VueloDetalleResponse> listarVuelosPorAeropuerto(
+            String codigoAeropuerto,
+            Integer idSimulacion,
+            LocalDate fecha
+    ) {
+        LocalDate fechaConsulta = resolverFechaConsulta(idSimulacion, fecha);
+        if (idSimulacion != null) {
+            List<VueloOcurrencia> ocurrencias = simulacionService
+                    .listarOcurrenciasSimuladasPorAeropuerto(
+                            idSimulacion, codigoAeropuerto, fechaConsulta
+                    );
+            Map<Long, List<SolicitudEnvio>> enviosPorOcurrencia =
+                    agruparEnviosPorOcurrencia(ocurrencias, idSimulacion);
+
+            return ocurrencias.stream()
+                    .map(ocurrencia -> construirDetalleOcurrencia(
+                            ocurrencia,
+                            enviosPorOcurrencia.getOrDefault(ocurrencia.getIdOcurrencia(), List.of())))
                     .toList();
         }
 
-        List<Vuelo> vuelos = vueloRepository.findConectadosByAeropuertoCodigo(codigoAeropuerto);
-        Map<Integer, List<SolicitudEnvio>> enviosPorVuelo = agruparEnviosPorVuelo(vuelos, null);
+        List<VueloOcurrencia> ocurrencias = vueloOcurrenciaRepository.findConectadasPorAeropuerto(
+                codigoAeropuerto,
+                fechaConsulta.atStartOfDay(),
+                fechaConsulta.plusDays(1).atStartOfDay()
+        );
+        ocurrencias.forEach(o -> vueloOcurrenciaService.actualizarEstadoTemporal(o, LocalDateTime.now(ZoneOffset.UTC)));
+        Map<Long, List<SolicitudEnvio>> enviosPorOcurrencia = agruparEnviosPorOcurrencia(ocurrencias, null);
 
-        return vuelos.stream()
-                .map(vuelo -> construirVueloDetalle(
-                        vuelo,
-                        null,
-                        enviosPorVuelo.getOrDefault(vuelo.getIdVuelo(), List.of()),
-                        null
-                ))
+        return ocurrencias.stream()
+                .map(ocurrencia -> construirDetalleOcurrencia(
+                        ocurrencia,
+                        enviosPorOcurrencia.getOrDefault(ocurrencia.getIdOcurrencia(), List.of())))
                 .toList();
     }
 
-    private List<SolicitudEnvio> cargarEnviosAsociados(List<Vuelo> vuelos, Integer idSimulacion) {
-        List<Integer> idsVuelo = vuelos.stream()
-                .map(Vuelo::getIdVuelo)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-
-        if (idsVuelo.isEmpty()) {
-            return List.of();
+    private LocalDate resolverFechaConsulta(Integer idSimulacion, LocalDate fecha) {
+        if (fecha != null) {
+            return fecha;
         }
-
-        List<SolicitudEnvio> envios = new ArrayList<>();
-        Set<Integer> idsEnvio = new HashSet<>();
-
-        for (SolicitudEnvio envio : filtrarEnviosPorContexto(
-                solicitudEnvioRepository.findByVueloIds(idsVuelo),
-                idSimulacion
-        )) {
-            if (idsEnvio.add(envio.getIdEnvio())) {
-                envios.add(envio);
-            }
-        }
-
-        for (AsignacionEnvio asignacion : filtrarAsignacionesPorContexto(
-                asignacionEnvioRepository.findByVueloIds(idsVuelo),
-                idSimulacion
-        )) {
-            SolicitudEnvio envio = asignacion.getEnvio();
-            if (envio != null && idsEnvio.add(envio.getIdEnvio())) {
-                envios.add(envio);
-            }
-        }
-
-        return envios;
+        return idSimulacion != null
+                ? simulacionService.obtenerFechaActual(idSimulacion)
+                : LocalDate.now(ZoneOffset.UTC);
     }
 
-    private Map<Integer, List<SolicitudEnvio>> agruparEnviosPorVuelo(List<Vuelo> vuelos, Integer idSimulacion) {
-        Map<Integer, List<SolicitudEnvio>> enviosPorVuelo = new LinkedHashMap<>();
-        List<Integer> idsVuelo = vuelos.stream()
-                .map(Vuelo::getIdVuelo)
+    private Map<Long, List<SolicitudEnvio>> agruparEnviosPorOcurrencia(
+            List<VueloOcurrencia> ocurrencias,
+            Integer idSimulacion
+    ) {
+        Set<Long> idsObjetivo = ocurrencias.stream()
+                .map(VueloOcurrencia::getIdOcurrencia)
                 .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        Set<String> clavesAgregadas = new HashSet<>();
+                .collect(java.util.stream.Collectors.toSet());
+        Map<Long, Map<Integer, SolicitudEnvio>> agrupados = new LinkedHashMap<>();
+        idsObjetivo.forEach(id -> agrupados.put(id, new LinkedHashMap<>()));
 
-        if (!idsVuelo.isEmpty()) {
-            for (AsignacionEnvio asignacion : filtrarAsignacionesPorContexto(
-                    asignacionEnvioRepository.findByVueloIds(idsVuelo),
-                    idSimulacion
-            )) {
-                if (asignacion.getRuta() == null || asignacion.getRuta().getVuelos() == null
-                        || asignacion.getEnvio() == null) {
-                    continue;
+        if (idsObjetivo.isEmpty()) {
+            return Map.of();
+        }
+
+        if (idSimulacion != null) {
+            for (SolicitudEnvio envio : simulacionService.obtenerEnviosSimulacion(idSimulacion)) {
+                registrarRutaEnOcurrencias(agrupados, idsObjetivo, envio, envio.getRuta());
+                for (SolicitudEnvio.AsignacionEnvioVista asignacion : envio.getAsignaciones()) {
+                    registrarRutaEnOcurrencias(agrupados, idsObjetivo, envio, asignacion.getRuta());
                 }
-
-                for (Vuelo vuelo : asignacion.getRuta().getVuelos()) {
-                    if (vuelo.getIdVuelo() == null || !idsVuelo.contains(vuelo.getIdVuelo())) {
-                        continue;
-                    }
-
-                    String clave = vuelo.getIdVuelo() + "-" + asignacion.getEnvio().getIdEnvio();
-                    if (clavesAgregadas.add(clave)) {
-                        enviosPorVuelo
-                                .computeIfAbsent(vuelo.getIdVuelo(), ignored -> new ArrayList<>())
-                                .add(asignacion.getEnvio());
-                    }
-                }
+            }
+        } else {
+            List<Long> ids = idsObjetivo.stream().toList();
+            for (SolicitudEnvio envio : solicitudEnvioRepository.findByOcurrenciaIds(ids)) {
+                registrarRutaEnOcurrencias(agrupados, idsObjetivo, envio, envio.getRuta());
+            }
+            for (AsignacionEnvio asignacion : asignacionEnvioRepository.findByOcurrenciaIds(ids)) {
+                registrarRutaEnOcurrencias(
+                        agrupados, idsObjetivo, asignacion.getEnvio(), asignacion.getRuta()
+                );
             }
         }
 
-        for (SolicitudEnvio envio : cargarEnviosAsociados(vuelos, idSimulacion)) {
-            if (envio.getRuta() == null || envio.getRuta().getVuelos() == null) {
-                continue;
-            }
+        Map<Long, List<SolicitudEnvio>> resultado = new LinkedHashMap<>();
+        agrupados.forEach((id, envios) -> resultado.put(id, List.copyOf(envios.values())));
+        return resultado;
+    }
 
-            for (Vuelo vuelo : envio.getRuta().getVuelos()) {
-                if (vuelo.getIdVuelo() == null) {
-                    continue;
-                }
-
-                String clave = vuelo.getIdVuelo() + "-" + envio.getIdEnvio();
-                if (clavesAgregadas.add(clave)) {
-                    enviosPorVuelo
-                            .computeIfAbsent(vuelo.getIdVuelo(), ignored -> new ArrayList<>())
-                            .add(envio);
-                }
+    private void registrarRutaEnOcurrencias(
+            Map<Long, Map<Integer, SolicitudEnvio>> agrupados,
+            Set<Long> idsObjetivo,
+            SolicitudEnvio envio,
+            Ruta ruta
+    ) {
+        if (envio == null || envio.getIdEnvio() == null || ruta == null || ruta.getOcurrencias() == null) {
+            return;
+        }
+        for (VueloOcurrencia ocurrencia : ruta.getOcurrencias()) {
+            Long id = ocurrencia.getIdOcurrencia();
+            if (idsObjetivo.contains(id)) {
+                agrupados.get(id).putIfAbsent(envio.getIdEnvio(), envio);
             }
         }
-
-        return enviosPorVuelo;
     }
 
     public EnvioDetalleResponse obtenerEnvioDetalle(String codigo) {
@@ -324,20 +271,22 @@ public class SeguimientoService {
     public EnvioDetalleResponse obtenerEnvioDetalle(String codigo, Integer idSimulacion) {
         Integer idEnvio = parsearIdEnvio(codigo);
 
-        SolicitudEnvio envio = solicitudEnvioRepository.findById(idEnvio)
+        SolicitudEnvio envio = idSimulacion != null
+                ? simulacionService.obtenerEnviosSimulacion(idSimulacion).stream()
+                .filter(candidato -> Objects.equals(candidato.getIdEnvio(), idEnvio))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "No existe el envio " + codigo + " en la simulacion " + idSimulacion + "."))
+                : solicitudEnvioRepository.findById(idEnvio)
                 .orElseThrow(() -> new IllegalArgumentException("No existe un envio con codigo " + codigo + "."));
 
-        if (idSimulacion != null
-                && (envio.getSimulacion() == null
-                || !Objects.equals(envio.getSimulacion().getIdSimulacion(), idSimulacion))) {
-            throw new IllegalArgumentException(
-                    "El envio " + codigo + " no pertenece a la simulacion " + idSimulacion + "."
-            );
-        }
-
         Ruta ruta = envio.getRuta();
-        List<AsignacionEnvio> asignaciones = asignacionEnvioRepository
-                .findByEnvio_IdEnvioOrderByIdAsignacionAsc(envio.getIdEnvio());
+        List<AsignacionEnvio> asignaciones = idSimulacion != null
+                ? envio.getAsignaciones().stream()
+                .map(vista -> new AsignacionEnvio(
+                        envio, vista.getRuta(), vista.getCantidadBolsas(), vista.getEstado()))
+                .toList()
+                : asignacionEnvioRepository.findByEnvio_IdEnvioOrderByIdAsignacionAsc(envio.getIdEnvio());
         Integer minutoReferencia = obtenerMinutoReferenciaEnvio(envio);
         boolean contextoFinalizado = contextoFinalizadoEnvio(envio);
         String estadoDetalle = determinarEstadoEnvioDetalle(
@@ -396,57 +345,6 @@ public class SeguimientoService {
         );
     }
 
-    private VueloDetalleResponse.EnvioEnVueloResponse mapearAsignacionEnVuelo(AsignacionEnvio asignacion) {
-        SolicitudEnvio envio = asignacion.getEnvio();
-        return new VueloDetalleResponse.EnvioEnVueloResponse(
-                formatearCodigoEnvio(envio.getIdEnvio()),
-                envio.getOrigen().getCodigo(),
-                envio.getDestino().getCodigo(),
-                asignacion.getCantidadBolsas(),
-                envio.getContarBolsas()
-        );
-    }
-
-    private boolean asignacionUsaVuelo(
-            AsignacionEnvio asignacion,
-            Integer idVuelo,
-            Integer salidaOcurrencia,
-            Integer idSimulacion,
-            LocalDateTime fechaInicioSimulacion,
-            Integer minutoReferencia
-    ) {
-        if (asignacion.getRuta() == null || asignacion.getRuta().getVuelos() == null) {
-            return false;
-        }
-
-        int minutoRuta = idSimulacion != null
-                && fechaInicioSimulacion != null
-                && asignacion.getEnvio() != null
-                ? calcularMinutoDesdeInicioSimulacion(asignacion.getEnvio(), fechaInicioSimulacion)
-                : 0;
-
-        for (Vuelo vuelo : asignacion.getRuta().getVuelos()) {
-            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vuelo, minutoRuta);
-
-            if (Objects.equals(vuelo.getIdVuelo(), idVuelo)) {
-                if (salidaOcurrencia != null) {
-                    return ventana.salidaMinuto() == salidaOcurrencia;
-                }
-
-                if (idSimulacion != null && minutoReferencia != null && minutoReferencia != Integer.MAX_VALUE) {
-                    return minutoReferencia >= ventana.salidaMinuto()
-                            && minutoReferencia < ventana.llegadaMinuto();
-                }
-
-                return true;
-            }
-
-            minutoRuta = ventana.llegadaMinuto();
-        }
-
-        return false;
-    }
-
     private List<EnvioDetalleResponse.HitoRutaResponse> construirHitosRuta(
             SolicitudEnvio envio,
             Integer minutoReferencia,
@@ -455,60 +353,57 @@ public class SeguimientoService {
         List<EnvioDetalleResponse.HitoRutaResponse> hitos = new ArrayList<>();
         Ruta ruta = envio.getRuta();
 
-        if (ruta == null || ruta.getVuelos() == null || ruta.getVuelos().isEmpty()) {
+        if (ruta == null || ruta.getOcurrencias().isEmpty()) {
             return hitos;
         }
 
-        Vuelo primerVuelo = ruta.getVuelos().getFirst();
+        VueloOcurrencia primeraOcurrencia = ruta.getOcurrencias().getFirst();
+        Vuelo primerVuelo = primeraOcurrencia.getVuelo();
         int minuto = minutoReferencia != null ? minutoReferencia : Integer.MIN_VALUE;
         LocalDateTime fechaBase = envio.getFecha() != null
                 ? envio.getFecha().atStartOfDay()
                 : LocalDate.now(ZoneOffset.UTC).atStartOfDay();
-        int minutoRuta = envio.getHora() != null
-                ? envio.getHora().getHour() * 60 + envio.getHora().getMinute()
-                : 0;
-        VentanaVueloSimulada primeraVentana = calcularVentanaRutaVuelo(primerVuelo, minutoRuta);
+        int primeraSalida = (int) ChronoUnit.MINUTES.between(fechaBase, primeraOcurrencia.getFechaHoraSalida());
         hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                 "salida",
                 envio.getOrigen().getCodigo(),
                 formatearFechaRegistro(envio),
                 formatearCodigoVuelo(primerVuelo.getIdVuelo()),
-                contextoFinalizado || minuto >= primeraVentana.salidaMinuto() ? "completado" : "pendiente"
+                contextoFinalizado || minuto >= primeraSalida ? "completado" : "pendiente"
         ));
 
-        for (int i = 0; i < ruta.getVuelos().size(); i++) {
-            Vuelo vuelo = ruta.getVuelos().get(i);
-            boolean esUltimo = i == ruta.getVuelos().size() - 1;
-            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vuelo, minutoRuta);
-            String estadoVuelo = contextoFinalizado || minuto >= ventana.llegadaMinuto()
+        for (int i = 0; i < ruta.getOcurrencias().size(); i++) {
+            VueloOcurrencia ocurrencia = ruta.getOcurrencias().get(i);
+            Vuelo vuelo = ocurrencia.getVuelo();
+            boolean esUltimo = i == ruta.getOcurrencias().size() - 1;
+            int salida = (int) ChronoUnit.MINUTES.between(fechaBase, ocurrencia.getFechaHoraSalida());
+            int llegada = (int) ChronoUnit.MINUTES.between(fechaBase, ocurrencia.getFechaHoraLlegada());
+            String estadoVuelo = contextoFinalizado || minuto >= llegada
                     ? "completado"
-                    : minuto >= ventana.salidaMinuto()
+                    : minuto >= salida
                     ? "activo"
                     : "pendiente";
 
             hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                     "vuelo",
                     formatearCodigoVuelo(vuelo.getIdVuelo()),
-                    fechaBase.plusMinutes(ventana.salidaMinuto()).format(ISO_FORMATTER),
+                    ocurrencia.getFechaHoraSalida().format(ISO_FORMATTER),
                     formatearCodigoVuelo(vuelo.getIdVuelo()),
                     estadoVuelo
             ));
 
             if (!esUltimo) {
-                Vuelo siguienteVuelo = ruta.getVuelos().get(i + 1);
-                VentanaVueloSimulada siguienteVentana = calcularVentanaRutaVuelo(
-                        siguienteVuelo,
-                        ventana.llegadaMinuto()
-                );
-                String estadoEscala = contextoFinalizado || minuto >= siguienteVentana.salidaMinuto()
+                VueloOcurrencia siguienteOcurrencia = ruta.getOcurrencias().get(i + 1);
+                int siguienteSalida = (int) ChronoUnit.MINUTES.between(fechaBase, siguienteOcurrencia.getFechaHoraSalida());
+                String estadoEscala = contextoFinalizado || minuto >= siguienteSalida
                         ? "completado"
-                        : minuto >= ventana.llegadaMinuto()
+                        : minuto >= llegada
                         ? "activo"
                         : "pendiente";
                 hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                         "escala",
                         vuelo.getHasta().getCodigo(),
-                        fechaBase.plusMinutes(ventana.llegadaMinuto()).format(ISO_FORMATTER),
+                        ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
                         formatearCodigoVuelo(vuelo.getIdVuelo()),
                         estadoEscala
                 ));
@@ -523,13 +418,12 @@ public class SeguimientoService {
                 hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                         "entrega",
                         vuelo.getHasta().getCodigo(),
-                        fechaBase.plusMinutes(ventana.llegadaMinuto()).format(ISO_FORMATTER),
+                        ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
                         formatearCodigoVuelo(vuelo.getIdVuelo()),
                         estadoEntrega
                 ));
             }
 
-            minutoRuta = ventana.llegadaMinuto();
         }
 
         return hitos;
@@ -607,7 +501,7 @@ public class SeguimientoService {
             return "Entregado";
         }
 
-        if (ruta == null || ruta.getVuelos() == null || ruta.getVuelos().isEmpty()) {
+        if (ruta == null || ruta.getOcurrencias().isEmpty()) {
             return "Planificado";
         }
 
@@ -632,7 +526,7 @@ public class SeguimientoService {
                 envio.getHora(),
                 envio.getIdCliente(),
                 ruta,
-                envio.getSimulacion(),
+                envio.getIdSimulacion(),
                 envio.getOrigen(),
                 envio.getDestino(),
                 envio.getContarBolsas(),
@@ -669,162 +563,6 @@ public class SeguimientoService {
         return LocalDateTime.of(fecha, hora).format(ISO_FORMATTER);
     }
 
-    private LocalDateTime parsearFechaHora(String valor) {
-        String normalizado = valor.trim();
-
-        if (normalizado.endsWith("Z") || normalizado.matches(".*[+-]\\d{2}:\\d{2}$")) {
-            return java.time.OffsetDateTime.parse(normalizado).toLocalDateTime();
-        }
-
-        return LocalDateTime.parse(normalizado);
-    }
-
-    private String formatearFechaVuelo(Integer minutoUtc) {
-        int minutos = minutoUtc != null ? minutoUtc : 0;
-        LocalDateTime base = LocalDate.now(ZoneOffset.UTC).atStartOfDay().plusMinutes(minutos);
-        return base.format(ISO_FORMATTER);
-    }
-
-    private String formatearFechaSalidaVuelo(
-            Vuelo vuelo,
-            LocalDateTime fechaInicioSimulacion,
-            Integer minutoReferencia,
-            Integer salidaOcurrencia
-    ) {
-        if (fechaInicioSimulacion == null && salidaOcurrencia != null) {
-            VentanaVueloSimulada ventana = calcularVentanaVueloPorSalida(vuelo, salidaOcurrencia);
-            return LocalDate.now(ZoneOffset.UTC)
-                    .atStartOfDay()
-                    .plusMinutes(ventana.salidaMinuto())
-                    .format(ISO_FORMATTER);
-        }
-
-        if (fechaInicioSimulacion == null) {
-            return formatearFechaVuelo(vuelo.getSalidaUtcMin());
-        }
-
-        VentanaVueloSimulada ventana = salidaOcurrencia != null
-                ? calcularVentanaVueloPorSalida(vuelo, salidaOcurrencia)
-                : calcularVentanaVueloSimulada(vuelo, minutoReferencia);
-        return fechaInicioSimulacion.plusMinutes(ventana.salidaMinuto()).format(ISO_FORMATTER);
-    }
-
-    private String formatearFechaLlegadaVuelo(
-            Vuelo vuelo,
-            LocalDateTime fechaInicioSimulacion,
-            Integer minutoReferencia,
-            Integer salidaOcurrencia
-    ) {
-        if (fechaInicioSimulacion == null && salidaOcurrencia != null) {
-            VentanaVueloSimulada ventana = calcularVentanaVueloPorSalida(vuelo, salidaOcurrencia);
-            return LocalDate.now(ZoneOffset.UTC)
-                    .atStartOfDay()
-                    .plusMinutes(ventana.llegadaMinuto())
-                    .format(ISO_FORMATTER);
-        }
-
-        if (fechaInicioSimulacion == null) {
-            return formatearFechaVuelo(vuelo.getLlegadaUtcMin());
-        }
-
-        VentanaVueloSimulada ventana = salidaOcurrencia != null
-                ? calcularVentanaVueloPorSalida(vuelo, salidaOcurrencia)
-                : calcularVentanaVueloSimulada(vuelo, minutoReferencia);
-        return fechaInicioSimulacion.plusMinutes(ventana.llegadaMinuto()).format(ISO_FORMATTER);
-    }
-
-    private VentanaVueloSimulada calcularVentanaVueloPorSalida(Vuelo vuelo, int salidaOcurrencia) {
-        int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-        int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
-
-        while (llegadaBase <= salidaBase) {
-            llegadaBase += MINUTOS_DIA;
-        }
-
-        int duracion = Math.max(1, llegadaBase - salidaBase);
-        return new VentanaVueloSimulada(salidaOcurrencia, salidaOcurrencia + duracion);
-    }
-
-    private VentanaVueloSimulada calcularVentanaVueloSimulada(Vuelo vuelo, Integer minutoReferencia) {
-        int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-        int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
-
-        while (llegadaBase <= salidaBase) {
-            llegadaBase += MINUTOS_DIA;
-        }
-
-        int minuto = minutoReferencia != null && minutoReferencia != Integer.MAX_VALUE
-                ? Math.max(0, minutoReferencia)
-                : 0;
-        int diaReferencia = Math.floorDiv(minuto, MINUTOS_DIA);
-        int salida = salidaBase + diaReferencia * MINUTOS_DIA;
-        int llegada = llegadaBase + diaReferencia * MINUTOS_DIA;
-
-        while (llegada <= minuto) {
-            salida += MINUTOS_DIA;
-            llegada += MINUTOS_DIA;
-        }
-
-        return new VentanaVueloSimulada(salida, llegada);
-    }
-
-    private LocalDateTime obtenerFechaInicioSimulacion(Integer idSimulacion) {
-        if (idSimulacion == null) {
-            return null;
-        }
-
-        try {
-            EstadoSimulacion estado = simulacionService.obtenerEstado(idSimulacion);
-            if (estado.getFechaHoraInicioSimulacion() != null) {
-                return estado.getFechaHoraInicioSimulacion();
-            }
-        } catch (IllegalArgumentException ignored) {
-            // Si no es la simulacion viva en memoria, se usa la fecha persistida.
-        }
-
-        return simulacionRepository.findById(idSimulacion)
-                .map(Simulacion::getFechaInicio)
-                .orElse(null);
-    }
-
-    private Integer obtenerMinutoReferenciaFechasVuelo(
-            Integer idSimulacion,
-            LocalDateTime fechaInicioSimulacion,
-            List<SolicitudEnvio> enviosAsociados
-    ) {
-        if (idSimulacion == null) {
-            return null;
-        }
-
-        try {
-            return simulacionService.obtenerEstado(idSimulacion).getPunteroConsumoMinutos();
-        } catch (IllegalArgumentException ignored) {
-            // Para historiales sin estado en memoria, se aproxima desde los envios de esa simulacion.
-        }
-
-        if (fechaInicioSimulacion == null || enviosAsociados == null || enviosAsociados.isEmpty()) {
-            return 0;
-        }
-
-        return enviosAsociados.stream()
-                .mapToInt(envio -> calcularMinutoDesdeInicioSimulacion(envio, fechaInicioSimulacion))
-                .max()
-                .orElse(0);
-    }
-
-    private int calcularMinutoDesdeInicioSimulacion(
-            SolicitudEnvio envio,
-            LocalDateTime fechaInicioSimulacion
-    ) {
-        if (envio.getFecha() == null || envio.getHora() == null) {
-            return 0;
-        }
-
-        LocalDateTime fechaHoraEnvio = LocalDateTime.of(envio.getFecha(), envio.getHora());
-        long minutos = java.time.Duration.between(fechaInicioSimulacion, fechaHoraEnvio).toMinutes();
-        return (int) Math.max(0, minutos);
-    }
-
     private String determinarTipoVuelo(Aeropuerto origen, Aeropuerto destino) {
         if (origen == null || destino == null) {
             return "intracontinental";
@@ -833,74 +571,6 @@ public class SeguimientoService {
         return origen.getRegion().equalsIgnoreCase(destino.getRegion())
                 ? "intracontinental"
                 : "intercontinental";
-    }
-
-    private String determinarEstadoVueloDetalle(
-            Vuelo vuelo,
-            Integer idSimulacion,
-            LocalDateTime fechaInicioSimulacion,
-            Integer minutoReferenciaFechas,
-            Integer salidaOcurrencia,
-            Integer minutoReferencia,
-            boolean contextoFinalizado
-    ) {
-        if (estaOcurrenciaVueloCancelada(
-                vuelo,
-                idSimulacion,
-                fechaInicioSimulacion,
-                minutoReferenciaFechas,
-                salidaOcurrencia
-        )) {
-            return "cancelado";
-        }
-
-        return estadoLogisticoService.determinarEstadoVuelo(
-                vuelo,
-                minutoReferencia,
-                contextoFinalizado
-        );
-    }
-
-    private boolean estaOcurrenciaVueloCancelada(
-            Vuelo vuelo,
-            Integer idSimulacion,
-            LocalDateTime fechaInicioSimulacion,
-            Integer minutoReferencia,
-            Integer salidaOcurrencia
-    ) {
-        if (vuelo == null || vuelo.getIdVuelo() == null) {
-            return false;
-        }
-
-        if (idSimulacion != null) {
-            if (salidaOcurrencia == null) {
-                return simulacionService.estaVueloSimuladoCanceladoEnDia(
-                        idSimulacion,
-                        vuelo.getIdVuelo(),
-                        minutoReferencia != null ? minutoReferencia : 0
-                );
-            }
-
-            return simulacionService.estaVueloSimuladoCancelado(
-                    idSimulacion,
-                    vuelo.getIdVuelo(),
-                    salidaOcurrencia
-            );
-        }
-
-        LocalDateTime fechaSalida = salidaOcurrencia != null
-                ? LocalDate.now(ZoneOffset.UTC).atStartOfDay().plusMinutes(salidaOcurrencia)
-                : vueloCancelacionServiceFechaSalidaActual(vuelo);
-
-        return vueloCancelacionRepository.existsByVuelo_IdVueloAndFechaHoraSalida(
-                vuelo.getIdVuelo(),
-                fechaSalida
-        );
-    }
-
-    private LocalDateTime vueloCancelacionServiceFechaSalidaActual(Vuelo vuelo) {
-        int salida = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-        return LocalDate.now(ZoneOffset.UTC).atStartOfDay().plusMinutes(salida);
     }
 
     private String determinarEstadoEnvioDetalle(
@@ -916,302 +586,64 @@ public class SeguimientoService {
             return "entregado";
         }
 
-        int minuto = minutoReferencia != null ? minutoReferencia : Integer.MIN_VALUE;
-        Integer primeraSalida = estadoLogisticoService.obtenerPrimeraSalidaUtc(envio.getRuta());
-
-        if (primeraSalida == null || minuto < primeraSalida) {
-            return "planificado";
-        }
-
-        if (estadoLogisticoService.encontrarVueloActivo(envio.getRuta(), minuto) != null) {
+        if (envio.getRuta().getOcurrencias().stream()
+                .anyMatch(o -> o.getEstado() == EstadoVueloOcurrencia.EN_VUELO)) {
             return "en_transito";
         }
-
-        return "en_escala";
+        return envio.getRuta().getOcurrencias().stream()
+                .anyMatch(o -> o.getEstado() == EstadoVueloOcurrencia.COMPLETADO)
+                ? "en_escala"
+                : "planificado";
     }
 
     private Integer obtenerMinutoReferenciaEnvio(SolicitudEnvio envio) {
-        if (envio.getSimulacion() == null) {
+        if (envio.getIdSimulacion() == null) {
             return estadoLogisticoService.obtenerMinutoActualUtc();
         }
 
-        if (!Boolean.TRUE.equals(envio.getSimulacion().getActiva())) {
-            return Integer.MAX_VALUE;
-        }
-
         try {
-            EstadoSimulacion estado = simulacionService.obtenerEstado(envio.getSimulacion().getIdSimulacion());
-            return estado.getPunteroConsumoMinutos();
+            EstadoSimulacion estado = simulacionService.obtenerEstado(envio.getIdSimulacion());
+            return estado.isActiva() ? estado.getPunteroConsumoMinutos() : Integer.MAX_VALUE;
         } catch (IllegalArgumentException e) {
             return 0;
         }
     }
 
     private boolean contextoFinalizadoEnvio(SolicitudEnvio envio) {
-        return envio.getSimulacion() != null
-                && !Boolean.TRUE.equals(envio.getSimulacion().getActiva());
-    }
-
-    private Integer obtenerMinutoReferenciaVuelo(List<SolicitudEnvio> enviosAsociados) {
-        if (enviosAsociados == null || enviosAsociados.isEmpty()) {
-            return estadoLogisticoService.obtenerMinutoActualUtc();
-        }
-
-        SolicitudEnvio envioOperacion = enviosAsociados.stream()
-                .filter(envio -> envio.getSimulacion() == null)
-                .findFirst()
-                .orElse(null);
-
-        if (envioOperacion != null) {
-            return estadoLogisticoService.obtenerMinutoActualUtc();
-        }
-
-        return obtenerMinutoReferenciaEnvio(enviosAsociados.getFirst());
-    }
-
-    private boolean contextoFinalizadoVuelo(List<SolicitudEnvio> enviosAsociados) {
-        return enviosAsociados != null
-                && !enviosAsociados.isEmpty()
-                && enviosAsociados.stream().allMatch(this::contextoFinalizadoEnvio);
-    }
-
-    private List<SolicitudEnvio> filtrarEnviosPorContexto(
-            List<SolicitudEnvio> envios,
-            Integer idSimulacion
-    ) {
-        if (idSimulacion == null) {
-            return envios.stream()
-                    .filter(envio -> envio.getSimulacion() == null)
-                    .toList();
-        }
-
-        return envios.stream()
-                .filter(envio -> envio.getSimulacion() != null)
-                .filter(envio -> Objects.equals(envio.getSimulacion().getIdSimulacion(), idSimulacion))
-                .toList();
-    }
-
-    private List<AsignacionEnvio> filtrarAsignacionesPorContexto(
-            List<AsignacionEnvio> asignaciones,
-            Integer idSimulacion
-    ) {
-        if (idSimulacion == null) {
-            return asignaciones.stream()
-                    .filter(asignacion -> asignacion.getEnvio() != null)
-                    .filter(asignacion -> asignacion.getEnvio().getSimulacion() == null)
-                    .toList();
-        }
-
-        return asignaciones.stream()
-                .filter(asignacion -> asignacion.getEnvio() != null)
-                .filter(asignacion -> asignacion.getEnvio().getSimulacion() != null)
-                .filter(asignacion -> Objects.equals(
-                        asignacion.getEnvio().getSimulacion().getIdSimulacion(),
-                        idSimulacion
-                ))
-                .toList();
-    }
-
-    private List<SolicitudEnvio> filtrarEnviosPorOcurrenciaVuelo(
-            Vuelo vuelo,
-            List<SolicitudEnvio> envios,
-            Integer idSimulacion,
-            LocalDateTime fechaInicioSimulacion,
-            Integer minutoReferencia,
-            Integer salidaOcurrencia
-    ) {
-        if (vuelo == null || vuelo.getIdVuelo() == null || envios == null || envios.isEmpty()) {
-            return List.of();
-        }
-
-        if (salidaOcurrencia != null) {
-            return envios.stream()
-                    .filter(envio -> envioUsaVueloEnSalidaOcurrencia(
-                            envio,
-                            vuelo.getIdVuelo(),
-                            salidaOcurrencia,
-                            idSimulacion,
-                            fechaInicioSimulacion
-                    ))
-                    .toList();
-        }
-
-        if (idSimulacion != null) {
-            int minutoActual = minutoReferencia != null && minutoReferencia != Integer.MAX_VALUE
-                    ? minutoReferencia
-                    : -1;
-
-            return envios.stream()
-                    .filter(envio -> envioUsaVueloEnMinutoSimulado(
-                            envio,
-                            vuelo.getIdVuelo(),
-                            minutoActual,
-                            fechaInicioSimulacion
-                    ))
-                    .toList();
-        }
-
-        LocalDateTime ahoraUtc = LocalDateTime.now(ZoneOffset.UTC);
-        return envios.stream()
-                .filter(envio -> envioUsaVueloEnFechaHoraOperacion(envio, vuelo.getIdVuelo(), ahoraUtc))
-                .toList();
-    }
-
-    private boolean envioUsaVueloEnFechaHoraOperacion(
-            SolicitudEnvio envio,
-            Integer idVuelo,
-            LocalDateTime fechaHoraUtc
-    ) {
-        Ruta ruta = envio.getRuta();
-        if (ruta == null || ruta.getVuelos() == null || fechaHoraUtc == null) {
+        if (envio.getIdSimulacion() == null) {
             return false;
         }
-
-        LocalDate fechaBase = envio.getFecha() != null ? envio.getFecha() : LocalDate.now(ZoneOffset.UTC);
-        int minutoReferencia = envio.getHora() != null
-                ? envio.getHora().getHour() * 60 + envio.getHora().getMinute()
-                : 0;
-
-        for (Vuelo vueloRuta : ruta.getVuelos()) {
-            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vueloRuta, minutoReferencia);
-            LocalDateTime salida = fechaBase.atStartOfDay().plusMinutes(ventana.salidaMinuto());
-            LocalDateTime llegada = fechaBase.atStartOfDay().plusMinutes(ventana.llegadaMinuto());
-
-            if (Objects.equals(vueloRuta.getIdVuelo(), idVuelo)
-                    && !fechaHoraUtc.isBefore(salida)
-                    && fechaHoraUtc.isBefore(llegada)) {
-                return true;
-            }
-
-            minutoReferencia = ventana.llegadaMinuto();
-        }
-
-        return false;
-    }
-
-    private boolean envioUsaVueloEnMinutoSimulado(
-            SolicitudEnvio envio,
-            Integer idVuelo,
-            int minutoActual,
-            LocalDateTime fechaInicioSimulacion
-    ) {
-        Ruta ruta = envio.getRuta();
-        if (ruta == null || ruta.getVuelos() == null || minutoActual < 0) {
-            return false;
-        }
-
-        int minutoReferencia = fechaInicioSimulacion != null
-                ? calcularMinutoDesdeInicioSimulacion(envio, fechaInicioSimulacion)
-                : 0;
-
-        for (Vuelo vueloRuta : ruta.getVuelos()) {
-            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vueloRuta, minutoReferencia);
-
-            if (Objects.equals(vueloRuta.getIdVuelo(), idVuelo)
-                    && minutoActual >= ventana.salidaMinuto()
-                    && minutoActual < ventana.llegadaMinuto()) {
-                return true;
-            }
-
-            minutoReferencia = ventana.llegadaMinuto();
-        }
-
-        return false;
-    }
-
-    private boolean envioUsaVueloEnSalidaOcurrencia(
-            SolicitudEnvio envio,
-            Integer idVuelo,
-            int salidaOcurrencia,
-            Integer idSimulacion,
-            LocalDateTime fechaInicioSimulacion
-    ) {
-        Ruta ruta = envio.getRuta();
-        if (ruta == null || ruta.getVuelos() == null) {
-            return false;
-        }
-
-        int minutoReferencia = idSimulacion != null && fechaInicioSimulacion != null
-                ? calcularMinutoDesdeInicioSimulacion(envio, fechaInicioSimulacion)
-                : 0;
-
-        for (Vuelo vueloRuta : ruta.getVuelos()) {
-            VentanaVueloSimulada ventana = calcularVentanaRutaVuelo(vueloRuta, minutoReferencia);
-
-            if (Objects.equals(vueloRuta.getIdVuelo(), idVuelo)
-                    && ventana.salidaMinuto() == salidaOcurrencia) {
-                return true;
-            }
-
-            minutoReferencia = ventana.llegadaMinuto();
-        }
-
-        return false;
-    }
-
-    private VentanaVueloSimulada calcularVentanaRutaVuelo(Vuelo vuelo, int minutoReferencia) {
-        int salidaBase = vuelo.getSalidaUtcMin() != null ? vuelo.getSalidaUtcMin() : 0;
-        int llegadaBase = vuelo.getLlegadaUtcMin() != null ? vuelo.getLlegadaUtcMin() : salidaBase;
-
-        while (llegadaBase <= salidaBase) {
-            llegadaBase += MINUTOS_DIA;
-        }
-
-        int minuto = Math.max(0, minutoReferencia);
-        int diaReferencia = Math.floorDiv(minuto, MINUTOS_DIA);
-        int salida = salidaBase + diaReferencia * MINUTOS_DIA;
-        int llegada = llegadaBase + diaReferencia * MINUTOS_DIA;
-
-        while (salida < minuto) {
-            salida += MINUTOS_DIA;
-            llegada += MINUTOS_DIA;
-        }
-
-        return new VentanaVueloSimulada(salida, llegada);
-    }
-
-    private Vuelo obtenerVueloDesdeContextoSimulado(Integer idSimulacion, Integer idVuelo) {
-        return simulacionService.obtenerVueloSimulado(idSimulacion, idVuelo);
-    }
-
-    private Integer parsearIdVuelo(String codigo) {
-        if (codigo == null || codigo.isBlank()) {
-            throw new IllegalArgumentException("El codigo del vuelo es obligatorio.");
-        }
-
-        Matcher tbMatcher = VUELO_TB_PATTERN.matcher(codigo.trim());
-        if (tbMatcher.find()) {
-            return Integer.parseInt(tbMatcher.group(1));
-        }
-
-        Matcher simMatcher = VUELO_SIM_PATTERN.matcher(codigo.trim());
-        if (simMatcher.find()) {
-            return Integer.parseInt(simMatcher.group(1));
-        }
-
-        Matcher flightMatcher = VUELO_FLIGHT_PATTERN.matcher(codigo.trim());
-        if (flightMatcher.find()) {
-            return Integer.parseInt(flightMatcher.group(1));
-        }
-
         try {
-            return Integer.parseInt(codigo.trim());
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Formato de codigo de vuelo invalido: " + codigo + ".");
+            return !simulacionService.obtenerEstado(envio.getIdSimulacion()).isActiva();
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
 
-    private Integer parsearSalidaOcurrenciaVuelo(String codigo) {
-        if (codigo == null || codigo.isBlank()) {
-            return null;
-        }
-
-        Matcher matcher = VUELO_OCURRENCIA_PATTERN.matcher(codigo.trim());
-        if (!matcher.find()) {
-            return null;
-        }
-
-        return Integer.parseInt(matcher.group(4));
+    private VueloDetalleResponse construirDetalleOcurrencia(
+            VueloOcurrencia ocurrencia,
+            List<SolicitudEnvio> envios
+    ) {
+        String estado = switch (ocurrencia.getEstado()) {
+            case PROGRAMADO -> "programado";
+            case EN_VUELO -> "en_vuelo";
+            case COMPLETADO -> "completado";
+            case CANCELADO -> "cancelado";
+        };
+        return new VueloDetalleResponse(
+                ocurrencia.getIdOcurrencia(),
+                ocurrencia.getVuelo().getIdVuelo(),
+                String.valueOf(ocurrencia.getVuelo().getIdVuelo()),
+                estado,
+                determinarTipoVuelo(ocurrencia.getVuelo().getDesde(), ocurrencia.getVuelo().getHasta()),
+                ocurrencia.getCapacidad(),
+                ocurrencia.getCapacidadUsada(),
+                ocurrencia.getVuelo().getDesde().getCodigo(),
+                ocurrencia.getVuelo().getHasta().getCodigo(),
+                ocurrencia.getFechaHoraSalida().format(ISO_FORMATTER),
+                ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
+                envios.stream().map(this::mapearEnvioEnVuelo).toList()
+        );
     }
 
     private Integer parsearIdEnvio(String codigo) {
@@ -1243,6 +675,4 @@ public class SeguimientoService {
         return numero != null ? numero : 0;
     }
 
-    private record VentanaVueloSimulada(int salidaMinuto, int llegadaMinuto) {
-    }
 }

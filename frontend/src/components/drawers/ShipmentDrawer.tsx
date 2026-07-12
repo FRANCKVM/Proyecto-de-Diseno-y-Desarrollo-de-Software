@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Eye } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
@@ -9,11 +10,12 @@ import type { BloquePaquetes, EnvioDetalle } from "@/types/shipment.types";
 
 interface ShipmentDrawerProps {
   codigo: string;
+  displayCodigo?: string;
   idSimulacion?: number | null;
 }
 
-const PANEL_REFRESH_MS_SIMULATION = 1500;
-const PANEL_REFRESH_MS_OPERATION = 5000;
+const PANEL_REFRESH_MS_SIMULATION = 3000;
+const PANEL_REFRESH_MS_OPERATION = 10000;
 
 /**
  * Formatea ISO 8601 a "DD/MM HH:mm".
@@ -56,6 +58,14 @@ interface PackageListItem {
   displayCodigo: string;
   estado: string;
   sequence: number;
+}
+
+interface RouteSummaryStep {
+  key: string;
+  label: string;
+  sublabel: string;
+  estado: string;
+  isLast: boolean;
 }
 
 const parseSequentialCode = (
@@ -157,6 +167,70 @@ const buildShipmentRouteSegmentsFromDetail = (
   }));
 };
 
+const formatFlightRouteCode = (
+  flightCode: string | null | undefined,
+  fromIcao: string,
+  toIcao: string
+): string => {
+  if (!flightCode) {
+    return `${fromIcao}>${toIcao}`;
+  }
+
+  return flightCode.includes(">")
+    ? flightCode
+    : `${fromIcao}>${toIcao}-${flightCode}`;
+};
+
+const buildRouteSummarySteps = (shipment: EnvioDetalle): RouteSummaryStep[] => {
+  const flightSteps = shipment.ruta
+    .map((hito, index) => ({ hito, index }))
+    .filter(({ hito }) => hito.tipo === "vuelo");
+
+  const summary = flightSteps.map(({ hito, index }, summaryIndex) => {
+    const previousStop = [...shipment.ruta]
+      .slice(0, index)
+      .reverse()
+      .find((candidate) => candidate.tipo !== "vuelo");
+    const nextStop = shipment.ruta
+      .slice(index + 1)
+      .find((candidate) => candidate.tipo !== "vuelo");
+    const fromIcao = previousStop?.aeropuertoIcao ?? shipment.origenIcao;
+    const toIcao = nextStop?.aeropuertoIcao ?? shipment.destinoIcao;
+    const departureLabel = previousStop
+      ? formatFechaCorta(previousStop.fecha)
+      : formatFechaCorta(hito.fecha);
+    const arrivalLabel = nextStop ? formatFechaCorta(nextStop.fecha) : null;
+
+    return {
+      key: `${hito.vueloCodigo ?? hito.aeropuertoIcao}-${index}`,
+      label: formatFlightRouteCode(hito.vueloCodigo, fromIcao, toIcao),
+      sublabel: arrivalLabel
+        ? `${departureLabel} → ${arrivalLabel}`
+        : `${departureLabel} — En vuelo`,
+      estado: hito.estado,
+      isLast: summaryIndex === flightSteps.length - 1,
+    };
+  });
+
+  if (summary.length > 0) {
+    return summary;
+  }
+
+  return shipment.ruta.map((hito, index) => ({
+    key: `${hito.aeropuertoIcao}-${index}`,
+    label: hito.aeropuertoIcao,
+    sublabel: `${formatFechaCorta(hito.fecha)} — ${
+      hito.tipo === "salida"
+        ? "Salida"
+        : hito.tipo === "escala"
+        ? "Escala"
+        : "Entrega"
+    }`,
+    estado: hito.estado,
+    isLast: index === shipment.ruta.length - 1,
+  }));
+};
+
 /**
  * Drawer de detalle de envio.
  * Estandar 61 + mockup 06 del Figma.
@@ -164,7 +238,11 @@ const buildShipmentRouteSegmentsFromDetail = (
  * Muestra info del envio, ruta asignada con timeline de hitos,
  * lista de paquetes (en bloques) y tiempo restante para entrega.
  */
-const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
+const ShipmentDrawer = ({
+  codigo,
+  displayCodigo,
+  idSimulacion,
+}: ShipmentDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const focusShipmentRouteSegments = useDrawerStore(
     (s) => s.focusShipmentRouteSegments
@@ -184,9 +262,20 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
     () => (shipment ? buildShipmentRouteSegmentsFromDetail(shipment) : []),
     [shipment]
   );
+  const routeSummarySteps = useMemo(
+    () => (shipment ? buildRouteSummarySteps(shipment) : []),
+    [shipment]
+  );
 
   useEffect(() => {
+    if (!codigo) {
+      return;
+    }
+
     let cancelled = false;
+    let requestInFlight = false;
+    const canPoll = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
 
     const refreshMs =
       idSimulacion != null
@@ -194,6 +283,8 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
         : PANEL_REFRESH_MS_OPERATION;
 
     const loadShipment = async (showLoading: boolean) => {
+      if (!canPoll() || requestInFlight) return;
+      requestInFlight = true;
       if (showLoading) {
         setIsLoading(true);
       }
@@ -203,6 +294,7 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
         if (cancelled) return;
         setShipment(data);
       } finally {
+        requestInFlight = false;
         if (!cancelled && showLoading) {
           setIsLoading(false);
         }
@@ -213,24 +305,32 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
     const intervalId = window.setInterval(() => {
       void loadShipment(false);
     }, refreshMs);
+    const handleVisibilityChange = () => {
+      if (canPoll()) {
+        void loadShipment(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [codigo, idSimulacion]);
 
   if (isLoading || !shipment) {
     return (
-      <DrawerBase eyebrow="Envio" title={codigo} onClose={close}>
-        <p className="text-body text-text-primary">Cargando informacion...</p>
+      <DrawerBase eyebrow="Envío" title={displayCodigo ?? codigo} onClose={close}>
+        <p className="text-body text-text-primary">Cargando información...</p>
       </DrawerBase>
     );
   }
 
   const estadoLabel =
     shipment.estado === "en_transito"
-      ? "En transito"
+      ? "En tránsito"
       : shipment.estado === "en_escala"
       ? "En escala"
       : shipment.estado === "entregado"
@@ -254,7 +354,7 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
   };
 
   return (
-    <DrawerBase eyebrow="Envio" title={shipment.codigo} onClose={close}>
+    <DrawerBase eyebrow="Envío" title={displayCodigo ?? shipment.codigo} onClose={close}>
       <div className="mb-5">
         <Tag variant={shipment.estado === "entregado" ? "normal" : "primary"}>
           {estadoLabel}
@@ -263,8 +363,8 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
 
       {/* Informacion del envio */}
       <section className="mb-6">
-        <h3 className="text-section-title mb-2">Informacion del envio</h3>
-        <InfoRow label="Codigo" value={shipment.codigo} />
+        <h3 className="text-section-title mb-2">Información del envío</h3>
+        <InfoRow label="Código" value={shipment.codigo} />
         <InfoRow label="Aerolinea" value={shipment.aerolinea} />
         <InfoRow label="Origen" value={shipment.origenIcao} />
         <InfoRow label="Destino" value={shipment.destinoIcao} />
@@ -278,7 +378,7 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
         />
         <InfoRow
           label="Plazo maximo"
-          value={`${shipment.plazoMaximoDias} dias`}
+          value={`${shipment.plazoMaximoDias} días`}
         />
         <InfoRow
           label="Fecha registro"
@@ -292,13 +392,23 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
 
       {/* Ruta asignada */}
       <section className="mb-6">
-        <h3 className="text-section-title mb-3">Ruta asignada</h3>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-section-title">Ruta asignada</h3>
+          <button
+            type="button"
+            onClick={handleFocusPackageRoute}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
+            aria-label="Enfocar ruta del envío en el mapa"
+            title="Ver ruta en el mapa"
+          >
+            <Eye size={16} strokeWidth={2.2} aria-hidden />
+          </button>
+        </div>
         <div className="space-y-1">
-          {shipment.ruta.map((hito, idx) => (
+          {routeSummarySteps.map((step) => (
             <RouteStep
-              key={`${hito.aeropuertoIcao}-${idx}`}
-              hito={hito}
-              isLast={idx === shipment.ruta.length - 1}
+              key={step.key}
+              step={step}
             />
           ))}
         </div>
@@ -315,11 +425,8 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
               key={`${maleta.codigo}-${maleta.sequence}`}
               className="rounded-input border border-border bg-card transition-colors hover:border-primary hover:bg-field"
             >
-              <button
-                type="button"
+              <div
                 className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
-                onClick={handleFocusPackageRoute}
-                aria-label={`Resaltar ruta de la maleta ${maleta.displayCodigo}`}
               >
                 <div className="min-w-0">
                   <p className="text-button text-primary hover:underline">
@@ -329,7 +436,7 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
                     {packageRouteLabel}
                   </p>
                   <p className="mt-1 text-secondary text-text-primary">
-                    Maleta individual del envio
+                    Maleta individual del envío
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -340,7 +447,7 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
                     #{maleta.sequence.toLocaleString("es-PE")}
                   </span>
                 </div>
-              </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -379,8 +486,7 @@ const ShipmentDrawer = ({ codigo, idSimulacion }: ShipmentDrawerProps) => {
 // ============================================================================
 
 interface RouteStepProps {
-  hito: EnvioDetalle["ruta"][number];
-  isLast: boolean;
+  step: RouteSummaryStep;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -401,22 +507,43 @@ const DOT_COLOR_BY_STATUS: Record<string, string> = {
   pendiente: "bg-text-tertiary",
 };
 
-const RouteStep = ({ hito, isLast }: RouteStepProps) => {
-  const status = hito.estado as string;
+const RouteStep = ({ step }: RouteStepProps) => {
+  const status = step.estado as string;
   const dotClass = DOT_COLOR_BY_STATUS[status] ?? "bg-text-tertiary";
   const statusColor = STATUS_COLOR[status] ?? "text-text-primary";
   const statusText = STATUS_LABEL[status] ?? status;
+  const hito = {
+    fecha: "",
+    tipo: "",
+    vueloCodigo: null as string | null,
+  };
 
   return (
     <div className="flex gap-3 relative pb-3">
       <div className="flex flex-col items-center pt-1">
         <div className={`w-3 h-3 rounded-full ${dotClass} relative z-10`} />
-        {!isLast && <div className="w-px flex-1 bg-border mt-1" />}
+        {!step.isLast && <div className="w-px flex-1 bg-border mt-1" />}
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-button text-text-primary">{step.label}</span>
+          <span className={`text-secondary ${statusColor}`}>{statusText}</span>
+        </div>
+        <p className="text-secondary text-text-primary">{step.sublabel}</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex gap-3 relative pb-3">
+      <div className="flex flex-col items-center pt-1">
+        <div className={`w-3 h-3 rounded-full ${dotClass} relative z-10`} />
+        {!step.isLast && <div className="w-px flex-1 bg-border mt-1" />}
       </div>
       <div className="flex-1">
         <div className="flex items-center justify-between">
           <span className="text-button text-text-primary">
-            {hito.aeropuertoIcao}
+            {step.label}
           </span>
           <span className={`text-secondary ${statusColor}`}>{statusText}</span>
         </div>

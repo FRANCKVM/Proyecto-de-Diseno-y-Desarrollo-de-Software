@@ -33,20 +33,11 @@ public class Vuelo {
     @Column(name = "capacidad", nullable = false)
     private Integer capacidad;
 
-    @Column(name = "capacidad_usada", nullable = false)
-    private Integer capacidadUsada = 0;
-
-    @Column(name = "cancelado", nullable = false)
-    private Boolean cancelado = false;
-
     @Column(name = "salida_utc_min", nullable = false)
     private Integer salidaUtcMin;
 
     @Column(name = "llegada_utc_min", nullable = false)
     private Integer llegadaUtcMin;
-
-    @Transient
-    private boolean bloqueadoPorVueloActivo = false;
 
     public Vuelo() {
     }
@@ -63,8 +54,6 @@ public class Vuelo {
         this.hasta = hasta;
         this.tiempoViajarDias = tiempoViajarDias;
         this.capacidad = capacidad;
-        this.capacidadUsada = 0;
-        this.cancelado = false;
         this.salidaUtcMin = salidaUtcMin;
         this.llegadaUtcMin = llegadaUtcMin;
     }
@@ -109,38 +98,6 @@ public class Vuelo {
         this.capacidad = capacidad;
     }
 
-    public Integer getCapacidadUsada() {
-        return capacidadUsada;
-    }
-
-    public void setCapacidadUsada(Integer capacidadUsada) {
-        this.capacidadUsada = capacidadUsada;
-    }
-
-    public Integer getCapacidadDisponible() {
-        if (capacidad == null) {
-            return 0;
-        }
-
-        if (capacidadUsada == null) {
-            return capacidad;
-        }
-
-        return capacidad - capacidadUsada;
-    }
-
-    public Boolean getCancelado() {
-        return cancelado;
-    }
-
-    public void setCancelado(Boolean cancelado) {
-        this.cancelado = cancelado;
-    }
-
-    public boolean estaCancelado() {
-        return Boolean.TRUE.equals(cancelado);
-    }
-
     public Integer getSalidaUtcMin() {
         return salidaUtcMin;
     }
@@ -157,41 +114,11 @@ public class Vuelo {
         this.llegadaUtcMin = llegadaUtcMin;
     }
 
-    public boolean isBloqueadoPorVueloActivo() {
-        return bloqueadoPorVueloActivo;
-    }
-
-    public void setBloqueadoPorVueloActivo(boolean bloqueadoPorVueloActivo) {
-        this.bloqueadoPorVueloActivo = bloqueadoPorVueloActivo;
-    }
-
-    public boolean tieneCapacidad(int bolsas) {
-        return !bloqueadoPorVueloActivo && !estaCancelado() && getCapacidadDisponible() >= bolsas;
-    }
-
-    public void reservar(int bolsas) {
-        if (bolsas < 0) {
-            throw new IllegalArgumentException("La cantidad de bolsas no puede ser negativa.");
-        }
-
-        if (!tieneCapacidad(bolsas)) {
-            throw new IllegalStateException("No hay capacidad suficiente en el vuelo.");
-        }
-
-        if (capacidadUsada == null) {
-            capacidadUsada = 0;
-        }
-
-        capacidadUsada += bolsas;
-    }
-
     @Override
     public String toString() {
         return desde.getCodigo() + " -> " + hasta.getCodigo() +
                 " | tiempo=" + tiempoViajarDias +
-                " | capDisp=" + getCapacidadDisponible() +
                 " | salidaUTC=" + salidaUtcMin +
-                " | llegadaUTC=" + llegadaUtcMin +
-                " | cancelado=" + cancelado;
+                " | llegadaUTC=" + llegadaUtcMin;
     }
 }

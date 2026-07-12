@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Eye } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
@@ -6,8 +7,12 @@ import { getFlightByCode } from "@/services/flightService";
 import { useDrawerStore } from "@/store/drawerStore";
 import {
   buildShipmentRouteSegments,
-  resolveShipmentFocusTarget,
 } from "@/utils/shipmentFocus";
+import {
+  formatShipmentDisplayCode,
+  getShipmentApiIdentifier,
+  parseShipmentIdentifier,
+} from "@/utils/shipmentCode";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { VueloDetalle } from "@/types/flight.types";
 
@@ -15,11 +20,10 @@ interface FlightDrawerProps {
   codigo: string;
   idSimulacion?: number | null;
   shipments?: BackendSolicitudEnvio[];
-  referenceMinute?: number | null;
 }
 
-const PANEL_REFRESH_MS_SIMULATION = 1500;
-const PANEL_REFRESH_MS_OPERATION = 5000;
+const PANEL_REFRESH_MS_SIMULATION = 3000;
+const PANEL_REFRESH_MS_OPERATION = 10000;
 const ISO_WITH_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
@@ -38,11 +42,6 @@ const formatFecha = (iso: string): string => {
 const parseFlightDateMs = (iso: string): number => {
   const normalized = ISO_WITH_TIME_ZONE.test(iso) ? iso : `${iso}Z`;
   return new Date(normalized).getTime();
-};
-
-const parseShipmentCodeId = (codigo: string): number | null => {
-  const match = codigo.match(/\d+/);
-  return match ? Number(match[0]) : null;
 };
 
 const formatTiempoRestante = (arrivalIso: string, nowMs: number): string => {
@@ -87,6 +86,9 @@ const formatPercent = (value: number): string =>
     maximumFractionDigits: 2,
   })}%`;
 
+const formatFlightDisplayCode = (flight: VueloDetalle): string =>
+  `${flight.origenIcao}>${flight.destinoIcao}-${flight.codigo}`;
+
 /**
  * Drawer de detalle de vuelo.
  * Estandar 61 + mockup 05 del Figma.
@@ -99,10 +101,12 @@ const FlightDrawer = ({
   codigo,
   idSimulacion,
   shipments = [],
-  referenceMinute,
 }: FlightDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
+  const focusShipmentRouteSegments = useDrawerStore(
+    (s) => s.focusShipmentRouteSegments
+  );
 
   const [flight, setFlight] = useState<VueloDetalle | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -120,7 +124,14 @@ const FlightDrawer = ({
   }, []);
 
   useEffect(() => {
+    if (!codigo) {
+      return;
+    }
+
     let cancelled = false;
+    let requestInFlight = false;
+    const canPoll = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
 
     const refreshMs =
       idSimulacion != null
@@ -128,6 +139,8 @@ const FlightDrawer = ({
         : PANEL_REFRESH_MS_OPERATION;
 
     const loadFlight = async (showLoading: boolean, forceRefresh: boolean) => {
+      if (!canPoll() || requestInFlight) return;
+      requestInFlight = true;
       if (showLoading) {
         setIsLoading(true);
         setNotFound(false);
@@ -146,27 +159,39 @@ const FlightDrawer = ({
           setNotFound(true);
         }
       } finally {
+        requestInFlight = false;
         if (!cancelled && showLoading) {
           setIsLoading(false);
         }
       }
     };
 
-    void loadFlight(true, false);
+    // Al abrir el drawer, obtenemos el detalle actual directamente del backend.
+    // La versión cacheada puede provenir del listado de un aeropuerto y no
+    // contener todavía los envíos asociados al vuelo.
+    void loadFlight(true, true);
     const intervalId = window.setInterval(() => {
       void loadFlight(false, true);
     }, refreshMs);
+    const handleVisibilityChange = () => {
+      if (canPoll()) {
+        void loadFlight(false, true);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [codigo, idSimulacion]);
 
   if (isLoading) {
     return (
       <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
-        <p className="text-body text-text-primary">Cargando informacion...</p>
+        <p className="text-body text-text-primary">Cargando información...</p>
       </DrawerBase>
     );
   }
@@ -175,7 +200,7 @@ const FlightDrawer = ({
     return (
       <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
         <p className="text-body text-text-primary">
-          No se encontro informacion para este vuelo.
+          No se encontró información para este vuelo.
         </p>
       </DrawerBase>
     );
@@ -193,26 +218,45 @@ const FlightDrawer = ({
       : flight.estado === "cancelado"
       ? "Cancelado"
       : flight.estado;
+  const displayFlightCode = formatFlightDisplayCode(flight);
   const openShipmentFromFlight = (shipmentCode: string) => {
-    const shipmentId = parseShipmentCodeId(shipmentCode);
+    const shipmentId = parseShipmentIdentifier(shipmentCode);
     const shipment = shipments.find(
       (candidate) => candidate.idEnvio === shipmentId
     );
 
-    if (!shipment) {
-      openShipment(shipmentCode);
+    if (!shipment || shipment.idEnvio === null) {
+      openShipment(shipmentId !== null ? String(shipmentId) : shipmentCode, {
+        idSimulacion,
+        displayCodigo: shipmentCode,
+      });
       return;
     }
 
-    openShipment(shipmentCode, {
+    openShipment(getShipmentApiIdentifier(shipment.idEnvio), {
       idSimulacion,
-      ...resolveShipmentFocusTarget(shipment, referenceMinute),
-      shipmentRouteSegments: buildShipmentRouteSegments(shipment),
+      displayCodigo: formatShipmentDisplayCode(shipment.idEnvio),
     });
   };
 
+  const focusShipmentFromFlight = (
+    shipmentCode: string,
+    fallback: { origenIcao: string; destinoIcao: string }
+  ) => {
+    const shipmentId = parseShipmentIdentifier(shipmentCode);
+    const shipment = shipments.find(
+      (candidate) => candidate.idEnvio === shipmentId
+    );
+
+    focusShipmentRouteSegments(
+      shipment
+        ? buildShipmentRouteSegments(shipment)
+        : [{ fromIcao: fallback.origenIcao, toIcao: fallback.destinoIcao }]
+    );
+  };
+
   return (
-    <DrawerBase eyebrow="Vuelo" title={flight.codigo} onClose={close}>
+    <DrawerBase eyebrow="Vuelo" title={displayFlightCode} onClose={close}>
       <div className="mb-5">
         <Tag variant={flight.estado === "en_vuelo" ? "primary" : "neutral"}>
           {estadoLabel}
@@ -221,8 +265,8 @@ const FlightDrawer = ({
 
       {/* Informacion del vuelo */}
       <section className="mb-6">
-        <h3 className="text-section-title mb-2">Informacion del vuelo</h3>
-        <InfoRow label="Codigo" value={flight.codigo} />
+        <h3 className="text-section-title mb-2">Información del vuelo</h3>
+        <InfoRow label="Código" value={displayFlightCode} />
         <InfoRow label="Estado" value={estadoLabel} />
         <InfoRow
           label="Tipo"
@@ -233,7 +277,7 @@ const FlightDrawer = ({
           }
         />
         <InfoRow
-          label="Ocupacion"
+          label="Ocupación"
           value={`${flight.ocupacion} / ${flight.capacidad} (${formatPercent(ocupacionPct)})`}
         />
         <InfoRow label="Fecha salida" value={formatFecha(flight.fechaSalida)} />
@@ -262,7 +306,7 @@ const FlightDrawer = ({
             color="primary"
             label="En vuelo"
             sublabel="Posicion actual"
-            status="En transito"
+            status="En tránsito"
             statusColor="text-primary"
             isMiddle
           />
@@ -280,21 +324,21 @@ const FlightDrawer = ({
       {/* Envios transportados */}
       <section>
         <h3 className="text-section-title mb-3">
-          Envios transportados
+          Envíos transportados
           {flight.envios.length > 0 && ` (${flight.envios.length})`}
         </h3>
         {flight.envios.length === 0 ? (
           <p className="text-body text-text-primary">
-            Sin envios asignados todavia.
+            Sin envíos asignados todavía.
           </p>
         ) : (
           <ul className="space-y-2">
             {flight.envios.map((e) => (
               <li
                 key={e.codigo}
-                className="bg-field rounded-input px-3 py-2 flex items-center justify-between"
+                className="bg-field rounded-input px-3 py-2 flex items-center justify-between gap-3"
               >
-                <div>
+                <div className="min-w-0">
                   <button
                     type="button"
                     className="text-button text-primary hover:underline block"
@@ -306,9 +350,25 @@ const FlightDrawer = ({
                     {e.origenIcao} &gt; {e.destinoIcao}
                   </span>
                 </div>
-                <span className="text-secondary text-text-primary">
-                  {e.maletasOcupadas} / {e.maletasTotales} mal.
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-secondary text-text-primary">
+                    {e.maletasOcupadas} / {e.maletasTotales} mal.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      focusShipmentFromFlight(e.codigo, {
+                        origenIcao: e.origenIcao,
+                        destinoIcao: e.destinoIcao,
+                      })
+                    }
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
+                    aria-label={`Enfocar ruta de ${e.codigo} en el mapa`}
+                    title="Ver ruta en el mapa"
+                  >
+                    <Eye size={16} strokeWidth={2.2} aria-hidden />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -363,7 +423,7 @@ const TimelineStep = ({
         <p className="text-secondary text-text-primary">{sublabel}</p>
       )}
       {isMiddle && (
-        <p className="text-secondary text-primary mt-0.5">En transito</p>
+        <p className="text-secondary text-primary mt-0.5">En tránsito</p>
       )}
     </div>
   </div>

@@ -29,9 +29,8 @@ public class SolicitudEnvio {
     @JoinColumn(name = "id_ruta")
     private Ruta ruta;
 
-    @ManyToOne
-    @JoinColumn(name = "id_simulacion")
-    private Simulacion simulacion;
+    @Transient
+    private Integer idSimulacionVolatil;
 
     @ManyToOne(optional = false)
     @JoinColumn(
@@ -70,7 +69,7 @@ public class SolicitudEnvio {
         this.hora = LocalTime.now();
         this.idCliente = 1;
         this.ruta = null;
-        this.simulacion = null;
+        this.idSimulacionVolatil = null;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -93,7 +92,7 @@ public class SolicitudEnvio {
         this.hora = hora;
         this.idCliente = idCliente;
         this.ruta = null;
-        this.simulacion = null;
+        this.idSimulacionVolatil = null;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -107,7 +106,7 @@ public class SolicitudEnvio {
             LocalTime hora,
             Integer idCliente,
             Ruta ruta,
-            Simulacion simulacion,
+            Integer idSimulacionVolatil,
             Aeropuerto origen,
             Aeropuerto destino,
             Integer contarBolsas,
@@ -118,7 +117,7 @@ public class SolicitudEnvio {
         this.hora = hora;
         this.idCliente = idCliente;
         this.ruta = ruta;
-        this.simulacion = simulacion;
+        this.idSimulacionVolatil = idSimulacionVolatil;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -132,7 +131,7 @@ public class SolicitudEnvio {
             LocalTime hora,
             Integer idCliente,
             Ruta ruta,
-            Simulacion simulacion,
+            Integer idSimulacionVolatil,
             Aeropuerto origen,
             Aeropuerto destino,
             Integer contarBolsas,
@@ -144,7 +143,7 @@ public class SolicitudEnvio {
         this.hora = hora;
         this.idCliente = idCliente;
         this.ruta = ruta;
-        this.simulacion = simulacion;
+        this.idSimulacionVolatil = idSimulacionVolatil;
         this.origen = origen;
         this.destino = destino;
         this.contarBolsas = contarBolsas;
@@ -197,19 +196,15 @@ public class SolicitudEnvio {
     }
 
     public Integer getIdSimulacion() {
-        return simulacion != null ? simulacion.getIdSimulacion() : null;
+        return idSimulacionVolatil;
+    }
+
+    public void setIdSimulacionVolatil(Integer idSimulacionVolatil) {
+        this.idSimulacionVolatil = idSimulacionVolatil;
     }
 
     public Aeropuerto getOrigen() {
         return origen;
-    }
-
-    public Simulacion getSimulacion() {
-        return simulacion;
-    }
-
-    public void setSimulacion(Simulacion simulacion) {
-        this.simulacion = simulacion;
     }
 
     public void setOrigen(Aeropuerto origen) {
@@ -325,7 +320,7 @@ public class SolicitudEnvio {
                 ", hora=" + hora +
                 ", idCliente=" + idCliente +
                 ", idRuta=" + getIdRuta() +
-                ", idSimulacion=" + (simulacion != null ? simulacion.getIdSimulacion() : null) +
+                ", idSimulacion=" + idSimulacionVolatil +
                 ", origen=" + (origen != null ? origen.getCodigo() : null) +
                 ", destino=" + (destino != null ? destino.getCodigo() : null) +
                 ", contarBolsas=" + contarBolsas +

@@ -27,7 +27,7 @@ const ShipmentRegistrationForm = ({
   occupancyByIcao = {},
   onCreated,
   onCancel,
-  submitLabel = "Registrar envio",
+  submitLabel = "Registrar envío",
   className,
 }: ShipmentRegistrationFormProps) => {
   const [form, setForm] = useState<CreateOperationShipmentRequest>(INITIAL_FORM);
@@ -68,8 +68,8 @@ const ShipmentRegistrationForm = ({
     if (!canSubmit) {
       setError(
         exceedsOriginCapacity
-          ? `El almacen origen solo tiene ${originAvailableBags ?? 0} maletas disponibles.`
-          : "Completa los campos requeridos antes de registrar el envio."
+          ? `El almacén origen solo tiene ${originAvailableBags ?? 0} maletas disponibles.`
+          : "Completa los campos requeridos antes de registrar el envío."
       );
       setSuccess(null);
       return;
@@ -82,13 +82,13 @@ const ShipmentRegistrationForm = ({
     try {
       await createOperationShipment(form);
       setForm(INITIAL_FORM);
-      setSuccess("Envio registrado correctamente.");
+      setSuccess("Envío registrado correctamente.");
       await onCreated?.();
     } catch (submitError) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "No se pudo registrar el envio."
+          : "No se pudo registrar el envío."
       );
     } finally {
       setIsSubmitting(false);
@@ -173,7 +173,7 @@ const ShipmentRegistrationForm = ({
           </p>
           {originOccupancy !== undefined && (
             <p className="text-secondary text-text-tertiary mt-0.5">
-              Ocupacion actual: {Math.round(originOccupancy)}%
+              Ocupación actual: {Math.round(originOccupancy)}%
             </p>
           )}
         </div>
@@ -182,7 +182,7 @@ const ShipmentRegistrationForm = ({
       <div className="rounded-input bg-primary-soft border border-primary/20 px-3 py-2">
         <p className="text-secondary text-text-primary">
           El plazo maximo se calcula automaticamente en backend segun si el
-          envio es intracontinental o intercontinental.
+          envío es intracontinental o intercontinental.
         </p>
       </div>
 
@@ -194,7 +194,7 @@ const ShipmentRegistrationForm = ({
 
       {exceedsOriginCapacity && (
         <p className="text-secondary text-danger">
-          La cantidad de maletas excede la capacidad disponible del almacen de origen.
+          La cantidad de maletas excede la capacidad disponible del almacén de origen.
         </p>
       )}
 

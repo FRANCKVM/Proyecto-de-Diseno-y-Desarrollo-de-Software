@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Search, X } from "lucide-react";
+import { Eye, Search, X } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
-import Tag from "@/components/atoms/Tag";
 import {
   useDrawerStore,
   type WarehouseSemaphoreFilter,
@@ -27,16 +26,10 @@ type WarehouseSortMode =
   | "llegada-proxima"
   | "salida-proxima";
 
-const TAG_VARIANT_BY_ESTADO: Record<EstadoSemaforo, "normal" | "elevado" | "critico"> = {
-  normal: "normal",
-  elevado: "elevado",
-  critico: "critico",
-};
-
-const ESTADO_LABEL: Record<EstadoSemaforo, string> = {
-  normal: "Normal",
-  elevado: "Elevado",
-  critico: "Critico",
+const SEMAPHORE_TEXT_CLASS: Record<EstadoSemaforo, string> = {
+  normal: "text-success",
+  elevado: "text-warning",
+  critico: "text-danger",
 };
 
 const SEMAPHORE_FILTER_OPTIONS: Array<{
@@ -47,7 +40,7 @@ const SEMAPHORE_FILTER_OPTIONS: Array<{
 }> = [
   {
     value: "vacios",
-    label: "Vacios",
+    label: "Vacíos",
     className: "border-[#4b5563] bg-[#d1d5db] hover:bg-[#9ca3af]",
     activeClassName: "border-[#111827] bg-[#374151] shadow-card ring-2 ring-[#111827]/25",
   },
@@ -59,7 +52,7 @@ const SEMAPHORE_FILTER_OPTIONS: Array<{
   },
   {
     value: "elevado",
-    label: "Ambar",
+    label: "Ámbar",
     className: "border-[#f59e0b] bg-[#fde68a] hover:bg-[#fcd34d]",
     activeClassName: "border-[#d97706] bg-[#f59e0b] shadow-card ring-2 ring-[#f59e0b]/25",
   },
@@ -102,7 +95,7 @@ const formatUtcMinute = (minute: number | null): string => {
   const normalized = normalizeMinute(minute);
   const hour = String(Math.floor(normalized / 60)).padStart(2, "0");
   const minutes = String(normalized % 60).padStart(2, "0");
-  return `${hour}:${minutes} UTC`;
+  return `${hour}:${minutes}`;
 };
 
 const getNearestFlightMinute = (
@@ -116,13 +109,16 @@ const getNearestFlightMinute = (
 
   for (const shipment of shipments) {
     for (const group of getShipmentRouteGroups(shipment)) {
-      for (const flight of group.ruta?.vuelos ?? []) {
+      for (const occurrence of group.ruta?.ocurrencias ?? []) {
+        const flight = occurrence.vuelo;
         const airportMatches =
           kind === "arrival"
             ? flight.hasta.codigo === airportIcao
             : flight.desde.codigo === airportIcao;
-        const flightMinute =
-          kind === "arrival" ? flight.llegadaUtcMin : flight.salidaUtcMin;
+        const eventDate = new Date(
+          kind === "arrival" ? occurrence.fechaHoraLlegada : occurrence.fechaHoraSalida
+        );
+        const flightMinute = eventDate.getUTCHours() * 60 + eventDate.getUTCMinutes();
         const distance = getMinutesUntil(flightMinute, referenceMinute);
 
         if (!airportMatches || distance === null) {
@@ -149,6 +145,7 @@ const WarehouseListDrawer = ({
 }: WarehouseListDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openWarehouseAirport = useDrawerStore((s) => s.openWarehouseAirport);
+  const focusWarehouseOnMap = useDrawerStore((s) => s.focusWarehouseOnMap);
   const selectedRegion = useDrawerStore((s) => s.warehouseRegionFilter);
   const setSelectedRegion = useDrawerStore((s) => s.setWarehouseRegionFilter);
   const occupancyFilter = useDrawerStore((s) => s.warehouseSemaphoreFilter);
@@ -245,7 +242,7 @@ const WarehouseListDrawer = ({
       onClose={close}
     >
       <p className="text-body text-text-primary mb-5">
-        Selecciona un almacen para revisar sus envios entrantes o salientes.
+        Selecciona un almacén para revisar sus envíos entrantes o salientes.
       </p>
 
       <div className="space-y-3 mb-5">
@@ -254,7 +251,7 @@ const WarehouseListDrawer = ({
             htmlFor="warehouse-code-search"
             className="block text-label-sm text-text-primary mb-1"
           >
-            Buscar por codigo
+            Buscar por código
           </label>
           <div className="relative">
             <Search
@@ -297,9 +294,9 @@ const WarehouseListDrawer = ({
 
         <div>
           <span className="block text-label-sm text-text-primary mb-1">
-            Filtrar por semaforo
+            Filtrar por semáforo
           </span>
-          <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semaforo">
+          <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semáforo">
             <button
               type="button"
               aria-label="Mostrar todos"
@@ -353,10 +350,10 @@ const WarehouseListDrawer = ({
             }
             className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
           >
-            <option value="ocupacion-desc">Ocupacion: mayor a menor</option>
-            <option value="ocupacion-asc">Ocupacion: menor a mayor</option>
-            <option value="llegada-proxima">Llegada de vuelo mas proxima</option>
-            <option value="salida-proxima">Salida de vuelo mas proxima</option>
+            <option value="ocupacion-desc">Ocupación: mayor a menor</option>
+            <option value="ocupacion-asc">Ocupación: menor a mayor</option>
+            <option value="llegada-proxima">Llegada de vuelo más próxima</option>
+            <option value="salida-proxima">Salida de vuelo más próxima</option>
           </select>
         </div>
       </div>
@@ -379,41 +376,58 @@ const WarehouseListDrawer = ({
                 key={airport.icao}
                 className="bg-field rounded-input px-3 py-3"
               >
-                <button
-                  type="button"
-                  className="w-full text-left"
-                  onClick={() => openWarehouseAirport(airport.icao)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-button text-primary hover:underline">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      className="block max-w-full text-left"
+                      onClick={() =>
+                        openWarehouseAirport(airport.icao, {
+                          focusOnMap: false,
+                        })
+                      }
+                    >
+                      <span className="block truncate text-button text-primary hover:underline">
                         {airport.icao} - {airport.name}
-                      </p>
-                      <p className="text-secondary text-text-primary">
-                        {airport.country}
-                      </p>
-                      <p className="text-secondary text-text-primary">
-                        Capacidad: {airport.capacity} maletas
-                      </p>
-                      <p className="text-secondary text-text-primary">
-                        Prox. llegada: {formatUtcMinute(schedule?.nextArrival.minute ?? null)}
-                      </p>
-                      <p className="text-secondary text-text-primary">
-                        Prox. salida: {formatUtcMinute(schedule?.nextDeparture.minute ?? null)}
-                      </p>
-                    </div>
+                      </span>
+                    </button>
+                    <p className="text-secondary text-text-primary">
+                      {airport.country}
+                    </p>
+                    <p className="text-secondary text-text-primary">
+                      Capacidad: {airport.capacity} maletas
+                    </p>
+                    <p className="text-secondary text-text-primary">
+                      Próx. llegada: {formatUtcMinute(schedule?.nextArrival.minute ?? null)}
+                    </p>
+                    <p className="text-secondary text-text-primary">
+                      Próx. salida: {formatUtcMinute(schedule?.nextDeparture.minute ?? null)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
                     {estado ? (
-                      <div className="flex flex-col items-end gap-1">
-                        <Tag variant={TAG_VARIANT_BY_ESTADO[estado]}>
-                          {ESTADO_LABEL[estado]}
-                        </Tag>
-                        <span className="text-secondary text-text-primary">
+                      <div className="flex min-w-[3.5rem] justify-end">
+                        <span
+                          className={cn(
+                            "text-button font-semibold",
+                            SEMAPHORE_TEXT_CLASS[estado]
+                          )}
+                        >
                           {Math.round(ocupacion ?? 0)}%
                         </span>
                       </div>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => focusWarehouseOnMap(airport.icao)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
+                      aria-label="Enfocar almacén en el mapa"
+                      title="Ver almacén en el mapa"
+                    >
+                      <Eye size={16} strokeWidth={2.2} aria-hidden />
+                    </button>
                   </div>
-                </button>
+                </div>
               </li>
             );
           })}

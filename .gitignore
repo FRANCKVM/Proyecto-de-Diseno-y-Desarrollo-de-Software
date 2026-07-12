@@ -1,0 +1,8 @@
+backend/target/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+*.log
+.DS_Store

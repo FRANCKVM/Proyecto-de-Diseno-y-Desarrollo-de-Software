@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import {
   fetchAllAirportsReferenceData,
-  fetchFlightDetailReferenceData,
 } from "@/services/referenceDataService";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { VueloDetalle } from "@/types/flight.types";
@@ -23,6 +22,8 @@ interface ReferenceDataState {
 }
 
 const unique = (values: string[]) => Array.from(new Set(values));
+const flightCacheKey = (flight: VueloDetalle): string =>
+  `occ:${flight.idOcurrencia}`;
 
 export const useReferenceDataStore = create<ReferenceDataState>((set) => ({
   airports: [],
@@ -47,14 +48,14 @@ export const useReferenceDataStore = create<ReferenceDataState>((set) => ({
       const nextFlightsByCode = { ...state.flightsByCode };
 
       for (const flight of flights) {
-        nextFlightsByCode[flight.codigo] = flight;
+        nextFlightsByCode[flightCacheKey(flight)] = flight;
       }
 
       return {
         flightsByCode: nextFlightsByCode,
         flightCodesByAirport: {
           ...state.flightCodesByAirport,
-          [icao]: unique(flights.map((flight) => flight.codigo)),
+          [icao]: unique(flights.map(flightCacheKey)),
         },
       };
     }),
@@ -62,17 +63,17 @@ export const useReferenceDataStore = create<ReferenceDataState>((set) => ({
     set((state) => ({
       flightsByCode: {
         ...state.flightsByCode,
-        [flight.codigo]: flight,
+        [flightCacheKey(flight)]: flight,
       },
       flightCodesByAirport: {
         ...state.flightCodesByAirport,
         [flight.origenIcao]: unique([
           ...(state.flightCodesByAirport[flight.origenIcao] ?? []),
-          flight.codigo,
+          flightCacheKey(flight),
         ]),
         [flight.destinoIcao]: unique([
           ...(state.flightCodesByAirport[flight.destinoIcao] ?? []),
-          flight.codigo,
+          flightCacheKey(flight),
         ]),
       },
     })),
@@ -99,8 +100,15 @@ export const getCachedFlightsByAirport = (icao: string): VueloDetalle[] => {
     .filter((flight): flight is VueloDetalle => Boolean(flight));
 };
 
-export const getCachedFlightByCode = (codigo: string) =>
-  useReferenceDataStore.getState().flightsByCode[codigo] ?? null;
+export const getCachedFlightByCode = (codigo: string) => {
+  const key = codigo.startsWith("occ-")
+    ? `occ:${codigo.slice(4)}`
+    : codigo;
+  const state = useReferenceDataStore.getState();
+  return state.flightsByCode[key]
+    ?? Object.values(state.flightsByCode).find((flight) => flight.codigo === codigo)
+    ?? null;
+};
 
 export const cacheFlightsForAirport = (icao: string, flights: VueloDetalle[]) =>
   useReferenceDataStore.getState().cacheFlightsForAirport(icao, flights);
@@ -145,19 +153,4 @@ export const initializeReferenceData = async (): Promise<void> => {
   })();
 
   return initializationPromise;
-};
-
-export const ensureFlightDetailCached = async (
-  codigo: string
-): Promise<VueloDetalle | null> => {
-  const cached = getCachedFlightByCode(codigo);
-  if (cached) {
-    return cached;
-  }
-
-  const flight = await fetchFlightDetailReferenceData(codigo);
-  if (flight) {
-    cacheFlightDetail(flight);
-  }
-  return flight;
 };

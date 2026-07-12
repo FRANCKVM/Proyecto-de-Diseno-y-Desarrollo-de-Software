@@ -17,7 +17,7 @@ const ShipmentFormDrawer = ({
   const close = useDrawerStore((s) => s.close);
 
   return (
-    <DrawerBase eyebrow="Nuevo envio" title="Registrar envio" onClose={close}>
+    <DrawerBase eyebrow="Nuevo envío" title="Registrar envío" onClose={close}>
       <section className="space-y-4">
         <p className="text-secondary text-text-primary">
           Selecciona origen, destino y cantidad de maletas. El plazo se define

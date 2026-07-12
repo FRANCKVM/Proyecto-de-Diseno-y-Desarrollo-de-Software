@@ -33,6 +33,8 @@ export interface EnvioEnVuelo {
  * Vuelo en formato detallado (para FlightDrawer).
  */
 export interface VueloDetalle {
+  idOcurrencia: number;
+  idVuelo: number;
   codigo: string;
   estado: EstadoVuelo;
   tipo: TipoVuelo;

@@ -7,6 +7,7 @@ public record ResultadoColapsoResponse(
         String rango,
         Integer diasHastaColapso,
         Integer maletasProcesadas,
+        Long duracionMinutos,
         Integer plazosIncumplidos,
         AlmacenesSaturadosResponse almacenesSaturados,
         Double factorDemandaMax,

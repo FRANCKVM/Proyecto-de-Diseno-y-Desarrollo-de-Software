@@ -5,9 +5,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.time.LocalDateTime;
 
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.entities.VueloOcurrencia;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.Grafo;
@@ -22,8 +24,7 @@ public class PlanificadorGenetico {
     private final int tamanoTorneo;
     private final int escalasIntermediasMax;
     private final Random aleatorio;
-    private final int minutoInicioUtc;
-    private final VueloOcurrenciaChecker ocurrenciaChecker;
+    private final LocalDateTime fechaHoraInicio;
 
     public PlanificadorGenetico(Grafo grafo,
                                 int tamanoPoblacion,
@@ -40,8 +41,7 @@ public class PlanificadorGenetico {
                 tasaMutacion,
                 tamanoTorneo,
                 escalasIntermediasMax,
-                -1,
-                (vuelo, salidaMinuto) -> true
+                null
         );
     }
 
@@ -52,8 +52,7 @@ public class PlanificadorGenetico {
                                 double tasaMutacion,
                                 int tamanoTorneo,
                                 int escalasIntermediasMax,
-                                int minutoInicioUtc,
-                                VueloOcurrenciaChecker ocurrenciaChecker) {
+                                LocalDateTime fechaHoraInicio) {
         this.grafo = grafo;
         this.tamanoPoblacion = tamanoPoblacion;
         this.generaciones = generaciones;
@@ -62,8 +61,7 @@ public class PlanificadorGenetico {
         this.tamanoTorneo = tamanoTorneo;
         this.escalasIntermediasMax = escalasIntermediasMax;
         this.aleatorio = new Random();
-        this.minutoInicioUtc = minutoInicioUtc;
-        this.ocurrenciaChecker = ocurrenciaChecker != null ? ocurrenciaChecker : (vuelo, salidaMinuto) -> true;
+        this.fechaHoraInicio = fechaHoraInicio;
     }
 
     public Ruta encontrarMejorRuta(SolicitudEnvio solicitud) {
@@ -77,7 +75,7 @@ public class PlanificadorGenetico {
 
             // Elitismo: se conserva el mejor cromosoma encontrado.
             Cromosoma elite = new Cromosoma(mejorGlobal);
-            elite.evaluar(grafo, solicitud, minutoInicioUtc, ocurrenciaChecker);
+            elite.evaluar(grafo, solicitud, fechaHoraInicio);
             nuevaPoblacion.add(elite);
 
             while (nuevaPoblacion.size() < tamanoPoblacion) {
@@ -96,7 +94,7 @@ public class PlanificadorGenetico {
                     mutar(hijo, solicitud);
                 }
 
-                hijo.evaluar(grafo, solicitud, minutoInicioUtc, ocurrenciaChecker);
+                hijo.evaluar(grafo, solicitud, fechaHoraInicio);
                 nuevaPoblacion.add(hijo);
             }
 
@@ -200,12 +198,9 @@ public class PlanificadorGenetico {
     ) {
         List<Aeropuerto> candidatos = new ArrayList<>();
 
-        for (Vuelo vuelo : grafo.getVuelosSalientes(actual)) {
-            if (vuelo.estaCancelado()) {
-                continue;
-            }
-
-            if (!vuelo.tieneCapacidad(solicitud.getContarBolsas())) {
+        for (VueloOcurrencia ocurrencia : grafo.getOcurrenciasSalientes(actual)) {
+            Vuelo vuelo = ocurrencia.getVuelo();
+            if (!ocurrencia.tieneCapacidad(solicitud.getContarBolsas())) {
                 continue;
             }
 
@@ -299,7 +294,7 @@ public class PlanificadorGenetico {
 
     private void evaluarPoblacion(List<Cromosoma> poblacion, SolicitudEnvio solicitud) {
         for (Cromosoma cromosoma : poblacion) {
-            cromosoma.evaluar(grafo, solicitud, minutoInicioUtc, ocurrenciaChecker);
+            cromosoma.evaluar(grafo, solicitud, fechaHoraInicio);
         }
     }
 
@@ -434,12 +429,9 @@ public class PlanificadorGenetico {
         List<Aeropuerto> candidatos = new ArrayList<>();
         List<Aeropuerto> candidatosConConexion = new ArrayList<>();
 
-        for (Vuelo vuelo : grafo.getVuelosSalientes(anterior)) {
-            if (vuelo.estaCancelado()) {
-                continue;
-            }
-
-            if (!vuelo.tieneCapacidad(solicitud.getContarBolsas())) {
+        for (VueloOcurrencia ocurrencia : grafo.getOcurrenciasSalientes(anterior)) {
+            Vuelo vuelo = ocurrencia.getVuelo();
+            if (!ocurrencia.tieneCapacidad(solicitud.getContarBolsas())) {
                 continue;
             }
 
@@ -472,10 +464,9 @@ public class PlanificadorGenetico {
     }
 
     private boolean existeVuelo(Aeropuerto desde, Aeropuerto hasta, int bolsas) {
-        for (Vuelo vuelo : grafo.getVuelosSalientes(desde)) {
-            if (vuelo.getHasta().equals(hasta) &&
-                !vuelo.estaCancelado() &&
-                vuelo.tieneCapacidad(bolsas)) {
+        for (VueloOcurrencia ocurrencia : grafo.getOcurrenciasSalientes(desde)) {
+            Vuelo vuelo = ocurrencia.getVuelo();
+            if (vuelo.getHasta().equals(hasta) && ocurrencia.tieneCapacidad(bolsas)) {
                 return true;
             }
         }

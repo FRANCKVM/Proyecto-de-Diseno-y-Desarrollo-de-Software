@@ -68,25 +68,4 @@ export interface FlightSimulationConfig {
    * simulacion (ejecucion, colapso); en dia a dia se ignora.
    */
   scaleByDemand?: boolean;
-  /**
-   * Envios reales del backend. Si se proveen, el hook deja de generar
-   * vuelos mock y calcula el progress visual a partir de los vuelos de
-   * cada ruta usando sus tiempos UTC.
-   */
-  backendShipments?: import("@/types/backendSimulation.types").BackendSolicitudEnvio[];
-  /**
-   * Minuto UTC de referencia para simulaciones. Si no se pasa, se usa
-   * el reloj UTC actual del navegador (operacion real).
-   */
-  backendClockMinutes?: number | null;
-  /**
-   * Fecha/hora inicial de la simulacion enviada por backend.
-   * Permite ubicar cada envio dentro de la linea de tiempo simulada.
-   */
-  backendSimulationStart?: string | null;
-  /**
-   * Velocidad base del reloj simulado enviada/derivada del backend.
-   * Expresada en minutos simulados por segundo real.
-   */
-  backendSimMinutesPerSecond?: number | null;
 }

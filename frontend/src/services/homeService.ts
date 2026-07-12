@@ -34,50 +34,22 @@ const parseShipmentDateTime = (
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const getCurrentUtcMinute = () => {
-  const nowUtc = new Date();
-  return nowUtc.getUTCHours() * 60 + nowUtc.getUTCMinutes();
-};
-
-const calculateFlightProgress = (
-  vuelo: BackendVuelo,
-  minutoActualUtc: number
-) => {
-  const salida = vuelo.salidaUtcMin ?? 0;
-  const llegada = vuelo.llegadaUtcMin ?? salida;
-
-  if (llegada <= salida) {
-    return minutoActualUtc >= llegada ? 1 : 0;
-  }
-
-  if (minutoActualUtc <= salida) {
-    return 0;
-  }
-
-  if (minutoActualUtc >= llegada) {
-    return 1;
-  }
-
-  return (minutoActualUtc - salida) / (llegada - salida);
-};
-
 const isIntercontinentalFlight = (vuelo: BackendVuelo) =>
   vuelo.desde.region.trim().toLowerCase() !==
   vuelo.hasta.region.trim().toLowerCase();
 
-const isShipmentInCourse = (
-  envio: BackendSolicitudEnvio,
-  minutoActualUtc: number
-) => {
-  const vuelos = getShipmentRouteGroups(envio).flatMap(
-    (group) => group.ruta?.vuelos ?? []
+const isShipmentInCourse = (envio: BackendSolicitudEnvio) => {
+  const ocurrencias = getShipmentRouteGroups(envio).flatMap(
+    (group) => group.ruta?.ocurrencias ?? []
   );
 
-  if (vuelos.length === 0) {
+  if (ocurrencias.length === 0) {
     return false;
   }
 
-  return vuelos.some((vuelo) => calculateFlightProgress(vuelo, minutoActualUtc) < 1);
+  return ocurrencias.some((ocurrencia) =>
+    ocurrencia.estado === "PROGRAMADO" || ocurrencia.estado === "EN_VUELO"
+  );
 };
 
 const isShipmentCompliant = (envio: BackendSolicitudEnvio) => {
@@ -127,13 +99,12 @@ const formatActivityTimestamp = (date: Date | null) => {
 };
 
 const buildActivityMessage = (
-  envio: BackendSolicitudEnvio,
-  minutoActualUtc: number
+  envio: BackendSolicitudEnvio
 ) => {
   const idLabel = envio.idEnvio ?? "s/n";
   const routeGroups = getShipmentRouteGroups(envio);
   const tramos = routeGroups.reduce(
-    (total, group) => total + (group.ruta?.vuelos?.length ?? 0),
+    (total, group) => total + (group.ruta?.ocurrencias?.length ?? 0),
     0
   );
   const origen = envio.origen.codigo;
@@ -147,7 +118,7 @@ const buildActivityMessage = (
     return `Envio ${idLabel} registrado sin ruta: ${origen} -> ${destino}.`;
   }
 
-  if (isShipmentInCourse(envio, minutoActualUtc)) {
+  if (isShipmentInCourse(envio)) {
     return `Envio ${idLabel} en curso: ${origen} -> ${destino} con ${tramos} tramo(s) y ${maletas} maletas.`;
   }
 
@@ -159,12 +130,11 @@ const buildActivityMessage = (
 };
 
 const buildActivitySeverity = (
-  envio: BackendSolicitudEnvio,
-  minutoActualUtc: number
+  envio: BackendSolicitudEnvio
 ): ActividadReciente["severidad"] => {
   const routeGroups = getShipmentRouteGroups(envio);
   const tramos = routeGroups.reduce(
-    (total, group) => total + (group.ruta?.vuelos?.length ?? 0),
+    (total, group) => total + (group.ruta?.ocurrencias?.length ?? 0),
     0
   );
 
@@ -172,7 +142,7 @@ const buildActivitySeverity = (
     return "error";
   }
 
-  if (isShipmentInCourse(envio, minutoActualUtc)) {
+  if (isShipmentInCourse(envio)) {
     return "informacion";
   }
 
@@ -192,25 +162,23 @@ export const buildHomeKpis = ({
       .map((airport) => airport.region?.trim())
       .filter((region): region is string => Boolean(region))
   );
-  const minutoActualUtc = getCurrentUtcMinute();
   const vuelosActivosIds = new Set<number>();
   const vuelosIntercontinentalesIds = new Set<number>();
   const enviosEnCurso = envios.filter((envio) =>
-    isShipmentInCourse(envio, minutoActualUtc)
+    isShipmentInCourse(envio)
   );
 
   for (const envio of envios) {
     for (const group of getShipmentRouteGroups(envio)) {
-      for (const vuelo of group.ruta?.vuelos ?? []) {
-      const progress = calculateFlightProgress(vuelo, minutoActualUtc);
-
-      if (progress <= 0 || progress >= 1) {
+      for (const ocurrencia of group.ruta?.ocurrencias ?? []) {
+      if (ocurrencia.estado !== "EN_VUELO") {
         continue;
       }
 
-      vuelosActivosIds.add(vuelo.idVuelo);
+      const vuelo = ocurrencia.vuelo;
+      vuelosActivosIds.add(ocurrencia.idOcurrencia);
       if (isIntercontinentalFlight(vuelo)) {
-        vuelosIntercontinentalesIds.add(vuelo.idVuelo);
+        vuelosIntercontinentalesIds.add(ocurrencia.idOcurrencia);
       }
       }
     }
@@ -266,8 +234,6 @@ export const buildRecentActivity = (
     ];
   }
 
-  const minutoActualUtc = getCurrentUtcMinute();
-
   return [...envios]
     .sort((a, b) => {
       const dateA = parseShipmentDateTime(a)?.getTime() ?? 0;
@@ -281,8 +247,8 @@ export const buildRecentActivity = (
       return {
         id: `actividad-${envio.idEnvio ?? index}`,
         cuando: formatActivityTimestamp(fecha),
-        mensaje: buildActivityMessage(envio, minutoActualUtc),
-        severidad: buildActivitySeverity(envio, minutoActualUtc),
+        mensaje: buildActivityMessage(envio),
+        severidad: buildActivitySeverity(envio),
       };
     });
 };

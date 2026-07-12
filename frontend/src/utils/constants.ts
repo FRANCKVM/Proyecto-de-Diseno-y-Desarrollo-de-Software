@@ -17,8 +17,8 @@ export const MAX_TIEMPO_ENTREGA_INTERCONTINENTAL = 2;
 // Umbrales por defecto de ocupacion de almacen (porcentaje).
 // Configurables por el operador en la pantalla de configuracion.
 // ============================================================================
-export const UMBRAL_SEMAFORO_VERDE_DEFAULT = 40;
-export const UMBRAL_SEMAFORO_AMBAR_DEFAULT = 70;
+export const UMBRAL_SEMAFORO_VERDE_DEFAULT = 10;
+export const UMBRAL_SEMAFORO_AMBAR_DEFAULT = 40;
 
 export const COLOR_SEMAFORO_VERDE = COLORS.success.base;
 export const COLOR_SEMAFORO_AMBAR = COLORS.warning.base;

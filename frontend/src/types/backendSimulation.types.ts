@@ -16,15 +16,23 @@ export interface BackendVuelo {
   hasta: BackendAeropuerto;
   tiempoViajarDias: number;
   capacidad: number;
-  capacidadUsada: number;
-  cancelado: boolean;
   salidaUtcMin: number;
   llegadaUtcMin: number;
 }
 
+export interface BackendVueloOcurrencia {
+  idOcurrencia: number;
+  vuelo: BackendVuelo;
+  fechaHoraSalida: string;
+  fechaHoraLlegada: string;
+  capacidad: number;
+  capacidadUsada: number;
+  estado: "PROGRAMADO" | "EN_VUELO" | "COMPLETADO" | "CANCELADO";
+}
+
 export interface BackendRuta {
   idRuta: number | null;
-  vuelos: BackendVuelo[];
+  ocurrencias: BackendVueloOcurrencia[];
   tiempoTotal: number;
   costo: number;
   factible: boolean;
@@ -37,14 +45,6 @@ export interface BackendAsignacionEnvio {
   estado: "INGRESADO" | "PARCIAL" | "EN_PROCESO" | "COMPLETADO";
 }
 
-export interface BackendSimulacion {
-  idSimulacion: number;
-  k: number;
-  fechaInicio: string;
-  fechaFin: string | null;
-  activa: boolean;
-}
-
 export interface BackendSolicitudEnvio {
   idEnvio: number | null;
   fecha: string;
@@ -52,7 +52,6 @@ export interface BackendSolicitudEnvio {
   idCliente: number;
   ruta: BackendRuta | null;
   idRuta?: number | null;
-  simulacion: BackendSimulacion | null;
   idSimulacion?: number | null;
   origen: BackendAeropuerto;
   destino: BackendAeropuerto;

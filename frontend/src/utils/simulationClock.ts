@@ -33,7 +33,7 @@ export const parseLocalDateTime = (
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const parseBackendRealDateTime = (
+export const parseBackendRealDateTime = (
   value: string | null | undefined,
   nowMs: number
 ): Date | null => {

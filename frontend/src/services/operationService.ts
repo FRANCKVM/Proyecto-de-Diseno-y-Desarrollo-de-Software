@@ -54,7 +54,7 @@ export const createOperationShipment = async (
       hora: now.toTimeString().slice(0, 8),
       idCliente: 1,
       ruta: null,
-      simulacion: null,
+      idSimulacion: null,
       origen: {
         codigo: payload.origenIcao,
         ciudad: payload.origenIcao,

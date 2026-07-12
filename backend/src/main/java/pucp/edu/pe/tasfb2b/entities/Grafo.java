@@ -1,24 +1,22 @@
 package pucp.edu.pe.tasfb2b.entities;
+
 import java.util.*;
 
 public class Grafo {
-    private final Map<Aeropuerto, List<Vuelo>> adyacencia;
-
-    public Grafo() {
-        this.adyacencia = new HashMap<>();
-    }
+    private final Map<Aeropuerto, List<VueloOcurrencia>> adyacencia = new HashMap<>();
 
     public void agregarAeropuerto(Aeropuerto aeropuerto) {
         adyacencia.putIfAbsent(aeropuerto, new ArrayList<>());
     }
 
-    public void agregarVuelo(Vuelo vuelo) {
+    public void agregarOcurrencia(VueloOcurrencia ocurrencia) {
+        Vuelo vuelo = ocurrencia.getVuelo();
         agregarAeropuerto(vuelo.getDesde());
         agregarAeropuerto(vuelo.getHasta());
-        adyacencia.get(vuelo.getDesde()).add(vuelo);
+        adyacencia.get(vuelo.getDesde()).add(ocurrencia);
     }
 
-    public List<Vuelo> getVuelosSalientes(Aeropuerto aeropuerto) {
+    public List<VueloOcurrencia> getOcurrenciasSalientes(Aeropuerto aeropuerto) {
         return adyacencia.getOrDefault(aeropuerto, Collections.emptyList());
     }
 

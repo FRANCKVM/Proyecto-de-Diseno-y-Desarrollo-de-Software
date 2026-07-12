@@ -9,14 +9,14 @@ import java.util.Random;
 @Service
 public class VueloCancelacionService {
 
-    public static final double PROBABILIDAD_CANCELACION = 0.20;
+    public static final double PROBABILIDAD_CANCELACION = 0.10;
     public static final long SEMILLA_CANCELACION = 42L;
     public static final int MINUTOS_AVISO_MIN = 60;
     public static final int MINUTOS_AVISO_MAX = 180;
     public static final int MINUTOS_DIA = 24 * 60;
 
     public boolean debeCancelar(Vuelo vuelo, long claveSalida) {
-        if (vuelo == null || vuelo.getIdVuelo() == null || Boolean.TRUE.equals(vuelo.getCancelado())) {
+        if (vuelo == null || vuelo.getIdVuelo() == null) {
             return false;
         }
 

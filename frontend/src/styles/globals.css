@@ -60,6 +60,10 @@
     max-width: none !important;
     height: auto;
   }
+
+  .leaflet-control-attribution {
+    display: none !important;
+  }
 }
 
 /* ========================================================================
@@ -133,6 +137,28 @@
     cursor: pointer;
   }
 
+  .tasf-flight-overlay-marker {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    pointer-events: auto;
+    will-change: transform;
+  }
+
+  .tasf-flight-overlay-tooltip {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%);
+    transition: opacity 120ms ease;
+    z-index: 2;
+  }
+
   .tasf-flight-tooltip {
     border: 1px solid #e0e2e7;
     border-radius: 6px;
@@ -153,6 +179,34 @@
   .tasf-flight-tooltip-content {
     color: #181b27;
     white-space: nowrap;
+  }
+
+  .tasf-route-overlay-line {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: var(--tasf-route-weight, 1px);
+    pointer-events: none;
+    transform-origin: 0 50%;
+    will-change: transform, width;
+    opacity: var(--tasf-route-opacity, 0.7);
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--tasf-route-color, #646b7a) 0,
+      var(--tasf-route-color, #646b7a) 6px,
+      transparent 6px,
+      transparent 14px
+    );
+  }
+
+  .tasf-route-overlay-arrow {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 18px;
+    height: 18px;
+    pointer-events: none;
+    will-change: transform;
   }
 
   .tasf-route-arrow {

@@ -15,25 +15,25 @@ public interface AsignacionEnvioRepository extends JpaRepository<AsignacionEnvio
 
     @EntityGraph(attributePaths = {
             "envio",
-            "envio.simulacion",
             "envio.origen",
             "envio.destino",
             "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
+            "ruta.ocurrencias",
+            "ruta.ocurrencias.vuelo",
+            "ruta.ocurrencias.vuelo.desde",
+            "ruta.ocurrencias.vuelo.hasta"
     })
     List<AsignacionEnvio> findByEnvio_IdEnvioOrderByIdAsignacionAsc(Integer idEnvio);
 
     @EntityGraph(attributePaths = {
             "envio",
-            "envio.simulacion",
             "envio.origen",
             "envio.destino",
             "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
+            "ruta.ocurrencias",
+            "ruta.ocurrencias.vuelo",
+            "ruta.ocurrencias.vuelo.desde",
+            "ruta.ocurrencias.vuelo.hasta"
     })
     @Query("""
             select a
@@ -45,13 +45,13 @@ public interface AsignacionEnvioRepository extends JpaRepository<AsignacionEnvio
 
     @EntityGraph(attributePaths = {
             "envio",
-            "envio.simulacion",
             "envio.origen",
             "envio.destino",
             "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
+            "ruta.ocurrencias",
+            "ruta.ocurrencias.vuelo",
+            "ruta.ocurrencias.vuelo.desde",
+            "ruta.ocurrencias.vuelo.hasta"
     })
     @Query("""
             select a
@@ -65,41 +65,21 @@ public interface AsignacionEnvioRepository extends JpaRepository<AsignacionEnvio
 
     @EntityGraph(attributePaths = {
             "envio",
-            "envio.simulacion",
             "envio.origen",
             "envio.destino",
             "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
+            "ruta.ocurrencias",
+            "ruta.ocurrencias.vuelo",
+            "ruta.ocurrencias.vuelo.desde",
+            "ruta.ocurrencias.vuelo.hasta"
     })
     @Query("""
             select distinct a
             from AsignacionEnvio a
             join a.ruta r
-            join r.vuelos v
-            where v.idVuelo = :idVuelo
+            join r.ocurrencias o
+            where o.idOcurrencia in :idsOcurrencia
             order by a.envio.idEnvio asc, a.idAsignacion asc
             """)
-    List<AsignacionEnvio> findByVueloId(@Param("idVuelo") Integer idVuelo);
-
-    @EntityGraph(attributePaths = {
-            "envio",
-            "envio.simulacion",
-            "envio.origen",
-            "envio.destino",
-            "ruta",
-            "ruta.vuelos",
-            "ruta.vuelos.desde",
-            "ruta.vuelos.hasta"
-    })
-    @Query("""
-            select distinct a
-            from AsignacionEnvio a
-            join a.ruta r
-            join r.vuelos v
-            where v.idVuelo in :idsVuelo
-            order by a.envio.idEnvio asc, a.idAsignacion asc
-            """)
-    List<AsignacionEnvio> findByVueloIds(@Param("idsVuelo") List<Integer> idsVuelo);
+    List<AsignacionEnvio> findByOcurrenciaIds(@Param("idsOcurrencia") List<Long> idsOcurrencia);
 }

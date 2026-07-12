@@ -1,3 +1,4 @@
+import { Eye, X } from "lucide-react";
 import Tag, { type TagVariant } from "@/components/atoms/Tag";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { cn } from "@/utils/cn";
@@ -5,8 +6,8 @@ import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
 
 interface FlightListCardProps {
   code: string;
-  routeText: string;
-  metaText: string;
+  routeText?: string;
+  metaText?: string;
   statusLabel: string;
   statusVariant: TagVariant;
   departureText: string;
@@ -18,6 +19,7 @@ interface FlightListCardProps {
   isCancelling?: boolean;
   notice?: string | null;
   onOpen: () => void;
+  onFocusOnMap?: () => void;
   onCancel?: () => void;
 }
 
@@ -82,6 +84,7 @@ const FlightListCard = ({
   isCancelling = false,
   notice,
   onOpen,
+  onFocusOnMap,
   onCancel,
 }: FlightListCardProps) => {
   const occupancyClass = getSemaphoreTextClass(occupancyPct, rangosSemaforo);
@@ -90,38 +93,71 @@ const FlightListCard = ({
   return (
     <article
       className={cn(
-        "w-full rounded-card border border-l-4 border-border bg-card px-4 py-3 text-left text-black transition-colors hover:bg-field",
+        "w-full rounded-input border border-l-4 border-border bg-card px-3 py-3 text-left text-black transition-colors hover:bg-field",
         borderClass
       )}
     >
       <button type="button" onClick={onOpen} className="w-full text-left">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-button text-black truncate">{code}</p>
-            <p className="mt-1 text-secondary text-black">{routeText}</p>
-            <p className="mt-1 text-secondary text-black">{metaText}</p>
+            <p className="text-button text-primary truncate">{code}</p>
+            {routeText && (
+              <p className="mt-1 text-secondary text-black">{routeText}</p>
+            )}
+            {metaText && (
+              <p className="mt-1 text-secondary text-black">{metaText}</p>
+            )}
           </div>
-          <div className="flex shrink-0 items-start">
+          <div className="flex shrink-0 items-center gap-2">
             <Tag variant={statusVariant}>{statusLabel}</Tag>
+            {onFocusOnMap && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFocusOnMap();
+                }}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
+                aria-label="Enfocar vuelo en el mapa"
+                title="Ver vuelo en el mapa"
+              >
+                <Eye size={16} strokeWidth={2.2} aria-hidden />
+              </button>
+            )}
+            {canCancel && onCancel && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancel();
+                }}
+                disabled={isCancelling}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-danger bg-card text-danger transition-colors hover:bg-danger/10 disabled:opacity-60 disabled:cursor-not-allowed"
+                aria-label={isCancelling ? "Cancelando vuelo" : "Cancelar vuelo"}
+                title={isCancelling ? "Cancelando..." : "Cancelar"}
+              >
+                <X size={15} strokeWidth={2.4} aria-hidden />
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 text-secondary">
-          <div className="inline-flex items-baseline gap-2">
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-secondary">
+          <div className="inline-flex items-baseline gap-1.5">
             <span className="text-black">Salida</span>
-            <span className="text-button text-black">{departureText}</span>
+            <span className="text-secondary text-black">{departureText}</span>
           </div>
-          <div className="inline-flex items-baseline gap-2">
+          <div className="inline-flex items-baseline gap-1.5">
             <span className="text-black">Llegada</span>
-            <span className="text-button text-black">{arrivalText}</span>
+            <span className="text-secondary text-black">{arrivalText}</span>
           </div>
-          <div className="inline-flex items-baseline gap-2">
+          <div className="inline-flex items-baseline gap-1.5">
             <span className="text-black">Progreso</span>
-            <span className="text-button text-black">{progressPct}%</span>
+            <span className="text-secondary text-black">{progressPct}%</span>
           </div>
-          <div className="inline-flex items-baseline gap-2">
-            <span className="text-black">Ocupacion</span>
-            <span className={cn("text-button", occupancyClass)}>
+          <div className="inline-flex items-baseline gap-1.5">
+            <span className="text-black">Ocupación</span>
+            <span className={cn("text-secondary", occupancyClass)}>
               {formatPercent(occupancyPct)}
             </span>
           </div>
@@ -137,18 +173,6 @@ const FlightListCard = ({
         </div>
       )}
 
-      {canCancel && onCancel && (
-        <div className="mt-3 flex justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isCancelling}
-            className="px-3 py-1.5 rounded-input border border-danger text-secondary text-danger bg-card hover:bg-danger/10 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {isCancelling ? "Cancelando..." : "Cancelar"}
-          </button>
-        </div>
-      )}
     </article>
   );
 };

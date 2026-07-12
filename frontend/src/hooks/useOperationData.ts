@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getOperationMap,
   getOperationState,
@@ -11,29 +11,66 @@ import type {
 } from "@/types/backendSimulation.types";
 import { USE_MOCK_DATA } from "@/utils/constants";
 
-const POLL_INTERVAL_MS = 5000;
+const STATE_POLL_INTERVAL_MS = 5000;
+const MAP_POLL_INTERVAL_MS = 10000;
+const SHIPMENTS_POLL_INTERVAL_MS = 15000;
 
 export const useOperationData = () => {
   const [estado, setEstado] = useState<BackendEstadoOperacion | null>(null);
   const [mapa, setMapa] = useState<BackendMapaSimulacionEstado | null>(null);
   const [envios, setEnvios] = useState<BackendSolicitudEnvio[]>([]);
+  const isFetchingStateRef = useRef(false);
+  const isFetchingMapRef = useRef(false);
+  const isFetchingShipmentsRef = useRef(false);
 
-  const poll = async () => {
-    const [estadoActual, mapaActual, enviosActuales] = await Promise.all([
-      getOperationState(),
-      getOperationMap(),
-      listOperationShipments(),
-    ]);
-
-    if (estadoActual) {
-      setEstado(estadoActual);
+  const fetchState = async () => {
+    if (isFetchingStateRef.current) {
+      return;
     }
+    isFetchingStateRef.current = true;
 
-    if (mapaActual) {
-      setMapa(mapaActual);
+    try {
+      const estadoActual = await getOperationState();
+      if (estadoActual) {
+        setEstado(estadoActual);
+      }
+    } finally {
+      isFetchingStateRef.current = false;
     }
+  };
 
-    setEnvios(enviosActuales);
+  const fetchMap = async () => {
+    if (isFetchingMapRef.current) {
+      return;
+    }
+    isFetchingMapRef.current = true;
+
+    try {
+      const mapaActual = await getOperationMap();
+      if (mapaActual) {
+        setMapa(mapaActual);
+      }
+    } finally {
+      isFetchingMapRef.current = false;
+    }
+  };
+
+  const fetchShipments = async () => {
+    if (isFetchingShipmentsRef.current) {
+      return;
+    }
+    isFetchingShipmentsRef.current = true;
+
+    try {
+      const enviosActuales = await listOperationShipments();
+      setEnvios(enviosActuales);
+    } finally {
+      isFetchingShipmentsRef.current = false;
+    }
+  };
+
+  const refresh = async () => {
+    await Promise.all([fetchState(), fetchMap(), fetchShipments()]);
   };
 
   useEffect(() => {
@@ -42,37 +79,90 @@ export const useOperationData = () => {
     }
 
     let cancelled = false;
+    const canPoll = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
 
-    const safePoll = async () => {
-      const [estadoActual, mapaActual, enviosActuales] = await Promise.all([
-        getOperationState(),
-        getOperationMap(),
-        listOperationShipments(),
-      ]);
+    const safeFetchState = async () => {
+      if (!canPoll() || isFetchingStateRef.current) {
+        return;
+      }
+      isFetchingStateRef.current = true;
 
-      if (cancelled) {
+      try {
+        const estadoActual = await getOperationState();
+        if (!cancelled && estadoActual) {
+          setEstado(estadoActual);
+        }
+      } finally {
+        isFetchingStateRef.current = false;
+      }
+    };
+
+    const safeFetchMap = async () => {
+      if (!canPoll() || isFetchingMapRef.current) {
+        return;
+      }
+      isFetchingMapRef.current = true;
+
+      try {
+        const mapaActual = await getOperationMap();
+        if (!cancelled && mapaActual) {
+          setMapa(mapaActual);
+        }
+      } finally {
+        isFetchingMapRef.current = false;
+      }
+    };
+
+    const safeFetchShipments = async () => {
+      if (!canPoll() || isFetchingShipmentsRef.current) {
+        return;
+      }
+      isFetchingShipmentsRef.current = true;
+
+      try {
+        const enviosActuales = await listOperationShipments();
+        if (!cancelled) {
+          setEnvios(enviosActuales);
+        }
+      } finally {
+        isFetchingShipmentsRef.current = false;
+      }
+    };
+
+    const refreshVisibleData = () => {
+      if (!canPoll()) {
         return;
       }
 
-      if (estadoActual) {
-        setEstado(estadoActual);
-      }
-
-      if (mapaActual) {
-        setMapa(mapaActual);
-      }
-
-      setEnvios(enviosActuales);
+      void safeFetchState();
+      void safeFetchMap();
+      void safeFetchShipments();
     };
 
-    void safePoll();
-    const intervalId = window.setInterval(() => {
-      void safePoll();
-    }, POLL_INTERVAL_MS);
+    refreshVisibleData();
+
+    const stateIntervalId = window.setInterval(() => {
+      void safeFetchState();
+    }, STATE_POLL_INTERVAL_MS);
+    const mapIntervalId = window.setInterval(() => {
+      void safeFetchMap();
+    }, MAP_POLL_INTERVAL_MS);
+    const shipmentsIntervalId = window.setInterval(() => {
+      void safeFetchShipments();
+    }, SHIPMENTS_POLL_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      refreshVisibleData();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      window.clearInterval(stateIntervalId);
+      window.clearInterval(mapIntervalId);
+      window.clearInterval(shipmentsIntervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -80,6 +170,6 @@ export const useOperationData = () => {
     estado,
     mapa,
     envios,
-    refresh: poll,
+    refresh,
   };
 };

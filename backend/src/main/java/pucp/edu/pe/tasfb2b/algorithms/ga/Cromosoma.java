@@ -1,15 +1,18 @@
 package pucp.edu.pe.tasfb2b.algorithms.ga;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
-import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.entities.Grafo;
 import pucp.edu.pe.tasfb2b.entities.Ruta;
 import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
-import pucp.edu.pe.tasfb2b.entities.Grafo;
+import pucp.edu.pe.tasfb2b.entities.Vuelo;
+import pucp.edu.pe.tasfb2b.entities.VueloOcurrencia;
 
 public class Cromosoma {
     private final List<Aeropuerto> genes;
@@ -18,10 +21,7 @@ public class Cromosoma {
     private boolean factible;
 
     public Cromosoma() {
-        this.genes = new ArrayList<>();
-        this.fitness = Double.MAX_VALUE;
-        this.ruta = new Ruta();
-        this.factible = false;
+        this(new ArrayList<>());
     }
 
     public Cromosoma(List<Aeropuerto> genes) {
@@ -38,226 +38,113 @@ public class Cromosoma {
         this.factible = otro.factible;
     }
 
-    public List<Aeropuerto> obtenerGenes() {
-        return genes;
-    }
-
-    public double obtenerFitness() {
-        return fitness;
-    }
-
-    public Ruta obtenerRuta() {
-        return ruta;
-    }
-
-    public boolean esFactible() {
-        return factible;
-    }
-
-    public void establecerGen(int indice, Aeropuerto aeropuerto) {
-        genes.set(indice, aeropuerto);
-    }
-
-    public void agregarGen(Aeropuerto aeropuerto) {
-        genes.add(aeropuerto);
-    }
-
-    public boolean contieneAeropuerto(Aeropuerto aeropuerto) {
-        return genes.contains(aeropuerto);
-    }
+    public List<Aeropuerto> obtenerGenes() { return genes; }
+    public double obtenerFitness() { return fitness; }
+    public Ruta obtenerRuta() { return ruta; }
+    public boolean esFactible() { return factible; }
+    public void establecerGen(int indice, Aeropuerto aeropuerto) { genes.set(indice, aeropuerto); }
+    public void agregarGen(Aeropuerto aeropuerto) { genes.add(aeropuerto); }
+    public boolean contieneAeropuerto(Aeropuerto aeropuerto) { return genes.contains(aeropuerto); }
 
     public void evaluar(Grafo grafo, SolicitudEnvio solicitud) {
-        evaluar(grafo, solicitud, -1, (vuelo, salidaMinuto) -> true);
+        evaluar(grafo, solicitud, solicitud.getFechaHoraRegistro());
     }
 
-    public void evaluar(
-            Grafo grafo,
-            SolicitudEnvio solicitud,
-            int minutoInicioUtc,
-            VueloOcurrenciaChecker ocurrenciaChecker
-    ) {
+    public void evaluar(Grafo grafo, SolicitudEnvio solicitud, LocalDateTime fechaHoraInicio) {
         Ruta rutaCandidato = new Ruta();
         boolean valido = true;
 
-        if (genes.size() < 2) {
-            this.fitness = 1_000_000;
-            this.factible = false;
-            this.ruta = rutaCandidato;
-            return;
-        }
-
-        if (!genes.get(0).equals(solicitud.getOrigen()) ||
-            !genes.get(genes.size() - 1).equals(solicitud.getDestino())) {
-
+        if (genes.size() < 2
+                || !genes.getFirst().equals(solicitud.getOrigen())
+                || !genes.getLast().equals(solicitud.getDestino())) {
             this.fitness = 1_000_000 + genes.size() * 100;
             this.factible = false;
             this.ruta = rutaCandidato;
             return;
         }
 
-        Set<Aeropuerto> visitados = new HashSet<>();
-        int tiempoActualUtcMin = minutoInicioUtc;
-        VueloOcurrenciaChecker checker = ocurrenciaChecker != null
-                ? ocurrenciaChecker
-                : (vuelo, salidaMinuto) -> true;
+        LocalDateTime cursor = fechaHoraInicio != null ? fechaHoraInicio : solicitud.getFechaHoraRegistro();
+        if (cursor == null) {
+            throw new IllegalArgumentException("La solicitud debe tener fecha y hora para elegir una ocurrencia.");
+        }
 
+        Set<Aeropuerto> visitados = new HashSet<>();
         for (int i = 0; i < genes.size() - 1; i++) {
             Aeropuerto desde = genes.get(i);
             Aeropuerto hasta = genes.get(i + 1);
-
             if (!visitados.add(desde)) {
                 valido = false;
                 break;
             }
 
-            Vuelo vuelo = encontrarMejorVuelo(
-                grafo,
-                desde,
-                hasta,
-                solicitud.getContarBolsas(),
-                tiempoActualUtcMin,
-                rutaCandidato.getTiempoTotal(),
-                solicitud.getDiasTiempoMaximo(),
-                checker
+            VueloOcurrencia ocurrencia = encontrarMejorOcurrencia(
+                    grafo,
+                    desde,
+                    hasta,
+                    solicitud.getContarBolsas(),
+                    cursor,
+                    rutaCandidato.getTiempoTotal(),
+                    solicitud.getDiasTiempoMaximo()
             );
-
-            if (vuelo == null) {
+            if (ocurrencia == null) {
                 valido = false;
                 break;
             }
 
-            double incrementoDias = calcularIncrementoDias(vuelo, tiempoActualUtcMin);
-
+            double incrementoDias = Duration.between(cursor, ocurrencia.getFechaHoraLlegada()).toMinutes() / 1440.0;
             if (rutaCandidato.getTiempoTotal() + incrementoDias > solicitud.getDiasTiempoMaximo()) {
                 valido = false;
                 break;
             }
-
-            rutaCandidato.agregarVuelo(vuelo, incrementoDias);
-            tiempoActualUtcMin = calcularLlegadaAjustada(vuelo, tiempoActualUtcMin);
+            rutaCandidato.agregarOcurrencia(ocurrencia, incrementoDias);
+            cursor = ocurrencia.getFechaHoraLlegada();
         }
 
         rutaCandidato.evaluar(solicitud);
-
         if (!rutaCandidato.esFactible()) {
             valido = false;
         }
 
         this.ruta = rutaCandidato;
         this.factible = valido;
-
-        if (valido) {
-            this.fitness = rutaCandidato.getCosto();
-        } else {
-            double penalizacion = 5000;
-            penalizacion += genes.size() * 100;
-            penalizacion += rutaCandidato.getTiempoTotal() * 500;
-
-            this.fitness = rutaCandidato.getCosto() + penalizacion;
-        }
+        this.fitness = valido
+                ? rutaCandidato.getCosto()
+                : rutaCandidato.getCosto() + 5000 + genes.size() * 100 + rutaCandidato.getTiempoTotal() * 500;
     }
 
-    private Vuelo encontrarMejorVuelo(
+    private VueloOcurrencia encontrarMejorOcurrencia(
             Grafo grafo,
             Aeropuerto desde,
             Aeropuerto hasta,
             int bolsas,
-            int tiempoActualUtcMin,
+            LocalDateTime cursor,
             double tiempoAcumuladoDias,
-            double plazoMaximoDias,
-            VueloOcurrenciaChecker ocurrenciaChecker
+            double plazoMaximoDias
     ) {
-        Vuelo mejorVuelo = null;
+        VueloOcurrencia mejor = null;
         double mejorIncremento = Double.MAX_VALUE;
 
-        for (Vuelo vuelo : grafo.getVuelosSalientes(desde)) {
-            if (!vuelo.getHasta().equals(hasta)) {
+        for (VueloOcurrencia ocurrencia : grafo.getOcurrenciasSalientes(desde)) {
+            Vuelo vuelo = ocurrencia.getVuelo();
+            if (!vuelo.getHasta().equals(hasta)
+                    || ocurrencia.getFechaHoraSalida().isBefore(cursor)
+                    || !ocurrencia.tieneCapacidad(bolsas)) {
                 continue;
             }
-
-            if (vuelo.estaCancelado()) {
+            double incremento = Duration.between(cursor, ocurrencia.getFechaHoraLlegada()).toMinutes() / 1440.0;
+            if (incremento <= 0 || tiempoAcumuladoDias + incremento > plazoMaximoDias) {
                 continue;
             }
-
-            if (!vuelo.tieneCapacidad(bolsas)) {
-                continue;
-            }
-
-            VentanaVuelo ventana = calcularVentanaVuelo(vuelo, tiempoActualUtcMin);
-            if (!ocurrenciaChecker.disponible(vuelo, ventana.salidaMinuto())) {
-                continue;
-            }
-
-            double incrementoDias = calcularIncrementoDias(vuelo, tiempoActualUtcMin);
-
-            if (incrementoDias <= 0) {
-                continue;
-            }
-
-            if (tiempoAcumuladoDias + incrementoDias > plazoMaximoDias) {
-                continue;
-            }
-
-            if (incrementoDias < mejorIncremento) {
-                mejorIncremento = incrementoDias;
-                mejorVuelo = vuelo;
+            if (incremento < mejorIncremento) {
+                mejorIncremento = incremento;
+                mejor = ocurrencia;
             }
         }
-
-        return mejorVuelo;
-    }
-
-    private double calcularIncrementoDias(Vuelo vuelo, int tiempoActualUtcMin) {
-        VentanaVuelo ventana = calcularVentanaVuelo(vuelo, tiempoActualUtcMin);
-        int referencia = tiempoActualUtcMin >= 0 ? tiempoActualUtcMin : ventana.salidaMinuto();
-        return (ventana.llegadaMinuto() - referencia) / 1440.0;
-    }
-
-    private int calcularLlegadaAjustada(Vuelo vuelo, int tiempoActualUtcMin) {
-        return calcularVentanaVuelo(vuelo, tiempoActualUtcMin).llegadaMinuto();
-    }
-
-    private VentanaVuelo calcularVentanaVuelo(Vuelo vuelo, int tiempoActualUtcMin) {
-        int salida = vuelo.getSalidaUtcMin();
-        int llegada = vuelo.getLlegadaUtcMin();
-
-        while (llegada <= salida) {
-            llegada += 1440;
-        }
-
-        if (tiempoActualUtcMin == -1) {
-            return new VentanaVuelo(salida, llegada);
-        }
-
-        while (salida < tiempoActualUtcMin) {
-            salida += 1440;
-            llegada += 1440;
-        }
-
-        while (llegada <= salida) {
-            llegada += 1440;
-        }
-
-        return new VentanaVuelo(salida, llegada);
-    }
-
-    private record VentanaVuelo(int salidaMinuto, int llegadaMinuto) {
+        return mejor;
     }
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-
-        sb.append("Cromosoma: ");
-
-        for (Aeropuerto aeropuerto : genes) {
-            sb.append(aeropuerto.getCodigo()).append(" ");
-        }
-
-        sb.append("\nFitness: ").append(fitness);
-        sb.append("\nFactible: ").append(factible);
-        sb.append("\n");
-
-        return sb.toString();
+        return "Cromosoma: " + genes + "\nFitness: " + fitness + "\nFactible: " + factible + "\n";
     }
 }

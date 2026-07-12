@@ -9,36 +9,6 @@ import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { ROUTES } from "@/utils/routes";
 import type { ResultadoPeriodo } from "@/types/simulationResult.types";
 
-const formatDuration = (minutes: number) => {
-  const days = Math.floor(minutes / (24 * 60));
-  const minutesAfterDays = minutes % (24 * 60);
-  const hours = Math.floor(minutesAfterDays / 60);
-  const remainingMinutes = minutesAfterDays % 60;
-  const parts: string[] = [];
-
-  if (days > 0) {
-    parts.push(`${days} d`);
-  }
-
-  if (hours > 0) {
-    parts.push(`${hours} h`);
-  }
-
-  if (remainingMinutes > 0) {
-    parts.push(`${remainingMinutes} min`);
-  }
-
-  if (parts.length > 0) {
-    return parts.join(" ");
-  }
-
-  if (minutes < 60) {
-    return `${minutes} min`;
-  }
-
-  return "0 min";
-};
-
 /**
  * Pantalla de resultados de simulacion de periodo.
  * Estandar 61 + mockup 07.
@@ -154,7 +124,7 @@ const ResultadosPeriodoPage = () => {
             />
             <InfoRow
               label="Duracion simulacion"
-              value={formatDuration(resultado.resumen.duracionMinutos)}
+              value={`${resultado.resumen.duracionMinutos.toLocaleString("es-PE")} min`}
             />
           </section>
 

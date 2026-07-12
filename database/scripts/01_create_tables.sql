@@ -1,7 +1,11 @@
 CREATE DATABASE IF NOT EXISTS tasfb2b;
 USE tasfb2b;
 
+DROP TABLE IF EXISTS resultado_simulacion;
+DROP TABLE IF EXISTS asignacion_envio;
+DROP TABLE IF EXISTS vuelo_cancelacion;
 DROP TABLE IF EXISTS ruta_vuelo;
+DROP TABLE IF EXISTS vuelo_ocurrencia;
 DROP TABLE IF EXISTS solicitud_envio;
 DROP TABLE IF EXISTS simulacion;
 DROP TABLE IF EXISTS ruta;
@@ -33,8 +37,6 @@ CREATE TABLE vuelo (
 
     tiempo_viajar_dias DECIMAL(10, 4) NOT NULL,
     capacidad INT NOT NULL,
-    capacidad_usada INT NOT NULL DEFAULT 0,
-    cancelado BOOLEAN NOT NULL DEFAULT FALSE,
 
     salida_utc_min INT NOT NULL,
     llegada_utc_min INT NOT NULL,
@@ -47,15 +49,28 @@ CREATE TABLE vuelo (
         FOREIGN KEY (codigo_aeropuerto_hasta)
         REFERENCES aeropuerto(codigo),
 
-    CONSTRAINT chk_vuelo_capacidad
-        CHECK (capacidad >= 0),
-
-    CONSTRAINT chk_vuelo_capacidad_usada
-        CHECK (capacidad_usada >= 0 AND capacidad_usada <= capacidad),
+    CONSTRAINT chk_vuelo_capacidad CHECK (capacidad >= 0),
 
     CONSTRAINT chk_vuelo_aeropuertos_distintos
         CHECK (codigo_aeropuerto_desde <> codigo_aeropuerto_hasta)
 );
+
+CREATE TABLE vuelo_ocurrencia (
+    id_ocurrencia BIGINT AUTO_INCREMENT PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    id_vuelo INT NOT NULL,
+    fecha_hora_salida DATETIME NOT NULL,
+    fecha_hora_llegada DATETIME NOT NULL,
+    capacidad INT NOT NULL,
+    capacidad_usada INT NOT NULL DEFAULT 0,
+    estado ENUM('PROGRAMADO', 'EN_VUELO', 'COMPLETADO', 'CANCELADO') NOT NULL DEFAULT 'PROGRAMADO',
+    CONSTRAINT uk_vuelo_ocurrencia_operativa UNIQUE (id_vuelo, fecha_hora_salida),
+    CONSTRAINT fk_vuelo_ocurrencia_vuelo FOREIGN KEY (id_vuelo) REFERENCES vuelo(id_vuelo),
+    CONSTRAINT chk_ocurrencia_capacidad CHECK (capacidad >= 0),
+    CONSTRAINT chk_ocurrencia_capacidad_usada CHECK (capacidad_usada >= 0 AND capacidad_usada <= capacidad)
+);
+
+CREATE INDEX idx_vuelo_ocurrencia_salida ON vuelo_ocurrencia(fecha_hora_salida);
 
 CREATE TABLE ruta (
     id_ruta INT AUTO_INCREMENT PRIMARY KEY,
@@ -67,7 +82,7 @@ CREATE TABLE ruta (
 
 CREATE TABLE ruta_vuelo (
     id_ruta INT NOT NULL,
-    id_vuelo INT NOT NULL,
+    id_ocurrencia BIGINT NOT NULL,
     orden INT NOT NULL,
 
     PRIMARY KEY (id_ruta, orden),
@@ -77,10 +92,12 @@ CREATE TABLE ruta_vuelo (
         REFERENCES ruta(id_ruta)
         ON DELETE CASCADE,
 
-    CONSTRAINT fk_ruta_vuelo_vuelo
-        FOREIGN KEY (id_vuelo)
-        REFERENCES vuelo(id_vuelo)
+    CONSTRAINT fk_ruta_vuelo_ocurrencia
+        FOREIGN KEY (id_ocurrencia)
+        REFERENCES vuelo_ocurrencia(id_ocurrencia)
 );
+
+CREATE INDEX idx_ruta_vuelo_ocurrencia ON ruta_vuelo(id_ocurrencia);
 
 CREATE TABLE simulacion (
     id_simulacion INT AUTO_INCREMENT PRIMARY KEY,
@@ -88,9 +105,19 @@ CREATE TABLE simulacion (
     fecha_inicio DATETIME NOT NULL,
     fecha_fin DATETIME NULL,
     activa BOOLEAN NOT NULL DEFAULT TRUE,
+    cancelaciones_vuelos INT NOT NULL DEFAULT 0,
+    duracion_simulacion_minutos BIGINT NULL,
 
     CONSTRAINT chk_simulacion_k
         CHECK (k > 0)
+);
+
+CREATE TABLE resultado_simulacion (
+    id_resultado INT AUTO_INCREMENT PRIMARY KEY,
+    id_simulacion INT NOT NULL UNIQUE,
+    resultado_periodo_json LONGTEXT NOT NULL,
+    resultado_colapso_json LONGTEXT NOT NULL,
+    CONSTRAINT fk_resultado_simulacion FOREIGN KEY (id_simulacion) REFERENCES simulacion(id_simulacion)
 );
 
 CREATE TABLE solicitud_envio (
@@ -101,7 +128,6 @@ CREATE TABLE solicitud_envio (
 
     id_cliente INT NOT NULL,
     id_ruta INT NULL,
-    id_simulacion INT NULL,
 
     codigo_aeropuerto_origen VARCHAR(10) NOT NULL,
     codigo_aeropuerto_destino VARCHAR(10) NOT NULL,
@@ -115,11 +141,6 @@ CREATE TABLE solicitud_envio (
     CONSTRAINT fk_solicitud_ruta
         FOREIGN KEY (id_ruta)
         REFERENCES ruta(id_ruta)
-        ON DELETE SET NULL,
-
-    CONSTRAINT fk_solicitud_simulacion
-        FOREIGN KEY (id_simulacion)
-        REFERENCES simulacion(id_simulacion)
         ON DELETE SET NULL,
 
     CONSTRAINT fk_solicitud_origen

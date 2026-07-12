@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -30,6 +30,22 @@ const KpiInline = ({ label, value, valueClass }: KpiInlineProps) => (
     <span
       className={cn(
         "text-button leading-tight mt-0.5",
+        valueClass ?? "text-text-primary"
+      )}
+    >
+      {value}
+    </span>
+  </div>
+);
+
+const KpiCompactLine = ({ label, value, valueClass }: KpiInlineProps) => (
+  <div className="flex items-baseline justify-between gap-3 whitespace-nowrap">
+    <span className="text-label-sm text-text-primary leading-tight">
+      {label}
+    </span>
+    <span
+      className={cn(
+        "text-button leading-tight",
         valueClass ?? "text-text-primary"
       )}
     >
@@ -71,6 +87,8 @@ const CAPACITY_TEXT_CLASS: Record<EstadoSemaforo, string> = {
   elevado: "text-warning",
   critico: "text-danger",
 };
+
+const formatHourMinute = (time: string) => time.split(":").slice(0, 2).join(":");
 
 interface TopBarToggleProps {
   expanded: boolean;
@@ -135,6 +153,117 @@ const TopBarFrame = ({
     </header>
   );
 };
+
+interface FloatingTopBarProps {
+  drawerAwareStyle?: React.CSSProperties;
+  main: ReactNode;
+  day: ReactNode;
+  metrics: ReactNode;
+}
+
+interface FloatingCardPosition {
+  x: number;
+  y: number;
+}
+
+const FloatingCard = ({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) => {
+  const [offset, setOffset] = useState<FloatingCardPosition>({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origin: FloatingCardPosition;
+  } | null>(null);
+
+  const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+
+    if (
+      event.button !== 0 ||
+      target.closest("button,a,input,select,textarea")
+    ) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: offset,
+    };
+    setDragging(true);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    setOffset({
+      x: drag.origin.x + event.clientX - drag.startX,
+      y: drag.origin.y + event.clientY - drag.startY,
+    });
+  };
+
+  const stopDragging = (event: PointerEvent<HTMLElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+      setDragging(false);
+    }
+  };
+
+  return (
+    <section
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={stopDragging}
+      onPointerCancel={stopDragging}
+      title="Arrastrar"
+      className={cn(
+        "touch-none rounded-input border border-border bg-card px-3 py-2.5 shadow-card",
+        dragging ? "z-[801] cursor-grabbing" : "cursor-move",
+        className
+      )}
+      style={{
+        transform: `translate(${offset.x}px, ${offset.y}px)`,
+      }}
+    >
+      {children}
+    </section>
+  );
+};
+
+const FloatingTopBar = ({
+  drawerAwareStyle,
+  main,
+  day,
+  metrics,
+}: FloatingTopBarProps) => (
+  <div
+    className="absolute left-0 top-0 z-[800] flex max-w-full items-start gap-2.5"
+    style={drawerAwareStyle}
+  >
+    <FloatingCard className="w-fit">
+      <div className="grid grid-cols-1 gap-2">{main}</div>
+    </FloatingCard>
+    <FloatingCard className="w-fit">
+      {day}
+    </FloatingCard>
+    <FloatingCard className="w-fit">
+      <div className="grid grid-cols-1 gap-1.5">{metrics}</div>
+    </FloatingCard>
+  </div>
+);
 
 // ============================================================================
 // VARIANTES
@@ -216,16 +345,10 @@ const TopBar = (props: TopBarProps) => {
   switch (props.variant) {
     case "ejecucion":
       return (
-        <TopBarFrame
-          expanded={expanded}
-          onToggle={toggleExpanded}
+        <FloatingTopBar
           drawerAwareStyle={drawerAwareStyle}
-          top={
+          main={
             <>
-              <KpiInline
-                label="Inicio sim.:"
-                value={props.reloj.inicioSimulacion}
-              />
               <KpiInline
                 label="Fecha/hora actual:"
                 value={props.reloj.fechaHoraActual}
@@ -234,32 +357,41 @@ const TopBar = (props: TopBarProps) => {
                 label="Transcurrido real:"
                 value={props.reloj.tiempoRealTranscurrido}
               />
-              <span className="text-button text-primary whitespace-nowrap">
-                Dia {props.dia.actual} de {props.dia.total}
-              </span>
-            </>
-          }
-          bottom={
-            <>
               <KpiInline
-                label="Fecha sim.:"
-                value={props.reloj.fechaSimulacionActual}
+                label="Inicio simulación:"
+                value={props.reloj.inicioSimulacion}
               />
               <KpiInline
-                label="Hora simulacion:"
-                value={props.reloj.horaSimulacion}
+                label="Fecha simulación:"
+                value={`${props.reloj.fechaSimulacionActual}, ${formatHourMinute(
+                  props.reloj.horaSimulacion
+                )}`}
               />
               <KpiInline
-                label="Transcurrido sim.:"
+                label="Transcurrido simulación:"
                 value={props.reloj.tiempoSimulacionTranscurrido}
               />
-              <KpiInline
-                label="Ocupacion aviones:"
+            </>
+          }
+          day={
+            <div className="flex flex-col">
+              <span className="text-label-sm text-text-tertiary leading-tight">
+                Día simulado
+              </span>
+              <span className="mt-0.5 whitespace-nowrap text-button text-primary">
+                Día {props.dia.actual} de {props.dia.total}
+              </span>
+            </div>
+          }
+          metrics={
+            <>
+              <KpiCompactLine
+                label="Ocupación aviones:"
                 value={props.kpis.ocupacionAviones.value}
                 valueClass={CAPACITY_TEXT_CLASS[props.kpis.ocupacionAviones.estado]}
               />
-              <KpiInline
-                label="Ocupacion almacenes:"
+              <KpiCompactLine
+                label="Ocupación almacenes:"
                 value={props.kpis.ocupacionAlmacenes.value}
                 valueClass={CAPACITY_TEXT_CLASS[props.kpis.ocupacionAlmacenes.estado]}
               />
@@ -280,14 +412,14 @@ const TopBar = (props: TopBarProps) => {
                 label="Fecha/hora actual:"
                 value={props.fechaActual}
               />
-              <KpiInline label="Envios hoy:" value={props.kpis.enviosHoy} />
-              <KpiInline
-                label="Ocupacion aviones:"
+              <KpiInline label="Envíos hoy:" value={props.kpis.enviosHoy} />
+              <KpiCompactLine
+                label="Ocupación aviones:"
                 value={props.kpis.ocupacionAviones.value}
                 valueClass={CAPACITY_TEXT_CLASS[props.kpis.ocupacionAviones.estado]}
               />
-              <KpiInline
-                label="Ocupacion almacenes:"
+              <KpiCompactLine
+                label="Ocupación almacenes:"
                 value={props.kpis.ocupacionAlmacenes.value}
                 valueClass={CAPACITY_TEXT_CLASS[props.kpis.ocupacionAlmacenes.estado]}
               />
@@ -299,17 +431,11 @@ const TopBar = (props: TopBarProps) => {
 
     case "colapso":
       return (
-        <TopBarFrame
-          expanded={expanded}
-          onToggle={toggleExpanded}
+        <FloatingTopBar
           drawerAwareStyle={drawerAwareStyle}
-          top={
+          main={
             <>
-              <ModoBadge variant="colapso" texto="Escenario de estres" />
-              <KpiInline
-                label="Inicio sim.:"
-                value={props.reloj.inicioSimulacion}
-              />
+              <ModoBadge variant="colapso" texto="Escenario de estrés" />
               <KpiInline
                 label="Fecha/hora actual:"
                 value={props.reloj.fechaHoraActual}
@@ -318,7 +444,10 @@ const TopBar = (props: TopBarProps) => {
                 label="Transcurrido real:"
                 value={props.reloj.tiempoRealTranscurrido}
               />
-              <KpiInline label="Dia simulado:" value={props.diaSimulado} />
+              <KpiInline
+                label="Inicio simulación:"
+                value={props.reloj.inicioSimulacion}
+              />
               <KpiInline
                 label="Demanda:"
                 value={props.demanda}
@@ -329,29 +458,37 @@ const TopBar = (props: TopBarProps) => {
                 value={props.estado}
                 valueClass="text-danger"
               />
-            </>
-          }
-          bottom={
-            <>
               <KpiInline
-                label="Fecha sim.:"
-                value={props.reloj.fechaSimulacionActual}
+                label="Fecha simulación:"
+                value={`${props.reloj.fechaSimulacionActual}, ${formatHourMinute(
+                  props.reloj.horaSimulacion
+                )}`}
               />
               <KpiInline
-                label="Hora simulacion:"
-                value={props.reloj.horaSimulacion}
-              />
-              <KpiInline
-                label="Transcurrido sim.:"
+                label="Transcurrido simulación:"
                 value={props.reloj.tiempoSimulacionTranscurrido}
               />
-              <KpiInline
-                label="Ocupacion aviones:"
+            </>
+          }
+          day={
+            <div className="flex flex-col">
+              <span className="text-label-sm text-text-tertiary leading-tight">
+                Día simulado
+              </span>
+              <span className="mt-0.5 whitespace-nowrap text-button text-danger">
+                Día {props.diaSimulado}
+              </span>
+            </div>
+          }
+          metrics={
+            <>
+              <KpiCompactLine
+                label="Ocupación aviones:"
                 value={props.kpis.ocupacionAviones.value}
                 valueClass={CAPACITY_TEXT_CLASS[props.kpis.ocupacionAviones.estado]}
               />
-              <KpiInline
-                label="Ocupacion almacenes:"
+              <KpiCompactLine
+                label="Ocupación almacenes:"
                 value={props.kpis.ocupacionAlmacenes.value}
                 valueClass={CAPACITY_TEXT_CLASS[props.kpis.ocupacionAlmacenes.estado]}
               />

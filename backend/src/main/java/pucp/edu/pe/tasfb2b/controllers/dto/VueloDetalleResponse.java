@@ -3,6 +3,8 @@ package pucp.edu.pe.tasfb2b.controllers.dto;
 import java.util.List;
 
 public record VueloDetalleResponse(
+        Long idOcurrencia,
+        Integer idVuelo,
         String codigo,
         String estado,
         String tipo,
