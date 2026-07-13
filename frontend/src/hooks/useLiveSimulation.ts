@@ -161,6 +161,7 @@ export const useLiveSimulation = (
   const lastShipmentsRefreshAtRef = useRef(0);
   const [isSseConnected, setIsSseConnected] = useState(false);
   const [sseFallbackActive, setSseFallbackActive] = useState(false);
+  const [mapClockTickMs, setMapClockTickMs] = useState(() => Date.now());
 
   const attachState = (data: BackendEstadoSimulacion) => {
     if (data.idSimulacion === null) {
@@ -578,6 +579,20 @@ export const useLiveSimulation = (
     sseFallbackActive,
   ]);
 
+  useEffect(() => {
+    if (USE_MOCK_DATA || !estado?.activa || !(mapa?.vuelos?.length)) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setMapClockTickMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [estado?.activa, mapa?.vuelos?.length]);
+
   const flights: MapFlight[] = useMemo(
     () => {
       const backendSimMinutesPerSecond =
@@ -601,6 +616,7 @@ export const useLiveSimulation = (
       estado?.punteroConsumoMinutos,
       estado?.scMinutos,
       estado?.ultimoMinutoSimulacion,
+      mapClockTickMs,
       mapa?.vuelos,
       speed,
     ]

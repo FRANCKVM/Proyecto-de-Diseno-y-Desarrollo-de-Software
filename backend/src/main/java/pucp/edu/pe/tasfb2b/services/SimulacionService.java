@@ -50,6 +50,7 @@ public class SimulacionService {
     private static final long INTERVALO_REAL_SEMANAL_MS = 40000;
     private static final long INTERVALO_REAL_COLAPSO_MS = 75000;
     private static final int VENTANA_CANCELACIONES_MAPA_MIN = 60;
+    private static final int VENTANA_VUELOS_MAPA_MIN = 60;
 
     private static final int TAMANO_POBLACION = 30;
     private static final int GENERACIONES = 60;
@@ -1055,6 +1056,15 @@ public class SimulacionService {
         }
 
         int minutoReferencia = obtenerMinutoReferenciaMapa();
+        int ventanaAdelantoMinutos = Math.max(
+                VENTANA_VUELOS_MAPA_MIN,
+                (scMinutos != null ? scMinutos : 0) + SA_MINUTOS
+        );
+        int finVentana = minutoReferencia + ventanaAdelantoMinutos;
+        if (ultimoMinutoSimulacion != null) {
+            finVentana = Math.min(finVentana, ultimoMinutoSimulacion);
+        }
+
         actualizarEstadoOcurrenciasSimuladas(minutoReferencia);
         List<MapaSimulacionEstado.VueloMapa> vuelosMapa = new ArrayList<>();
 
@@ -1069,7 +1079,7 @@ public class SimulacionService {
             }
             int salidaMinuto = (int) ChronoUnit.MINUTES.between(fechaHoraInicioSimulacion, ocurrencia.getFechaHoraSalida());
             int llegadaMinuto = (int) ChronoUnit.MINUTES.between(fechaHoraInicioSimulacion, ocurrencia.getFechaHoraLlegada());
-            if (minutoReferencia < salidaMinuto
+            if (salidaMinuto > finVentana
                     || minutoReferencia >= llegadaMinuto
                     || ocurrencia.getEstado() == EstadoVueloOcurrencia.CANCELADO) {
                 continue;
