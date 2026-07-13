@@ -3,6 +3,7 @@ services:
     image: mysql:8.4
     container_name: tasfb2b_mysql
     restart: unless-stopped
+    command: --max_connections=200
     environment:
       MYSQL_ROOT_PASSWORD: pdds
       MYSQL_DATABASE: tasfb2b
