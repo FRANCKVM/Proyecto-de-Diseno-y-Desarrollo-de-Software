@@ -1,8 +1,11 @@
 package pucp.edu.pe.tasfb2b.services;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 public class EstadoSimulacion {
+
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     private final Integer idSimulacion;
     private final boolean activa;
@@ -123,12 +126,12 @@ public class EstadoSimulacion {
         return procesandoBloque;
     }
 
-    public LocalDateTime getFechaHoraInicioReal() {
-        return fechaHoraInicioReal;
+    public String getFechaHoraInicioReal() {
+        return formatearUtc(fechaHoraInicioReal);
     }
 
-    public LocalDateTime getFechaHoraInicioSimulacion() {
-        return fechaHoraInicioSimulacion;
+    public String getFechaHoraInicioSimulacion() {
+        return formatearUtc(fechaHoraInicioSimulacion);
     }
 
     public Integer getK() {
@@ -237,5 +240,9 @@ public class EstadoSimulacion {
 
     public double getFitnessGlobal() {
         return fitnessGlobal;
+    }
+
+    private String formatearUtc(LocalDateTime fechaHora) {
+        return fechaHora != null ? fechaHora.format(ISO_FORMATTER) + "Z" : null;
     }
 }

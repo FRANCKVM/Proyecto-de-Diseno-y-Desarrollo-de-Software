@@ -21,6 +21,10 @@ import {
   getShipmentApiIdentifier,
 } from "@/utils/shipmentCode";
 import { cn } from "@/utils/cn";
+import {
+  formatUtcDateTime,
+  parseUtcDateTimeMs,
+} from "@/utils/utcDateTime";
 import { cacheFlightsForAirport } from "@/store/referenceDataStore";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
@@ -68,18 +72,7 @@ const ENVIO_ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
 };
 
 const formatFlightDateTime = (iso: string): string => {
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Sin dato";
-  }
-
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-
-  return `${day}/${month} ${hour}:${minute}`;
+  return formatUtcDateTime(iso, "Sin dato");
 };
 
 const parseDateTimeMs = (value: string | null | undefined): number | null => {
@@ -87,8 +80,7 @@ const parseDateTimeMs = (value: string | null | undefined): number | null => {
     return null;
   }
 
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
+  return parseUtcDateTimeMs(value);
 };
 
 const isFlightRelevantAtReference = (
@@ -101,15 +93,8 @@ const isFlightRelevantAtReference = (
     return true;
   }
 
-  const referenceMs = simulationStartMs + Math.max(0, referenceMinute) * 60_000;
   const departureMs = parseDateTimeMs(flight.fechaSalida);
-  const arrivalMs = parseDateTimeMs(flight.fechaLlegadaEstimada);
-
-  if (flight.estado === "cancelado") {
-    return departureMs === null || departureMs >= referenceMs;
-  }
-
-  return arrivalMs === null || arrivalMs > referenceMs;
+  return departureMs === null || departureMs >= simulationStartMs;
 };
 
 const resolveFlightStatusAtReference = (
@@ -162,12 +147,12 @@ const getFlightProgressPct = (flight: VueloDetalle): number => {
     return 0;
   }
 
-  const departureMs = Date.parse(flight.fechaSalida);
-  const arrivalMs = Date.parse(flight.fechaLlegadaEstimada);
+  const departureMs = parseUtcDateTimeMs(flight.fechaSalida);
+  const arrivalMs = parseUtcDateTimeMs(flight.fechaLlegadaEstimada);
 
   if (
-    Number.isNaN(departureMs) ||
-    Number.isNaN(arrivalMs) ||
+    departureMs === null ||
+    arrivalMs === null ||
     arrivalMs <= departureMs
   ) {
     return 0;
@@ -184,19 +169,10 @@ const formatFlightDisplayCode = (flight: VueloDetalle): string =>
   `${flight.origenIcao}>${flight.destinoIcao}-${flight.codigo}`;
 
 const formatShipmentDateTime = (fecha: string, hora: string): string => {
-  const iso = `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}Z`;
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) {
-    return `${fecha} ${hora}`;
-  }
-
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const hourPart = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-
-  return `${day}/${month} ${hourPart}:${minute}`;
+  return formatUtcDateTime(
+    `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}`,
+    `${fecha} ${hora}`
+  );
 };
 
 const getShipmentKey = (shipment: BackendSolicitudEnvio): string =>
@@ -208,6 +184,85 @@ const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
   shipment.idEnvio !== null
     ? formatShipmentDisplayCode(shipment.idEnvio)
     : `Envío ${shipment.origen.codigo}-${shipment.destino.codigo}`;
+
+type ShipmentStatus = "planificados" | "en-curso" | "entregados";
+
+const getShipmentTimeline = (
+  shipment: BackendSolicitudEnvio,
+  simulationStart?: string | null
+): { firstDeparture: number | null; lastArrival: number | null } => {
+  const routeGroups = getShipmentRouteGroups(shipment);
+  let firstDeparture: number | null = null;
+  let lastArrival: number | null = null;
+
+  for (const group of routeGroups) {
+    for (const occurrence of group.ruta?.ocurrencias ?? []) {
+      const baseMs =
+        parseDateTimeMs(simulationStart) ??
+        parseDateTimeMs(`${shipment.fecha}T00:00:00`);
+      const departureMs = parseDateTimeMs(occurrence.fechaHoraSalida);
+      const arrivalMs = parseDateTimeMs(occurrence.fechaHoraLlegada);
+
+      if (baseMs === null || departureMs === null || arrivalMs === null) {
+        continue;
+      }
+
+      const departure = Math.round((departureMs - baseMs) / 60_000);
+      const arrival = Math.round((arrivalMs - baseMs) / 60_000);
+      firstDeparture =
+        firstDeparture === null ? departure : Math.min(firstDeparture, departure);
+      lastArrival = lastArrival === null ? arrival : Math.max(lastArrival, arrival);
+    }
+  }
+
+  return { firstDeparture, lastArrival };
+};
+
+const resolveDerivedShipmentStatus = (
+  shipment: BackendSolicitudEnvio,
+  referenceMinute: number | null | undefined,
+  simulationStart?: string | null
+): ShipmentStatus => {
+  if (shipment.estado === "COMPLETADO") {
+    return "entregados";
+  }
+
+  if (referenceMinute === null || referenceMinute === undefined) {
+    return shipment.estado === "PARCIAL" || shipment.estado === "EN_PROCESO"
+      ? "en-curso"
+      : "planificados";
+  }
+
+  const timeline = getShipmentTimeline(shipment, simulationStart);
+  if (timeline.lastArrival !== null && referenceMinute >= timeline.lastArrival) {
+    return "entregados";
+  }
+
+  if (
+    shipment.estado === "PARCIAL" ||
+    shipment.estado === "EN_PROCESO" ||
+    (timeline.firstDeparture !== null && referenceMinute >= timeline.firstDeparture)
+  ) {
+    return "en-curso";
+  }
+
+  return "planificados";
+};
+
+const getDerivedShipmentStatusLabel = (
+  shipment: BackendSolicitudEnvio,
+  status: ShipmentStatus
+): string => {
+  if (status === "entregados") {
+    return "Completado";
+  }
+
+  if (status === "en-curso") {
+    return "En curso";
+  }
+
+  return ENVIO_ESTADO_LABEL[shipment.estado];
+};
 
 type FlightFilter = "todos" | EstadoVuelo;
 type AirportViewMode = "vuelos" | "envios";
@@ -719,11 +774,18 @@ const AirportDrawer = ({
               </p>
             ) : (
               <ul className="space-y-2">
-                {filteredShipmentRelations.map(({ shipment, incoming, outgoing }) => (
-                  <li
-                    key={getShipmentKey(shipment)}
-                    className="bg-field rounded-input px-3 py-2 flex items-center justify-between gap-3"
-                  >
+                {filteredShipmentRelations.map(({ shipment, incoming, outgoing }) => {
+                  const derivedShipmentStatus = resolveDerivedShipmentStatus(
+                    shipment,
+                    referenceMinute,
+                    simulationStart
+                  );
+
+                  return (
+                    <li
+                      key={getShipmentKey(shipment)}
+                      className="bg-field rounded-input px-3 py-2 flex items-center justify-between gap-3"
+                    >
                     <div className="min-w-0">
                       {shipment.idEnvio !== null ? (
                         <button
@@ -758,16 +820,17 @@ const AirportDrawer = ({
                       {outgoing && <Tag variant="primary">Saliente</Tag>}
                       {incoming && <Tag variant="neutral">Entrante</Tag>}
                       <Tag
-                        variant={shipment.estado === "COMPLETADO" ? "normal" : "primary"}
+                        variant={derivedShipmentStatus === "entregados" ? "normal" : "primary"}
                       >
-                        {ENVIO_ESTADO_LABEL[shipment.estado]}
+                        {getDerivedShipmentStatusLabel(shipment, derivedShipmentStatus)}
                       </Tag>
                       <span className="text-secondary text-text-primary">
                         {shipment.contarBolsas} maletas
                       </span>
                     </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </>

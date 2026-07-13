@@ -65,6 +65,7 @@ const DrawerHost = ({
           rangosSemaforo={rangosSemaforo}
           shipments={shipments}
           referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "warehouse-airport":

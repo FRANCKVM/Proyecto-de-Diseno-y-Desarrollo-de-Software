@@ -51,7 +51,7 @@ export const createOperationShipment = async (
     return mockResolve<BackendSolicitudEnvio>({
       idEnvio: Date.now(),
       fecha: now.toISOString().slice(0, 10),
-      hora: now.toTimeString().slice(0, 8),
+      hora: now.toISOString().slice(11, 19),
       idCliente: 1,
       ruta: null,
       idSimulacion: null,

@@ -19,6 +19,7 @@ import {
   getFlightOccupancyMetric,
   getWarehouseOccupancyMetric,
 } from "@/utils/capacityMetrics";
+import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 const getUtcDateKey = (date: Date): string => date.toISOString().slice(0, 10);
@@ -37,7 +38,10 @@ const isShipmentDelivered = (
 
   for (const group of routeGroups) {
     for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const arrival = Date.parse(occurrence.fechaHoraLlegada);
+      const arrival = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
+      if (arrival === null) {
+        continue;
+      }
       lastArrival = lastArrival === null ? arrival : Math.max(lastArrival, arrival);
     }
   }

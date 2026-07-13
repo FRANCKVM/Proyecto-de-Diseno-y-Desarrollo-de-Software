@@ -369,7 +369,7 @@ System.out.println("Fitness global del algoritmo: " + fitnessGlobal + "%");
             boolean cancelado = randomCancelacion.nextDouble() < probabilidadCancelacion;
             if (cancelado) vuelosCancelados++;
             for (int dia = 0; dia < 7; dia++) {
-                var salida = java.time.LocalDate.now().plusDays(dia).atStartOfDay().plusMinutes(salidaUtcMin);
+                var salida = java.time.LocalDate.now(java.time.ZoneOffset.UTC).plusDays(dia).atStartOfDay().plusMinutes(salidaUtcMin);
                 var ocurrencia = new pucp.edu.pe.tasfb2b.entities.VueloOcurrencia(
                         vuelo, salida, salida.plusMinutes(Math.max(1, llegadaUtcMin - salidaUtcMin)), capacidad);
                 if (cancelado) {

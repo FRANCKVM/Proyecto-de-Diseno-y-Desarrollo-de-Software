@@ -15,6 +15,12 @@ import {
 } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { cn } from "@/utils/cn";
+import {
+  addDaysToIsoDateUtc,
+  formatUtcSimulationMinute,
+  pad2,
+  parseUtcDateTimeMs,
+} from "@/utils/utcDateTime";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { RangoSemaforo } from "@/types/common.types";
 import type { VueloDetalle } from "@/types/flight.types";
@@ -119,15 +125,6 @@ const DAY_MINUTES = 24 * 60;
 const normalizeMinute = (minute: number): number =>
   ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
 
-const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
-};
-
 const resolveTemporalStatus = (
   status: FlightPanelStatus,
   departureMs: number,
@@ -162,7 +159,7 @@ const formatMinuteTime = (value: number): string => {
   const hours = Math.floor(normalized / 60);
   const minutes = normalized % 60;
 
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  return `${pad2(hours)}:${pad2(minutes)}`;
 };
 
 const formatMinuteDateTime = (
@@ -173,13 +170,9 @@ const formatMinuteDateTime = (
     return "Sin dato";
   }
 
-  const simulationStartMs = parseLocalDateTimeMs(simulationStart);
+  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
   if (simulationStartMs !== null) {
-    const date = new Date(simulationStartMs + value * 60_000);
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-
-    return `${day}/${month} ${formatMinuteTime(value)}`;
+    return formatUtcSimulationMinute(value, simulationStart);
   }
 
   const dayNumber = Math.floor(Math.max(0, value) / DAY_MINUTES) + 1;
@@ -215,10 +208,10 @@ const buildOccurrencePanelFlights = (
   referenceMinute?: number | null,
   nowMs = Date.now()
 ): PanelFlight[] => {
-  const simulationStartMs = parseLocalDateTimeMs(simulationStart);
+  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
   return occurrences.map((occurrence) => {
-    const departureMs = Date.parse(occurrence.fechaSalida);
-    const arrivalMs = Date.parse(occurrence.fechaLlegadaEstimada);
+    const departureMs = parseUtcDateTimeMs(occurrence.fechaSalida) ?? NaN;
+    const arrivalMs = parseUtcDateTimeMs(occurrence.fechaLlegadaEstimada) ?? NaN;
     const durationMs = Math.max(1, arrivalMs - departureMs);
     const referenceMs = simulationStartMs !== null && referenceMinute != null
       ? simulationStartMs + referenceMinute * 60_000
@@ -255,16 +248,17 @@ const buildOccurrencePanelFlights = (
       departureIso: occurrence.fechaSalida,
     };
   }).filter((flight) => {
-    const referenceMs = simulationStartMs !== null && referenceMinute != null
-      ? simulationStartMs + referenceMinute * 60_000
-      : nowMs;
-    const departureMs = parseLocalDateTimeMs(flight.departureIso);
+    const departureMs = parseUtcDateTimeMs(flight.departureIso);
 
-    if (flight.estado === "cancelado") {
-      return departureMs === null || departureMs >= referenceMs;
+    if (
+      simulationStartMs !== null &&
+      departureMs !== null &&
+      departureMs < simulationStartMs
+    ) {
+      return false;
     }
 
-    return flight.estado !== "completado";
+    return true;
   });
 };
 
@@ -303,6 +297,10 @@ const ActiveFlightsDrawer = ({
     simulationStart,
     referenceMinute
   );
+  const occurrenceQueryDates = useMemo(() => {
+    const previousDate = addDaysToIsoDateUtc(queryDate, -1);
+    return previousDate ? [previousDate, queryDate] : [queryDate];
+  }, [queryDate]);
   const {
     cancelFlight,
     cancellingFlightKey,
@@ -341,9 +339,18 @@ const ActiveFlightsDrawer = ({
       setOccurrencesError(null);
 
       try {
-        const data = await listFlightOccurrences(idSimulacion, queryDate);
+        const dataByDate = await Promise.all(
+          occurrenceQueryDates.map((date) =>
+            listFlightOccurrences(idSimulacion, date)
+          )
+        );
+        const uniqueOccurrences = new Map<number, VueloDetalle>();
+        dataByDate.flat().forEach((occurrence) => {
+          uniqueOccurrences.set(occurrence.idOcurrencia, occurrence);
+        });
+
         if (!cancelled) {
-          setOccurrences(data);
+          setOccurrences(Array.from(uniqueOccurrences.values()));
         }
       } catch {
         if (!cancelled) {
@@ -375,7 +382,7 @@ const ActiveFlightsDrawer = ({
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [idSimulacion, queryDate]);
+  }, [idSimulacion, occurrenceQueryDates]);
 
   const panelFlights = useMemo(
     () => buildOccurrencePanelFlights(

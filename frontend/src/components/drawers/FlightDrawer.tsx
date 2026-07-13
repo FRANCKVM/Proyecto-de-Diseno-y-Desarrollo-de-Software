@@ -13,6 +13,10 @@ import {
   getShipmentApiIdentifier,
   parseShipmentIdentifier,
 } from "@/utils/shipmentCode";
+import {
+  formatUtcDateTimeWithYear,
+  parseUtcDateTimeMs,
+} from "@/utils/utcDateTime";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { VueloDetalle } from "@/types/flight.types";
 
@@ -24,27 +28,27 @@ interface FlightDrawerProps {
 
 const PANEL_REFRESH_MS_SIMULATION = 3000;
 const PANEL_REFRESH_MS_OPERATION = 10000;
-const ISO_WITH_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
- * Formatea ISO 8601 a "DD/MM/YYYY HH:mm" en horario local.
+ * Formatea ISO 8601 a "DD/MM/YYYY HH:mm" en UTC.
  */
-const formatFecha = (iso: string): string => {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+const formatFecha = (iso: string | null | undefined): string => {
+  return formatUtcDateTimeWithYear(iso, "Sin dato");
 };
 
-const parseFlightDateMs = (iso: string): number => {
-  const normalized = ISO_WITH_TIME_ZONE.test(iso) ? iso : `${iso}Z`;
-  return new Date(normalized).getTime();
+const parseFlightDateMs = (iso: string | null | undefined): number => {
+  return parseUtcDateTimeMs(iso) ?? NaN;
 };
 
-const formatTiempoRestante = (arrivalIso: string, nowMs: number): string => {
+const formatTiempoRestante = (
+  arrivalIso: string | null | undefined,
+  nowMs: number,
+  estado?: VueloDetalle["estado"]
+): string => {
+  if (estado === "completado") {
+    return "Completado";
+  }
+
   const arrivalMs = parseFlightDateMs(arrivalIso);
 
   if (Number.isNaN(arrivalMs)) {
@@ -86,8 +90,26 @@ const formatPercent = (value: number): string =>
     maximumFractionDigits: 2,
   })}%`;
 
-const formatFlightDisplayCode = (flight: VueloDetalle): string =>
-  `${flight.origenIcao}>${flight.destinoIcao}-${flight.codigo}`;
+const formatFlightDisplayCode = (flight: VueloDetalle): string => {
+  const origen = flight.origenIcao || "?";
+  const destino = flight.destinoIcao || "?";
+  const codigoVuelo = flight.codigo || flight.idVuelo || flight.idOcurrencia || "s/n";
+  return `${origen}>${destino}-${codigoVuelo}`;
+};
+
+const getFlightTagVariant = (estado: VueloDetalle["estado"]) => {
+  switch (estado) {
+    case "en_vuelo":
+      return "primary";
+    case "completado":
+      return "normal";
+    case "cancelado":
+      return "critico";
+    case "programado":
+    default:
+      return "neutral";
+  }
+};
 
 /**
  * Drawer de detalle de vuelo.
@@ -219,6 +241,14 @@ const FlightDrawer = ({
       ? "Cancelado"
       : flight.estado;
   const displayFlightCode = formatFlightDisplayCode(flight);
+  const flightEnvios = Array.isArray(flight.envios) ? flight.envios : [];
+  const isCancelled = flight.estado === "cancelado";
+  const isCompleted = flight.estado === "completado";
+  const remainingTimeValue = isCancelled ? (
+    <Tag variant="critico">Cancelado</Tag>
+  ) : (
+    formatTiempoRestante(flight.fechaLlegadaEstimada, nowMs, flight.estado)
+  );
   const openShipmentFromFlight = (shipmentCode: string) => {
     const shipmentId = parseShipmentIdentifier(shipmentCode);
     const shipment = shipments.find(
@@ -257,11 +287,13 @@ const FlightDrawer = ({
 
   return (
     <DrawerBase eyebrow="Vuelo" title={displayFlightCode} onClose={close}>
-      <div className="mb-5">
-        <Tag variant={flight.estado === "en_vuelo" ? "primary" : "neutral"}>
-          {estadoLabel}
-        </Tag>
-      </div>
+      {!isCancelled && (
+        <div className="mb-5">
+          <Tag variant={getFlightTagVariant(flight.estado)}>
+            {estadoLabel}
+          </Tag>
+        </div>
+      )}
 
       {/* Informacion del vuelo */}
       <section className="mb-6">
@@ -287,7 +319,7 @@ const FlightDrawer = ({
         />
         <InfoRow
           label="Tiempo restante"
-          value={formatTiempoRestante(flight.fechaLlegadaEstimada, nowMs)}
+          value={remainingTimeValue}
         />
       </section>
 
@@ -296,26 +328,32 @@ const FlightDrawer = ({
         <h3 className="text-section-title mb-3">Trayecto del vuelo</h3>
         <div className="space-y-3">
           <TimelineStep
-            color="success"
+            color={isCancelled ? "neutral" : "success"}
             label={`Origen (${flight.origenIcao})`}
             sublabel={`${formatFecha(flight.fechaSalida)} — Salida`}
-            status="Completado"
-            statusColor="text-success"
+            status={isCancelled ? "Cancelado" : "Completado"}
+            statusColor={isCancelled ? "text-danger" : "text-success"}
           />
           <TimelineStep
-            color="primary"
-            label="En vuelo"
-            sublabel="Posicion actual"
-            status="En tránsito"
-            statusColor="text-primary"
-            isMiddle
+            color={isCancelled ? "neutral" : "primary"}
+            label={isCancelled ? "Cancelado" : "En vuelo"}
+            sublabel={isCancelled ? "Vuelo cancelado" : "Posicion actual"}
+            status={isCancelled ? "Cancelado" : "En tránsito"}
+            statusColor={isCancelled ? "text-danger" : "text-primary"}
+            isMiddle={!isCancelled}
           />
           <TimelineStep
-            color="neutral"
+            color={isCompleted ? "success" : "neutral"}
             label={`Destino (${flight.destinoIcao})`}
             sublabel={`${formatFecha(flight.fechaLlegadaEstimada)} — Llegada est.`}
-            status="Pendiente"
-            statusColor="text-text-primary"
+            status={isCompleted ? "Completado" : isCancelled ? "Cancelado" : "Pendiente"}
+            statusColor={
+              isCompleted
+                ? "text-success"
+                : isCancelled
+                ? "text-danger"
+                : "text-text-primary"
+            }
             isLast
           />
         </div>
@@ -325,15 +363,15 @@ const FlightDrawer = ({
       <section>
         <h3 className="text-section-title mb-3">
           Envíos transportados
-          {flight.envios.length > 0 && ` (${flight.envios.length})`}
+          {flightEnvios.length > 0 && ` (${flightEnvios.length})`}
         </h3>
-        {flight.envios.length === 0 ? (
+        {flightEnvios.length === 0 ? (
           <p className="text-body text-text-primary">
             Sin envíos asignados todavía.
           </p>
         ) : (
           <ul className="space-y-2">
-            {flight.envios.map((e) => (
+            {flightEnvios.map((e) => (
               <li
                 key={e.codigo}
                 className="bg-field rounded-input px-3 py-2 flex items-center justify-between gap-3"

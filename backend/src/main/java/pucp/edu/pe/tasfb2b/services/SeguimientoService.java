@@ -150,8 +150,8 @@ public class SeguimientoService {
                 ocurrencia.getCapacidadUsada(),
                 vuelo.getDesde().getCodigo(),
                 vuelo.getHasta().getCodigo(),
-                ocurrencia.getFechaHoraSalida().format(ISO_FORMATTER),
-                ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
+                formatearUtc(ocurrencia.getFechaHoraSalida()),
+                formatearUtc(ocurrencia.getFechaHoraLlegada()),
                 List.of()
         );
     }
@@ -387,7 +387,7 @@ public class SeguimientoService {
             hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                     "vuelo",
                     formatearCodigoVuelo(vuelo.getIdVuelo()),
-                    ocurrencia.getFechaHoraSalida().format(ISO_FORMATTER),
+                    formatearUtc(ocurrencia.getFechaHoraSalida()),
                     formatearCodigoVuelo(vuelo.getIdVuelo()),
                     estadoVuelo
             ));
@@ -403,7 +403,7 @@ public class SeguimientoService {
                 hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                         "escala",
                         vuelo.getHasta().getCodigo(),
-                        ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
+                        formatearUtc(ocurrencia.getFechaHoraLlegada()),
                         formatearCodigoVuelo(vuelo.getIdVuelo()),
                         estadoEscala
                 ));
@@ -418,7 +418,7 @@ public class SeguimientoService {
                 hitos.add(new EnvioDetalleResponse.HitoRutaResponse(
                         "entrega",
                         vuelo.getHasta().getCodigo(),
-                        ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
+                        formatearUtc(ocurrencia.getFechaHoraLlegada()),
                         formatearCodigoVuelo(vuelo.getIdVuelo()),
                         estadoEntrega
                 ));
@@ -560,7 +560,7 @@ public class SeguimientoService {
     private String formatearFechaRegistro(SolicitudEnvio envio) {
         LocalDate fecha = envio.getFecha() != null ? envio.getFecha() : LocalDate.now(ZoneOffset.UTC);
         LocalTime hora = envio.getHora() != null ? envio.getHora() : LocalTime.MIDNIGHT;
-        return LocalDateTime.of(fecha, hora).format(ISO_FORMATTER);
+        return formatearUtc(LocalDateTime.of(fecha, hora));
     }
 
     private String determinarTipoVuelo(Aeropuerto origen, Aeropuerto destino) {
@@ -640,8 +640,8 @@ public class SeguimientoService {
                 ocurrencia.getCapacidadUsada(),
                 ocurrencia.getVuelo().getDesde().getCodigo(),
                 ocurrencia.getVuelo().getHasta().getCodigo(),
-                ocurrencia.getFechaHoraSalida().format(ISO_FORMATTER),
-                ocurrencia.getFechaHoraLlegada().format(ISO_FORMATTER),
+                formatearUtc(ocurrencia.getFechaHoraSalida()),
+                formatearUtc(ocurrencia.getFechaHoraLlegada()),
                 envios.stream().map(this::mapearEnvioEnVuelo).toList()
         );
     }
@@ -669,6 +669,10 @@ public class SeguimientoService {
 
     private String formatearCodigoPaquete(Integer idEnvio, int indice) {
         return "PKG-" + String.format("%03d", idEnvio) + "-" + String.format("%03d", indice);
+    }
+
+    private String formatearUtc(LocalDateTime fechaHora) {
+        return fechaHora != null ? fechaHora.format(ISO_FORMATTER) + "Z" : null;
     }
 
     private int valor(Integer numero) {

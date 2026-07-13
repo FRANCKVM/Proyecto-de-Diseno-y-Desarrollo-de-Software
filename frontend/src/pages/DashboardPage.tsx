@@ -4,6 +4,7 @@ import KpiCard from "@/components/molecules/KpiCard";
 import { listSimulationHistory } from "@/services/simulationService";
 import { useLiveSimulationStore } from "@/store/liveSimulationStore";
 import { ROUTES } from "@/utils/routes";
+import { formatUtcDateTimeWithYear } from "@/utils/utcDateTime";
 import type { HistorialSimulacion } from "@/types/simulationResult.types";
 
 const formatDateTime = (value: string | null) => {
@@ -11,19 +12,7 @@ const formatDateTime = (value: string | null) => {
     return "En curso";
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString("es-PE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatUtcDateTimeWithYear(value, value);
 };
 
 const getStatusClasses = (activa: boolean) =>

@@ -1,14 +1,12 @@
 package pucp.edu.pe.tasfb2b.controllers.dto;
 
-import java.time.LocalDateTime;
-
 public record HistorialSimulacionResponse(
         Integer id,
         String tipo,
         Integer k,
         Boolean activa,
-        LocalDateTime fechaInicio,
-        LocalDateTime fechaFin,
+        String fechaInicio,
+        String fechaFin,
         String rango,
         Integer totalMaletas,
         Integer cumplimiento,

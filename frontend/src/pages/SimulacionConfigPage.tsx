@@ -11,6 +11,7 @@ import {
   startLiveSimulation,
 } from "@/services/simulationService";
 import { ROUTES, resolveSimulationModuleRoute } from "@/utils/routes";
+import { addDaysToIsoDateUtc, parseUtcDateTime } from "@/utils/utcDateTime";
 import type { TipoSimulacion } from "@/types/common.types";
 
 // ============================================================================
@@ -65,9 +66,7 @@ const formatFechaDisplay = (iso: string): string => {
  * Agrega N dias a una fecha ISO y retorna otra fecha ISO.
  */
 const addDays = (isoDate: string, days: number): string => {
-  const d = new Date(isoDate);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
+  return addDaysToIsoDateUtc(isoDate, days) ?? isoDate;
 };
 
 /**
@@ -75,7 +74,7 @@ const addDays = (isoDate: string, days: number): string => {
  */
 const diaSemana = (iso: string): string => {
   const dias = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
-  return dias[new Date(iso).getDay()];
+  return dias[parseUtcDateTime(iso)?.getUTCDay() ?? 0];
 };
 
 // ============================================================================

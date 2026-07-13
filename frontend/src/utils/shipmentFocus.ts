@@ -1,5 +1,6 @@
 import type { BackendRuta, BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
 
 export interface ShipmentRouteSegment {
   fromIcao: string;
@@ -17,8 +18,8 @@ const resolveReferenceMs = (
   simulationStart?: string | null
 ): number => {
   if (referenceMinute != null && simulationStart) {
-    const start = Date.parse(simulationStart);
-    if (!Number.isNaN(start)) return start + referenceMinute * 60_000;
+    const start = parseUtcDateTimeMs(simulationStart);
+    if (start !== null) return start + referenceMinute * 60_000;
   }
   return Date.now();
 };
@@ -45,8 +46,11 @@ export const resolveShipmentFocusTarget = (
   const referenceMs = resolveReferenceMs(referenceMinute, simulationStart);
   let previousAirportIcao = shipment.origen.codigo;
   for (const occurrence of occurrences) {
-    const departureMs = Date.parse(occurrence.fechaHoraSalida);
-    const arrivalMs = Date.parse(occurrence.fechaHoraLlegada);
+    const departureMs = parseUtcDateTimeMs(occurrence.fechaHoraSalida);
+    const arrivalMs = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
+    if (departureMs === null || arrivalMs === null) {
+      continue;
+    }
     if (referenceMs < departureMs) {
       return { focusedAirportIcao: previousAirportIcao, focusedFlightId: null };
     }

@@ -12,6 +12,7 @@ import {
   formatShipmentDisplayCode,
   getShipmentApiIdentifier,
 } from "@/utils/shipmentCode";
+import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 interface BaggageDrawerProps {
@@ -44,22 +45,17 @@ const getCurrentUtcMinute = (): number => {
 const getUtcMinutesSinceShipmentDay = (
   shipment: BackendSolicitudEnvio
 ): number => {
-  const shipmentDayMs = Date.parse(`${shipment.fecha}T00:00:00Z`);
+  const shipmentDayMs = parseUtcDateTimeMs(`${shipment.fecha}T00:00:00`);
 
-  if (Number.isNaN(shipmentDayMs)) {
+  if (shipmentDayMs === null) {
     return getCurrentUtcMinute();
   }
 
   return Math.floor((Date.now() - shipmentDayMs) / 60_000);
 };
 
-const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
+const parseTimelineDateTimeMs = (value: string | null | undefined): number | null => {
+  return parseUtcDateTimeMs(value);
 };
 
 const getShipmentTimeline = (
@@ -77,10 +73,17 @@ const getShipmentTimeline = (
 
   for (const group of routeGroups) {
     for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const baseMs = parseLocalDateTimeMs(simulationStart)
-        ?? Date.parse(`${shipment.fecha}T00:00:00Z`);
-      const departure = Math.round((Date.parse(occurrence.fechaHoraSalida) - baseMs) / 60_000);
-      const arrival = Math.round((Date.parse(occurrence.fechaHoraLlegada) - baseMs) / 60_000);
+      const baseMs = parseTimelineDateTimeMs(simulationStart)
+        ?? parseUtcDateTimeMs(`${shipment.fecha}T00:00:00`);
+      const departureMs = parseUtcDateTimeMs(occurrence.fechaHoraSalida);
+      const arrivalMs = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
+
+      if (baseMs === null || departureMs === null || arrivalMs === null) {
+        continue;
+      }
+
+      const departure = Math.round((departureMs - baseMs) / 60_000);
+      const arrival = Math.round((arrivalMs - baseMs) / 60_000);
 
       firstDeparture =
         firstDeparture === null

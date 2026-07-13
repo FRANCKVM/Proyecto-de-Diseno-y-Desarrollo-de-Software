@@ -11,6 +11,7 @@ import {
   hasCachedFlightsByAirport,
   initializeReferenceData,
 } from "@/store/referenceDataStore";
+import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
 import type { VueloDetalle } from "@/types/flight.types";
 
 const occurrenceListCache = new Map<string, { expiresAt: number; data: VueloDetalle[] }>();
@@ -22,7 +23,10 @@ const occurrenceContextPrefix = (idSimulacion?: number | null) =>
 const occurrenceContextKey = (idSimulacion?: number | null, fecha?: string) =>
   `${occurrenceContextPrefix(idSimulacion)}:${fecha ?? "actual"}`;
 
-const ISO_WITH_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+const normalizeFlightDetail = (flight: VueloDetalle): VueloDetalle => ({
+  ...flight,
+  envios: Array.isArray(flight.envios) ? flight.envios : [],
+});
 
 export const resolveFlightQueryDate = (
   idSimulacion?: number | null,
@@ -30,11 +34,8 @@ export const resolveFlightQueryDate = (
   referenceMinute?: number | null
 ): string => {
   if (idSimulacion != null && simulationStart) {
-    const normalizedStart = ISO_WITH_TIME_ZONE.test(simulationStart)
-      ? simulationStart
-      : `${simulationStart}Z`;
-    const startMs = Date.parse(normalizedStart);
-    if (Number.isFinite(startMs)) {
+    const startMs = parseUtcDateTimeMs(simulationStart);
+    if (startMs !== null) {
       return new Date(startMs + Math.max(0, referenceMinute ?? 0) * 60_000)
         .toISOString()
         .slice(0, 10);
@@ -67,10 +68,11 @@ export const getFlightByCode = async (
   const idOcurrencia = Number(codigo.slice(4));
   if (!Number.isFinite(idOcurrencia)) return null;
   const cached = options?.forceRefresh || idSimulacion != null ? null : getCachedFlightByCode(codigo);
-  if (cached) return cached;
+  if (cached) return normalizeFlightDetail(cached);
   const occurrence = await fetchFlightOccurrenceDetail(idOcurrencia, idSimulacion);
-  if (occurrence && idSimulacion == null) cacheFlightDetail(occurrence);
-  return occurrence;
+  const normalized = occurrence ? normalizeFlightDetail(occurrence) : null;
+  if (normalized && idSimulacion == null) cacheFlightDetail(normalized);
+  return normalized;
 };
 
 /**
@@ -109,7 +111,7 @@ export const listFlightsByAirport = async (
     options?.fecha
   );
   cacheFlightsForAirport(icao, flights);
-  return flights;
+  return flights.map(normalizeFlightDetail);
 };
 
 export const cancelFlightOccurrence = async (
@@ -120,12 +122,13 @@ export const cancelFlightOccurrence = async (
     idSimulacion: idSimulacion ?? null,
   });
 
-  cacheFlightDetail(data);
+  const normalized = normalizeFlightDetail(data);
+  cacheFlightDetail(normalized);
   const prefix = `${occurrenceContextPrefix(idSimulacion)}:`;
   for (const key of occurrenceListCache.keys()) {
     if (key.startsWith(prefix)) occurrenceListCache.delete(key);
   }
-  return data;
+  return normalized;
 };
 
 export const listFlightOccurrences = async (
@@ -145,11 +148,12 @@ export const listFlightOccurrences = async (
       },
     })
     .then(({ data }) => {
+      const normalized = data.map(normalizeFlightDetail);
       occurrenceListCache.set(key, {
-        data,
+        data: normalized,
         expiresAt: Date.now() + (idSimulacion != null ? 2_000 : 30_000),
       });
-      return data;
+      return normalized;
     })
     .finally(() => occurrenceListRequests.delete(key));
   occurrenceListRequests.set(key, request);

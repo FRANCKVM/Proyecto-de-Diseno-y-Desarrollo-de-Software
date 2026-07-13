@@ -8,6 +8,10 @@ import {
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import { cn } from "@/utils/cn";
+import {
+  formatUtcSimulationMinute,
+  parseUtcDateTimeMs,
+} from "@/utils/utcDateTime";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
@@ -18,6 +22,7 @@ interface WarehouseListDrawerProps {
   rangosSemaforo?: RangoSemaforo;
   shipments?: BackendSolicitudEnvio[];
   referenceMinute?: number | null;
+  simulationStart?: string | null;
 }
 
 type WarehouseSortMode =
@@ -87,25 +92,16 @@ const getMinutesUntil = (
   return (normalizedTarget - normalizedReference + DAY_MINUTES) % DAY_MINUTES;
 };
 
-const formatUtcMinute = (minute: number | null): string => {
-  if (minute === null) {
-    return "Sin vuelos";
-  }
-
-  const normalized = normalizeMinute(minute);
-  const hour = String(Math.floor(normalized / 60)).padStart(2, "0");
-  const minutes = String(normalized % 60).padStart(2, "0");
-  return `${hour}:${minutes}`;
-};
-
 const getNearestFlightMinute = (
   shipments: BackendSolicitudEnvio[],
   airportIcao: string,
   referenceMinute: number,
-  kind: "arrival" | "departure"
+  kind: "arrival" | "departure",
+  simulationStart?: string | null
 ): { minute: number | null; distance: number | null } => {
   let nearestMinute: number | null = null;
   let nearestDistance: number | null = null;
+  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
 
   for (const shipment of shipments) {
     for (const group of getShipmentRouteGroups(shipment)) {
@@ -115,19 +111,27 @@ const getNearestFlightMinute = (
           kind === "arrival"
             ? flight.hasta.codigo === airportIcao
             : flight.desde.codigo === airportIcao;
-        const eventDate = new Date(
+        const eventMs = parseUtcDateTimeMs(
           kind === "arrival" ? occurrence.fechaHoraLlegada : occurrence.fechaHoraSalida
         );
-        const flightMinute = eventDate.getUTCHours() * 60 + eventDate.getUTCMinutes();
-        const distance = getMinutesUntil(flightMinute, referenceMinute);
+        if (eventMs === null) {
+          continue;
+        }
 
-        if (!airportMatches || distance === null) {
+        const flightMinute = simulationStartMs !== null
+          ? Math.round((eventMs - simulationStartMs) / 60_000)
+          : new Date(eventMs).getUTCHours() * 60 + new Date(eventMs).getUTCMinutes();
+        const distance = simulationStartMs !== null
+          ? flightMinute - referenceMinute
+          : getMinutesUntil(flightMinute, referenceMinute);
+
+        if (!airportMatches || distance === null || distance < 0) {
           continue;
         }
 
         if (nearestDistance === null || distance < nearestDistance) {
           nearestDistance = distance;
-          nearestMinute = normalizeMinute(flightMinute);
+          nearestMinute = flightMinute;
         }
       }
     }
@@ -142,6 +146,7 @@ const WarehouseListDrawer = ({
   rangosSemaforo,
   shipments = [],
   referenceMinute,
+  simulationStart,
 }: WarehouseListDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openWarehouseAirport = useDrawerStore((s) => s.openWarehouseAirport);
@@ -191,13 +196,15 @@ const WarehouseListDrawer = ({
           shipments,
           airport.icao,
           currentReferenceMinute,
-          "arrival"
+          "arrival",
+          simulationStart
         ),
         nextDeparture: getNearestFlightMinute(
           shipments,
           airport.icao,
           currentReferenceMinute,
-          "departure"
+          "departure",
+          simulationStart
         ),
       },
     ])
@@ -398,10 +405,18 @@ const WarehouseListDrawer = ({
                       Capacidad: {airport.capacity} maletas
                     </p>
                     <p className="text-secondary text-text-primary">
-                      Próx. llegada: {formatUtcMinute(schedule?.nextArrival.minute ?? null)}
+                      Próx. llegada: {formatUtcSimulationMinute(
+                        schedule?.nextArrival.minute ?? null,
+                        simulationStart,
+                        "Sin vuelos"
+                      )}
                     </p>
                     <p className="text-secondary text-text-primary">
-                      Próx. salida: {formatUtcMinute(schedule?.nextDeparture.minute ?? null)}
+                      Próx. salida: {formatUtcSimulationMinute(
+                        schedule?.nextDeparture.minute ?? null,
+                        simulationStart,
+                        "Sin vuelos"
+                      )}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

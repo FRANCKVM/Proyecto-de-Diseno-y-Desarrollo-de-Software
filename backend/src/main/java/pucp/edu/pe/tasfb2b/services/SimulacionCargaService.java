@@ -225,7 +225,7 @@ public class SimulacionCargaService {
             }
         }
 
-        return LocalDate.now();
+        return LocalDate.now(java.time.ZoneOffset.UTC);
     }
 
     private double calcularPlazoMaximoDias(Aeropuerto origen, Aeropuerto destino) {

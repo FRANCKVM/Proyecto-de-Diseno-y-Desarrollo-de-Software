@@ -11,6 +11,11 @@ import {
   formatShipmentDisplayCode,
   getShipmentApiIdentifier,
 } from "@/utils/shipmentCode";
+import {
+  formatUtcDateTime,
+  formatUtcSimulationMinute,
+  parseUtcDateTimeMs,
+} from "@/utils/utcDateTime";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 
 interface ShipmentOverviewDrawerProps {
@@ -22,8 +27,6 @@ interface ShipmentOverviewDrawerProps {
 
 type ShipmentStatus = "planificados" | "en-curso" | "entregados";
 type ShipmentViewMode = "todos" | "en-curso" | "entregados";
-
-const DAY_MINUTES = 24 * 60;
 
 const ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
   INGRESADO: "Ingresado",
@@ -40,25 +43,17 @@ const getCurrentUtcMinute = (): number => {
 const getUtcMinutesSinceShipmentDay = (
   shipment: BackendSolicitudEnvio
 ): number => {
-  const shipmentDayMs = Date.parse(`${shipment.fecha}T00:00:00Z`);
+  const shipmentDayMs = parseUtcDateTimeMs(`${shipment.fecha}T00:00:00`);
 
-  if (Number.isNaN(shipmentDayMs)) {
+  if (shipmentDayMs === null) {
     return getCurrentUtcMinute();
   }
 
   return Math.floor((Date.now() - shipmentDayMs) / 60_000);
 };
 
-const normalizeMinute = (minute: number): number =>
-  ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
-
-const parseLocalDateTimeMs = (value: string | null | undefined): number | null => {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
+const parseTimelineDateTimeMs = (value: string | null | undefined): number | null => {
+  return parseUtcDateTimeMs(value);
 };
 
 const getShipmentTimeline = (
@@ -76,10 +71,17 @@ const getShipmentTimeline = (
 
   for (const group of routeGroups) {
     for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const baseMs = parseLocalDateTimeMs(simulationStart)
-        ?? Date.parse(`${shipment.fecha}T00:00:00Z`);
-      const departure = Math.round((Date.parse(occurrence.fechaHoraSalida) - baseMs) / 60_000);
-      const arrival = Math.round((Date.parse(occurrence.fechaHoraLlegada) - baseMs) / 60_000);
+      const baseMs = parseTimelineDateTimeMs(simulationStart)
+        ?? parseUtcDateTimeMs(`${shipment.fecha}T00:00:00`);
+      const departureMs = parseUtcDateTimeMs(occurrence.fechaHoraSalida);
+      const arrivalMs = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
+
+      if (baseMs === null || departureMs === null || arrivalMs === null) {
+        continue;
+      }
+
+      const departure = Math.round((departureMs - baseMs) / 60_000);
+      const arrival = Math.round((arrivalMs - baseMs) / 60_000);
 
       firstDeparture =
         firstDeparture === null
@@ -108,31 +110,11 @@ const getElapsedMinutes = (
   return referenceMinute - eventMinute;
 };
 
-const formatUtcMinute = (minute: number | null): string => {
-  if (minute === null) {
-    return "Sin hora";
-  }
-
-  const normalized = normalizeMinute(minute);
-  const hour = String(Math.floor(normalized / 60)).padStart(2, "0");
-  const minutes = String(normalized % 60).padStart(2, "0");
-  return `${hour}:${minutes}`;
-};
-
 const formatShipmentDateTime = (fecha: string, hora: string): string => {
-  const iso = `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}Z`;
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) {
-    return `${fecha} ${hora}`;
-  }
-
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-
-  return `${day}/${month} ${hour}:${minute}`;
+  return formatUtcDateTime(
+    `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}`,
+    `${fecha} ${hora}`
+  );
 };
 
 const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
@@ -362,15 +344,18 @@ const ShipmentOverviewDrawer = ({
             const derivedStatus = shipmentStatus(shipment);
             const timeLabel =
               derivedStatus === "planificados"
-                ? `Salida: ${formatUtcMinute(
-                    getFirstDepartureMinute(shipment, simulationStart)
+                ? `Salida: ${formatUtcSimulationMinute(
+                    getFirstDepartureMinute(shipment, simulationStart),
+                    simulationStart
                   )}`
                 : derivedStatus === "en-curso"
-                  ? `Llegada estimada: ${formatUtcMinute(
-                      getLastArrivalMinute(shipment, simulationStart)
+                  ? `Llegada estimada: ${formatUtcSimulationMinute(
+                      getLastArrivalMinute(shipment, simulationStart),
+                      simulationStart
                     )}`
-                : `Entrega: ${formatUtcMinute(
-                    getLastArrivalMinute(shipment, simulationStart)
+                : `Entrega: ${formatUtcSimulationMinute(
+                    getLastArrivalMinute(shipment, simulationStart),
+                    simulationStart
                   )}`;
 
             return (

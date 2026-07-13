@@ -18,6 +18,7 @@ import pucp.edu.pe.tasfb2b.repositories.ResultadoSimulacionRepository;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -32,6 +33,7 @@ public class ResultadosSimulacionService {
 
     private static final double UMBRAL_ELEVADO = 60.0;
     private static final double UMBRAL_CRITICO = 85.0;
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     private final SimulacionRepository simulacionRepository;
     private final ResultadoSimulacionRepository resultadoSimulacionRepository;
@@ -300,7 +302,7 @@ public class ResultadosSimulacionService {
         if (snapshot == null) {
             return new HistorialSimulacionResponse(
                     simulacion.getIdSimulacion(), tipo, simulacion.getK(), simulacion.getActiva(),
-                    simulacion.getFechaInicio(), simulacion.getFechaFin(), "En ejecucion", 0, null,
+                    formatearUtc(simulacion.getFechaInicio()), formatearUtc(simulacion.getFechaFin()), "En ejecucion", 0, null,
                     0, valor(simulacion.getCancelacionesVuelos()), 0, null, null, null,
                     "La simulacion aun no tiene un resultado final."
             );
@@ -314,8 +316,8 @@ public class ResultadosSimulacionService {
                     tipo,
                     simulacion.getK(),
                     simulacion.getActiva(),
-                    simulacion.getFechaInicio(),
-                    simulacion.getFechaFin(),
+                    formatearUtc(simulacion.getFechaInicio()),
+                    formatearUtc(simulacion.getFechaFin()),
                     colapso.rango(),
                     colapso.maletasProcesadas(),
                     null,
@@ -334,8 +336,8 @@ public class ResultadosSimulacionService {
                 tipo,
                 simulacion.getK(),
                 simulacion.getActiva(),
-                simulacion.getFechaInicio(),
-                simulacion.getFechaFin(),
+                formatearUtc(simulacion.getFechaInicio()),
+                formatearUtc(simulacion.getFechaFin()),
                 periodo.rango(),
                 periodo.totalMaletas(),
                 periodo.cumplimiento(),
@@ -347,6 +349,10 @@ public class ResultadosSimulacionService {
                 null,
                 periodo.conclusion()
         );
+    }
+
+    private String formatearUtc(LocalDateTime fechaHora) {
+        return fechaHora != null ? fechaHora.format(ISO_FORMATTER) + "Z" : null;
     }
 
     private Map<String, AeropuertoStats> construirStatsPorAeropuerto(

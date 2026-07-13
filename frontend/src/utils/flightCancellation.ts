@@ -1,12 +1,11 @@
+import { parseUtcDateTimeMs, pad2 } from "@/utils/utcDateTime";
+
 const MIN_CANCEL_NOTICE_MINUTES = 60;
 const DAY_MINUTES = 24 * 60;
 const MINUTE_MS = 60_000;
 const DAY_MS = DAY_MINUTES * MINUTE_MS;
 
 const ZONE_SUFFIX_PATTERN = /(Z|[+-]\d{2}:\d{2})$/;
-const LOCAL_DATE_TIME_PATTERN =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/;
-
 interface ResolveFlightCancellationInput {
   fechaSalida: string;
   idSimulacion?: number | null;
@@ -25,42 +24,23 @@ const hasExplicitZone = (value: string): boolean =>
   ZONE_SUFFIX_PATTERN.test(value.trim());
 
 const parseDateTimeMs = (value: string): number => {
-  const normalized = value.trim();
-
-  if (hasExplicitZone(normalized)) {
-    return Date.parse(normalized);
-  }
-
-  const match = LOCAL_DATE_TIME_PATTERN.exec(normalized);
-  if (!match) {
-    return Date.parse(normalized);
-  }
-
-  const [, year, month, day, hour, minute, second = "0"] = match;
-  return new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-    Number(second)
-  ).getTime();
+  return parseUtcDateTimeMs(value) ?? NaN;
 };
 
-const formatLocalDateTime = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  const second = String(date.getSeconds()).padStart(2, "0");
+const formatUtcDateTimeWithoutZone = (date: Date): string => {
+  const year = date.getUTCFullYear();
+  const month = pad2(date.getUTCMonth() + 1);
+  const day = pad2(date.getUTCDate());
+  const hour = pad2(date.getUTCHours());
+  const minute = pad2(date.getUTCMinutes());
+  const second = pad2(date.getUTCSeconds());
 
   return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
 };
 
 const formatDateLikeInput = (dateMs: number, input: string): string => {
   const date = new Date(dateMs);
-  return hasExplicitZone(input) ? date.toISOString() : formatLocalDateTime(date);
+  return hasExplicitZone(input) ? date.toISOString() : formatUtcDateTimeWithoutZone(date);
 };
 
 export const resolveFlightCancellationTiming = ({

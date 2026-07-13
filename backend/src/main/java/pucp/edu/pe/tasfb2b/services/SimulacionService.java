@@ -26,6 +26,8 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -55,6 +57,7 @@ public class SimulacionService {
     private static final double TASA_MUTACION = 0.25;
     private static final int TAMANO_TORNEO = 3;
     private static final int ESCALAS_INTERMEDIAS_MAX = 4;
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     private final SimulacionCargaService simulacionCargaService;
     private final SimulacionEstadoService simulacionEstadoService;
@@ -124,7 +127,7 @@ public class SimulacionService {
 
     @PostConstruct
     public void cerrarSimulacionesActivasHuerfanas() {
-        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
 
         for (Simulacion simulacion : simulacionRepository.findByActivaTrue()) {
             simulacion.setActiva(false);
@@ -173,7 +176,7 @@ public class SimulacionService {
         this.cancelacionesVuelosSimulados.clear();
         this.enviosSimuladosProcesados.clear();
         this.siguienteIdEnvioVolatil = -1;
-        this.fechaHoraInicioReal = LocalDateTime.now();
+        this.fechaHoraInicioReal = LocalDateTime.now(ZoneOffset.UTC);
         this.fechaHoraInicioSimulacion = fechaHoraInicio;
         this.duracionSolicitadaMinutos = duracionDias != null
                 ? duracionDias.longValue() * VueloCancelacionService.MINUTOS_DIA
@@ -405,7 +408,6 @@ public class SimulacionService {
                 .filter(o -> codigoAeropuerto.equalsIgnoreCase(o.getVuelo().getDesde().getCodigo())
                         || codigoAeropuerto.equalsIgnoreCase(o.getVuelo().getHasta().getCodigo()))
                 .peek(o -> actualizarEstadoOcurrenciaSimulada(o, minutoReferencia))
-                .filter(o -> esOcurrenciaVigenteParaListado(o, minutoReferencia))
                 .sorted(Comparator.comparing(VueloOcurrencia::getFechaHoraSalida))
                 .toList();
     }
@@ -423,7 +425,6 @@ public class SimulacionService {
         return ocurrenciasSimuladas.values().stream()
                 .filter(o -> fecha == null || o.getFechaHoraSalida().toLocalDate().equals(fecha))
                 .peek(o -> actualizarEstadoOcurrenciaSimulada(o, minutoReferencia))
-                .filter(o -> esOcurrenciaVigenteParaListado(o, minutoReferencia))
                 .sorted(Comparator.comparing(VueloOcurrencia::getFechaHoraSalida))
                 .toList();
     }
@@ -662,22 +663,6 @@ public class SimulacionService {
         }
     }
 
-    private boolean esOcurrenciaVigenteParaListado(
-            VueloOcurrencia ocurrencia,
-            int minutoReferencia
-    ) {
-        if (ocurrencia == null || fechaHoraInicioSimulacion == null) {
-            return false;
-        }
-
-        LocalDateTime referencia = fechaHoraInicioSimulacion.plusMinutes(Math.max(0, minutoReferencia));
-        if (ocurrencia.getEstado() == EstadoVueloOcurrencia.CANCELADO) {
-            return !ocurrencia.getFechaHoraSalida().isBefore(referencia);
-        }
-
-        return ocurrencia.getFechaHoraLlegada().isAfter(referencia);
-    }
-
     private VueloOcurrencia resolverOcurrenciaSimuladaCancelable(
             VueloOcurrencia ocurrencia,
             int minutoCancelacion
@@ -894,7 +879,7 @@ public class SimulacionService {
             this.simulacionActual.setActiva(false);
             this.simulacionActual.setFechaFin(fechaHoraInicioSimulacion != null
                     ? fechaHoraInicioSimulacion.plusMinutes(duracionFinalMinutos)
-                    : LocalDateTime.now());
+                    : LocalDateTime.now(ZoneOffset.UTC));
             this.simulacionActual.setCancelacionesVuelos(cancelacionesVuelosSimulados.size());
             this.simulacionActual.setDuracionSimulacionMinutos(duracionFinalMinutos);
             simulacionRepository.save(this.simulacionActual);
@@ -924,11 +909,11 @@ public class SimulacionService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("resultadoDisponible", true);
             payload.put("activa", false);
-            payload.put("fechaFin", estadoFinal.getFechaHoraInicioSimulacion() != null
-                    ? estadoFinal.getFechaHoraInicioSimulacion()
+            payload.put("fechaFin", fechaHoraInicioSimulacion != null
+                    ? formatearUtc(fechaHoraInicioSimulacion
                             .plusMinutes(estadoFinal.getPunteroConsumoMinutos() != null
                                     ? estadoFinal.getPunteroConsumoMinutos()
-                                    : 0)
+                                    : 0))
                     : null);
             simulationSseService.publish(idSimulacionFinal, "simulation.finished", payload);
             simulationSseService.publish(idSimulacionFinal, "simulation.state", Map.of(
@@ -1132,7 +1117,7 @@ public class SimulacionService {
 
         long realMs = Math.max(
                 0,
-                ChronoUnit.MILLIS.between(fechaHoraInicioReal, LocalDateTime.now())
+                ChronoUnit.MILLIS.between(fechaHoraInicioReal, LocalDateTime.now(ZoneOffset.UTC))
         );
         long minutoVisual = (realMs * scMinutos) / intervaloRealActualMs;
         int referencia = (int) Math.min(Integer.MAX_VALUE, minutoVisual);
@@ -1583,6 +1568,10 @@ public class SimulacionService {
                 .mapToInt(solicitud -> calcularMinutoSimulacion(solicitud, fechaHoraInicioSimulacion))
                 .max()
                 .orElse(0);
+    }
+
+    private String formatearUtc(LocalDateTime fechaHora) {
+        return fechaHora != null ? fechaHora.format(ISO_FORMATTER) + "Z" : null;
     }
 
     private void imprimirEstadoFinalJson(EstadoSimulacion estadoFinal) {

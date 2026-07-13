@@ -1,64 +1,30 @@
 import type { BackendEstadoSimulacion } from "@/types/backendSimulation.types";
+import {
+  buildUtcDateTime,
+  formatUtcClock,
+  formatUtcDate,
+  formatUtcDateTimeWithYear,
+  parseUtcDateTime,
+} from "@/utils/utcDateTime";
 
-const CLOCK_FORMATTER = new Intl.DateTimeFormat("es-PE", {
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
-
-const START_FORMATTER = new Intl.DateTimeFormat("es-PE", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-const DATE_FORMATTER = new Intl.DateTimeFormat("es-PE", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
-export const parseLocalDateTime = (
+export const parseUtcSimulationDateTime = (
   value: string | null | undefined
 ): Date | null => {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseUtcDateTime(value);
 };
 
 export const parseBackendRealDateTime = (
   value: string | null | undefined,
-  nowMs: number
+  _nowMs: number
 ): Date | null => {
   if (!value) {
     return null;
   }
 
-  const localDate = parseLocalDateTime(value);
-  const utcDate = parseLocalDateTime(`${value.replace(/Z$/, "")}Z`);
-
-  if (!localDate) {
-    return utcDate;
-  }
-
-  if (!utcDate) {
-    return localDate;
-  }
-
-  const localDrift = Math.abs(nowMs - localDate.getTime());
-  const utcDrift = Math.abs(nowMs - utcDate.getTime());
-
-  return utcDrift < localDrift ? utcDate : localDate;
+  return parseUtcDateTime(value);
 };
 
-export const buildLocalDateTime = (
+export const buildUtcSimulationDateTime = (
   fecha: string | null | undefined,
   hora: string | null | undefined
 ): Date | null => {
@@ -66,17 +32,17 @@ export const buildLocalDateTime = (
     return null;
   }
 
-  return parseLocalDateTime(`${fecha}T${hora}:00`);
+  return buildUtcDateTime(fecha, hora);
 };
 
 export const formatClock = (date: Date | null): string =>
-  date ? CLOCK_FORMATTER.format(date) : "--:--:--";
+  formatUtcClock(date);
 
 export const formatStartDateTime = (date: Date | null): string =>
-  date ? START_FORMATTER.format(date) : "--/--/---- --:--";
+  formatUtcDateTimeWithYear(date);
 
 export const formatDate = (date: Date | null): string =>
-  date ? DATE_FORMATTER.format(date) : "--/--/----";
+  formatUtcDate(date);
 
 export const formatDuration = (durationMs: number): string => {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
@@ -117,9 +83,9 @@ export const resolveSimulationClockData = ({
     ? null
     : parseBackendRealDateTime(estado?.fechaHoraInicioReal, nowMs);
   const fechaInicioSimulacion = useMockData
-    ? buildLocalDateTime(fechaInicio, horaInicio)
-    : parseLocalDateTime(estado?.fechaHoraInicioSimulacion) ??
-      buildLocalDateTime(fechaInicio, horaInicio);
+    ? buildUtcSimulationDateTime(fechaInicio, horaInicio)
+    : parseUtcSimulationDateTime(estado?.fechaHoraInicioSimulacion) ??
+      buildUtcSimulationDateTime(fechaInicio, horaInicio);
 
   const elapsedRealMs = fechaInicioReal
     ? Math.max(0, nowMs - fechaInicioReal.getTime())

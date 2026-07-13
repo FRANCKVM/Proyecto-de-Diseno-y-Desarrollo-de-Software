@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -65,8 +66,8 @@ public class SolicitudEnvio {
     }
 
     public SolicitudEnvio(Aeropuerto origen, Aeropuerto destino, Integer contarBolsas, Double diasTiempoMaximo) {
-        this.fecha = LocalDate.now();
-        this.hora = LocalTime.now();
+        this.fecha = LocalDate.now(ZoneOffset.UTC);
+        this.hora = LocalTime.now(ZoneOffset.UTC);
         this.idCliente = 1;
         this.ruta = null;
         this.idSimulacionVolatil = null;

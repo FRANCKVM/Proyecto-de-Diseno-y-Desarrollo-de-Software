@@ -5,6 +5,11 @@ import type {
   BackendVuelo,
 } from "@/types/backendSimulation.types";
 import { getAssignedBags, getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import {
+  buildUtcDateTime,
+  formatUtcDateTime,
+  pad2,
+} from "@/utils/utcDateTime";
 
 export interface HomeKpis {
   aeropuertos: { total: number; sublabel: string };
@@ -29,9 +34,7 @@ const parseShipmentDateTime = (
 
   const horaNormalizada =
     envio.hora && envio.hora.trim() !== "" ? envio.hora : "00:00:00";
-  const parsed = new Date(`${envio.fecha}T${horaNormalizada}`);
-
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return buildUtcDateTime(envio.fecha, horaNormalizada);
 };
 
 const isIntercontinentalFlight = (vuelo: BackendVuelo) =>
@@ -73,16 +76,12 @@ const formatActivityTimestamp = (date: Date | null) => {
   }
 
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const targetDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const targetDay = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
   const diffDays = Math.round(
-    (today.getTime() - targetDay.getTime()) / (1000 * 60 * 60 * 24)
+    (today - targetDay) / (1000 * 60 * 60 * 24)
   );
-  const hora = date.toLocaleTimeString("es-PE", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const hora = `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
 
   if (diffDays === 0) {
     return `Hoy ${hora}`;
@@ -92,10 +91,7 @@ const formatActivityTimestamp = (date: Date | null) => {
     return `Ayer ${hora}`;
   }
 
-  return date.toLocaleDateString("es-PE", {
-    day: "2-digit",
-    month: "2-digit",
-  });
+  return formatUtcDateTime(date).slice(0, 5);
 };
 
 const buildActivityMessage = (

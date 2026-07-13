@@ -25,6 +25,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -100,7 +101,7 @@ public class OperacionesService {
     @Scheduled(fixedRate = 60000)
     @Transactional
     public void procesarCancelacionesProgramadasOperacion() {
-        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
         LocalDate hoy = ahora.toLocalDate();
         List<LocalDate> fechas = List.of(hoy, hoy.plusDays(1));
 
@@ -162,7 +163,7 @@ public class OperacionesService {
         Vuelo vuelo = vueloRepository.findById(idVuelo)
                 .orElseThrow(() -> new IllegalArgumentException("No existe un vuelo con codigo " + idVuelo + "."));
 
-        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
         fechaHoraSalida = resolverFechaHoraSalidaCancelable(fechaHoraSalida, ahora);
         LocalDateTime salidaCancelable = fechaHoraSalida;
 
@@ -240,8 +241,8 @@ public class OperacionesService {
 
         SolicitudEnvio solicitud = new SolicitudEnvio(
                 null,
-                LocalDate.now(),
-                LocalTime.now(),
+                LocalDate.now(ZoneOffset.UTC),
+                LocalTime.now(ZoneOffset.UTC),
                 1,
                 origen,
                 destino,
@@ -255,7 +256,7 @@ public class OperacionesService {
     @Transactional(readOnly = true)
     public EstadoOperacionResponse obtenerEstadoOperacion() {
         List<SolicitudEnvio> envios = obtenerEnviosOperacion();
-        LocalDate hoy = LocalDate.now();
+        LocalDate hoy = LocalDate.now(ZoneOffset.UTC);
         int enviosHoy = (int) envios.stream()
                 .filter(envio -> hoy.equals(envio.getFecha()))
                 .count();
@@ -275,7 +276,7 @@ public class OperacionesService {
                 .count();
 
         return new EstadoOperacionResponse(
-                LocalDateTime.now().toString(),
+                LocalDateTime.now(ZoneOffset.UTC).toString() + "Z",
                 enviosHoy,
                 enTransito,
                 entregadas,
@@ -295,7 +296,7 @@ public class OperacionesService {
     }
 
     private List<MapaSimulacionEstado.CancelacionVueloMapa> construirCancelacionesRecientesMapaOperacion() {
-        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
         cancelacionesOperacionRecientes.removeIf(cancelacion ->
                 cancelacion.getFechaHoraCancelacion().isBefore(
                         ahora.minusMinutes(VENTANA_CANCELACIONES_MAPA_REAL_MIN)
@@ -360,7 +361,7 @@ public class OperacionesService {
 
             solicitudes.add(new SolicitudEnvio(
                     null,
-                    envio.getFecha() != null ? envio.getFecha() : LocalDate.now(),
+                    envio.getFecha() != null ? envio.getFecha() : LocalDate.now(ZoneOffset.UTC),
                     envio.getHora() != null ? envio.getHora() : LocalTime.of(0, 0),
                     envio.getIdCliente() != null ? envio.getIdCliente() : 1,
                     origen,
@@ -751,7 +752,7 @@ public class OperacionesService {
     private Map<String, Double> construirOcupacionPorAeropuertoOperacion(List<SolicitudEnvio> envios) {
         Map<String, Integer> bolsasAsignadasPorOrigen = new HashMap<>();
         Map<String, Integer> bolsasOcupadasPorAeropuerto = new HashMap<>();
-        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
         List<AsignacionEnvio> asignaciones = envios.isEmpty()
                 ? List.of()
                 : asignacionEnvioRepository.findByEnvioInOrderByEnvio_IdEnvioAscIdAsignacionAsc(envios);

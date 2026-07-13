@@ -23,6 +23,11 @@ const mapBackendAirport = (airport: BackendAeropuerto): AirportWithCoords => ({
   lng: airport.longitud ?? 0,
 });
 
+const normalizeFlightDetail = (flight: VueloDetalle): VueloDetalle => ({
+  ...flight,
+  envios: Array.isArray(flight.envios) ? flight.envios : [],
+});
+
 export const fetchAllAirportsReferenceData = async (): Promise<
   AirportWithCoords[]
 > => {
@@ -53,7 +58,7 @@ export const fetchFlightsByAirportReferenceData = async (
       ...(fecha ? { fecha } : {}),
     },
   });
-  return data;
+  return data.map(normalizeFlightDetail);
 };
 
 export const fetchFlightOccurrenceDetail = async (
@@ -65,7 +70,7 @@ export const fetchFlightOccurrenceDetail = async (
       `/vuelos/ocurrencias/${idOcurrencia}`,
       { params: idSimulacion != null ? { idSimulacion } : undefined }
     );
-    return data;
+    return normalizeFlightDetail(data);
   } catch {
     return null;
   }
