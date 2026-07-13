@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import { useMap } from "react-leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
@@ -57,10 +57,15 @@ const RouteLine = ({
   const lineRef = useRef<HTMLDivElement | null>(null);
   const arrowRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number>(0);
+  const fallbackProgressUpdatedAtRef = useRef<number>(
+    typeof performance !== "undefined" ? performance.now() : Date.now()
+  );
+  const arrowHtmlKeyRef = useRef<string>("");
   const fromLatLng = useMemo(() => L.latLng(from.lat, from.lng), [from.lat, from.lng]);
   const toLatLng = useMemo(() => L.latLng(to.lat, to.lng), [to.lat, to.lng]);
   const progressSnapshot = progress;
-  const progressTimestamp = progressUpdatedAtMs ?? performance.now();
+  const progressTimestamp =
+    progressUpdatedAtMs ?? fallbackProgressUpdatedAtRef.current;
   const progressVelocity = progressVelocityPerSecond ?? 0;
 
   useEffect(() => {
@@ -147,8 +152,12 @@ const RouteLine = ({
           fromPoint.y + routeDy * 0.62
         );
         const arrowAngle = (Math.atan2(routeDy, routeDx) * 180) / Math.PI;
+        const arrowHtmlKey = `${color}:${Math.round(arrowAngle * 100) / 100}`;
 
-        arrowElement.innerHTML = buildRouteArrowHtml(color, arrowAngle);
+        if (arrowHtmlKeyRef.current !== arrowHtmlKey) {
+          arrowHtmlKeyRef.current = arrowHtmlKey;
+          arrowElement.innerHTML = buildRouteArrowHtml(color, arrowAngle);
+        }
         arrowElement.style.transform = `translate3d(${
           arrowPoint.x - ROUTE_ARROW_SIZE / 2
         }px, ${arrowPoint.y - ROUTE_ARROW_SIZE / 2}px, 0)`;
@@ -200,4 +209,4 @@ const RouteLine = ({
   return null;
 };
 
-export default RouteLine;
+export default memo(RouteLine);

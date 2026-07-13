@@ -1,4 +1,5 @@
 import { Eye, X } from "lucide-react";
+import type { KeyboardEvent } from "react";
 import Tag, { type TagVariant } from "@/components/atoms/Tag";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { cn } from "@/utils/cn";
@@ -17,10 +18,17 @@ interface FlightListCardProps {
   rangosSemaforo?: RangoSemaforo;
   canCancel?: boolean;
   isCancelling?: boolean;
-  notice?: string | null;
+  notice?: FlightCardNotice | string | null;
   onOpen: () => void;
   onFocusOnMap?: () => void;
   onCancel?: () => void;
+}
+
+type FlightCardNoticeTone = "success" | "warning" | "error";
+
+interface FlightCardNotice {
+  message: string;
+  tone?: FlightCardNoticeTone;
 }
 
 const SEMAPHORE_TEXT_CLASS: Record<EstadoSemaforo, string> = {
@@ -33,6 +41,12 @@ const SEMAPHORE_BORDER_CLASS: Record<EstadoSemaforo, string> = {
   normal: "border-l-[#16a34a]",
   elevado: "border-l-[#f59e0b]",
   critico: "border-l-[#ef4444]",
+};
+
+const NOTICE_CLASS: Record<FlightCardNoticeTone, string> = {
+  success: "border-success/40 bg-success-soft text-success",
+  warning: "border-warning/40 bg-warning-soft text-warning",
+  error: "border-danger/40 bg-danger-soft text-danger",
 };
 
 const formatPercent = (value?: number): string =>
@@ -89,6 +103,20 @@ const FlightListCard = ({
 }: FlightListCardProps) => {
   const occupancyClass = getSemaphoreTextClass(occupancyPct, rangosSemaforo);
   const borderClass = getSemaphoreBorderClass(occupancyPct, rangosSemaforo);
+  const noticeData =
+    typeof notice === "string"
+      ? { message: notice, tone: "warning" as const }
+      : notice;
+  const handleOpenKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onOpen();
+    }
+  };
 
   return (
     <article
@@ -97,7 +125,13 @@ const FlightListCard = ({
         borderClass
       )}
     >
-      <button type="button" onClick={onOpen} className="w-full text-left">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={handleOpenKeyDown}
+        className="w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-button text-primary truncate">{code}</p>
@@ -162,14 +196,17 @@ const FlightListCard = ({
             </span>
           </div>
         </div>
-      </button>
+      </div>
 
-      {notice && (
+      {noticeData && (
         <div
           role="alert"
-          className="mt-3 rounded-input border border-warning/40 bg-warning-soft px-3 py-2 text-secondary text-warning shadow-card"
+          className={cn(
+            "mt-3 rounded-input border px-3 py-2 text-secondary shadow-card",
+            NOTICE_CLASS[noticeData.tone ?? "warning"]
+          )}
         >
-          {notice}
+          {noticeData.message}
         </div>
       )}
 

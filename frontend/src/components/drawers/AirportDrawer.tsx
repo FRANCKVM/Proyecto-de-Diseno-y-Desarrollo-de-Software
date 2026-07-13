@@ -3,7 +3,6 @@ import { Eye, Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import InfoRow from "@/components/molecules/InfoRow";
 import FlightListCard from "@/components/molecules/FlightListCard";
-import FlightCancellationPopup from "@/components/molecules/FlightCancellationPopup";
 import Tag from "@/components/atoms/Tag";
 import { getAirportByIcao } from "@/services/airportService";
 import {
@@ -340,10 +339,7 @@ const AirportDrawer = ({
   const {
     cancelFlight,
     cancellingFlightKey,
-    cancelError,
     cancelNotice,
-    cancelPopup,
-    dismissCancelPopup,
   } = useFlightCancellationAction({
     idSimulacion,
     referenceMinute,
@@ -549,11 +545,6 @@ const AirportDrawer = ({
       title={`${airport.icao} - ${airport.name}`}
       onClose={close}
     >
-      <FlightCancellationPopup
-        message={cancelPopup?.message ?? null}
-        tone={cancelPopup?.tone}
-        onClose={dismissCancelPopup}
-      />
       <section className="mb-6">
         <h3 className="text-section-title mb-2">Información general</h3>
         <InfoRow label="Pais" value={airport.country} />
@@ -682,9 +673,6 @@ const AirportDrawer = ({
               </div>
             </div>
 
-            {cancelError && (
-              <p className="text-secondary text-danger mb-3">{cancelError}</p>
-            )}
             {filteredFlights.length === 0 ? (
               <p className="text-body text-text-primary">
                 No hay vuelos asociados a este almacén para la búsqueda o filtros seleccionados.
@@ -713,7 +701,10 @@ const AirportDrawer = ({
                       isCancelling={cancellingFlightKey === actionKey}
                       notice={
                         cancelNotice?.actionKey === actionKey
-                          ? cancelNotice.message
+                          ? {
+                              message: cancelNotice.message,
+                              tone: cancelNotice.tone,
+                            }
                           : null
                       }
                       onOpen={() =>

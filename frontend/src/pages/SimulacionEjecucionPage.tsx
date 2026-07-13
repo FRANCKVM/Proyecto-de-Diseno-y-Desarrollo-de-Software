@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import TopBar from "@/components/organisms/TopBar";
 import WorldMap from "@/components/map/WorldMap";
 import SimulationControlPanel from "@/components/organisms/SimulationControlPanel";
@@ -100,6 +100,15 @@ const SimulacionEjecucionPage = () => {
   const activeFlightSemaphoreFilter = useDrawerStore(
     (s) => s.activeFlightSemaphoreFilter
   );
+  const activeFlightAirportFilter = useDrawerStore(
+    (s) => s.activeFlightAirportFilter
+  );
+  const activeFlightStatusFilter = useDrawerStore(
+    (s) => s.activeFlightStatusFilter
+  );
+  const activeFlightSearchFilter = useDrawerStore(
+    (s) => s.activeFlightSearchFilter
+  );
   const activeFlightOnlyId = useDrawerStore((s) => s.activeFlightOnlyId);
   const shipmentRouteSegments = useDrawerStore((s) => s.shipmentRouteSegments);
 
@@ -132,6 +141,19 @@ const SimulacionEjecucionPage = () => {
   const liveReferenceMinute = USE_MOCK_DATA
     ? undefined
     : Math.floor(elapsedSimulatedMs / 60_000);
+  const flightCancellationEvents = useMemo(
+    () => mapa?.cancelacionesRecientes ?? [],
+    [mapa?.cancelacionesRecientes]
+  );
+
+  const handleAirportClick = useCallback(
+    (airport: { icao: string }) => openAirport(airport.icao),
+    [openAirport]
+  );
+  const handleFlightClick = useCallback(
+    (id: string) => openFlight(`occ-${id}`, { idSimulacion }),
+    [idSimulacion, openFlight]
+  );
 
   useEffect(() => {
     if (
@@ -180,11 +202,14 @@ const SimulacionEjecucionPage = () => {
             warehouseSemaphoreFilter={warehouseSemaphoreFilter}
             activeFlightRegionFilter={activeFlightRegionFilter}
             activeFlightSemaphoreFilter={activeFlightSemaphoreFilter}
+            activeFlightAirportFilter={activeFlightAirportFilter}
+            activeFlightStatusFilter={activeFlightStatusFilter}
+            activeFlightSearchFilter={activeFlightSearchFilter}
             activeFlightOnlyId={activeFlightOnlyId}
-            flightCancellationEvents={mapa?.cancelacionesRecientes ?? []}
+            flightCancellationEvents={flightCancellationEvents}
             shipmentRouteSegments={shipmentRouteSegments}
-            onAirportClick={(a) => openAirport(a.icao)}
-            onFlightClick={(id) => openFlight(`occ-${id}`, { idSimulacion })}
+            onAirportClick={handleAirportClick}
+            onFlightClick={handleFlightClick}
           />
         )}
         <MapQuickActions

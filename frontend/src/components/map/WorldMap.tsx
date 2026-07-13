@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import {
   MapContainer as LeafletMap,
   TileLayer,
@@ -19,7 +26,6 @@ import AirportMarker from "@/components/map/AirportMarker";
 import FlightMarker from "@/components/map/FlightMarker";
 import FlightCancellationAlertMarker from "@/components/map/FlightCancellationAlertMarker";
 import RouteLine from "@/components/map/RouteLine";
-import { useCancellationAnimationStore } from "@/store/cancellationAnimationStore";
 
 /**
  * Vuelo en formato consumible por el mapa.
@@ -47,6 +53,12 @@ export interface MapFlightCancellationEvent {
 }
 
 type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
+type ActiveFlightStatusFilter =
+  | "todos"
+  | "programado"
+  | "en_vuelo"
+  | "completado"
+  | "cancelado";
 type WarehouseSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 
 interface WorldMapProps {
@@ -61,6 +73,9 @@ interface WorldMapProps {
   warehouseSemaphoreFilter?: WarehouseSemaphoreFilter;
   activeFlightRegionFilter?: string;
   activeFlightSemaphoreFilter?: ActiveFlightSemaphoreFilter;
+  activeFlightAirportFilter?: string;
+  activeFlightStatusFilter?: ActiveFlightStatusFilter;
+  activeFlightSearchFilter?: string;
   activeFlightOnlyId?: string | null;
   flightCancellationEvents?: MapFlightCancellationEvent[];
   shipmentRouteSegments?: ShipmentRouteSegment[];
@@ -480,26 +495,23 @@ const WorldMap = ({
   warehouseSemaphoreFilter = "todos",
   activeFlightRegionFilter = "todos",
   activeFlightSemaphoreFilter = "todos",
+  activeFlightAirportFilter = "todos",
+  activeFlightStatusFilter = "todos",
+  activeFlightSearchFilter = "",
   activeFlightOnlyId,
   flightCancellationEvents = [],
   shipmentRouteSegments = [],
   onAirportClick,
   onFlightClick,
 }: WorldMapProps) => {
-  const manualCancellationEvents = useCancellationAnimationStore((s) => s.events);
   const [visibleCancellationAlerts, setVisibleCancellationAlerts] = useState<
     VisibleCancellationAlert[]
   >([]);
   const seenCancellationIdsRef = useRef(readSeenCancellationIds());
   const cancellationAlertTimersRef = useRef<number[]>([]);
 
-  const allCancellationEvents = useMemo(
-    () => [...flightCancellationEvents, ...manualCancellationEvents],
-    [flightCancellationEvents, manualCancellationEvents]
-  );
-
   useEffect(() => {
-    allCancellationEvents.forEach((event) => {
+    flightCancellationEvents.forEach((event) => {
       if (!event.airportIcao || seenCancellationIdsRef.current.has(event.id)) {
         return;
       }
@@ -520,7 +532,7 @@ const WorldMap = ({
 
       cancellationAlertTimersRef.current.push(timerId);
     });
-  }, [allCancellationEvents]);
+  }, [flightCancellationEvents]);
 
   useEffect(() => {
     return () => {
@@ -652,6 +664,7 @@ const WorldMap = ({
     activeFlightOnlyId && activeOnlyFlights.length > 0
       ? activeOnlyFlights
       : warehouseFilteredFlights;
+  const normalizedActiveFlightSearch = activeFlightSearchFilter.trim().toLowerCase();
   const visibleFlights = activeFilterBaseFlights.filter((flight) => {
     if (activeFlightOnlyId && activeOnlyFlights.length > 0) {
       return true;
@@ -675,8 +688,27 @@ const WorldMap = ({
         : occupancy !== undefined &&
           occupancy > 0 &&
           estado === activeFlightSemaphoreFilter);
+    const matchesAirport =
+      activeFlightAirportFilter === "todos" ||
+      flight.fromIcao === activeFlightAirportFilter ||
+      flight.toIcao === activeFlightAirportFilter;
+    const matchesStatus =
+      activeFlightStatusFilter === "todos" ||
+      activeFlightStatusFilter === "en_vuelo";
+    const displayCode = `${flight.fromIcao}>${flight.toIcao}-${flight.code ?? flight.id}`.toLowerCase();
+    const matchesSearch =
+      normalizedActiveFlightSearch.length === 0 ||
+      String(flight.id).toLowerCase().startsWith(normalizedActiveFlightSearch) ||
+      (flight.code?.toLowerCase().startsWith(normalizedActiveFlightSearch) ?? false) ||
+      displayCode.startsWith(normalizedActiveFlightSearch);
 
-    return matchesRegion && matchesSemaphore;
+    return (
+      matchesRegion &&
+      matchesSemaphore &&
+      matchesAirport &&
+      matchesStatus &&
+      matchesSearch
+    );
   });
   const overviewPositions = useMemo(() => {
     const positions: LatLngExpression[] = visibleAirports.map((airport) => [
@@ -830,4 +862,4 @@ const WorldMap = ({
   );
 };
 
-export default WorldMap;
+export default memo(WorldMap);

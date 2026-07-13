@@ -3,7 +3,6 @@ import { X } from "lucide-react";
 import type { TagVariant } from "@/components/atoms/Tag";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import FlightListCard from "@/components/molecules/FlightListCard";
-import FlightCancellationPopup from "@/components/molecules/FlightCancellationPopup";
 import { useFlightCancellationAction } from "@/hooks/useFlightCancellationAction";
 import {
   listFlightOccurrences,
@@ -12,6 +11,7 @@ import {
 import {
   useDrawerStore,
   type ActiveFlightSemaphoreFilter,
+  type ActiveFlightStatusFilter,
 } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { cn } from "@/utils/cn";
@@ -39,7 +39,7 @@ type FlightPanelStatus =
   | "completado"
   | "cancelado";
 
-type FlightStatusFilter = "todos" | FlightPanelStatus;
+type FlightStatusFilter = ActiveFlightStatusFilter;
 
 interface PanelFlight {
   id: string;
@@ -121,6 +121,7 @@ type FlightSortMode =
   | "destino";
 
 const DAY_MINUTES = 24 * 60;
+const FLIGHT_LIST_PAGE_SIZE = 80;
 
 const normalizeMinute = (minute: number): number =>
   ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
@@ -282,9 +283,17 @@ const ActiveFlightsDrawer = ({
     (s) => s.setActiveFlightSemaphoreFilter
   );
   const [sortMode, setSortMode] = useState<FlightSortMode>("ocupacion-desc");
-  const [selectedAirport, setSelectedAirport] = useState("todos");
-  const [flightSearch, setFlightSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<FlightStatusFilter>("todos");
+  const selectedAirport = useDrawerStore((s) => s.activeFlightAirportFilter);
+  const setSelectedAirport = useDrawerStore(
+    (s) => s.setActiveFlightAirportFilter
+  );
+  const flightSearch = useDrawerStore((s) => s.activeFlightSearchFilter);
+  const setFlightSearch = useDrawerStore((s) => s.setActiveFlightSearchFilter);
+  const statusFilter = useDrawerStore((s) => s.activeFlightStatusFilter);
+  const setStatusFilter = useDrawerStore((s) => s.setActiveFlightStatusFilter);
+  const [visibleFlightLimit, setVisibleFlightLimit] = useState(
+    FLIGHT_LIST_PAGE_SIZE
+  );
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelledFlightIds, setCancelledFlightIds] = useState<Set<string>>(
     () => new Set()
@@ -304,10 +313,7 @@ const ActiveFlightsDrawer = ({
   const {
     cancelFlight,
     cancellingFlightKey,
-    cancelError,
     cancelNotice,
-    cancelPopup,
-    dismissCancelPopup,
   } = useFlightCancellationAction({
     idSimulacion,
     referenceMinute,
@@ -354,8 +360,10 @@ const ActiveFlightsDrawer = ({
         }
       } catch {
         if (!cancelled) {
-          setOccurrences([]);
-          setOccurrencesError("No se pudieron cargar las ocurrencias de vuelo.");
+          if (showLoading) {
+            setOccurrences([]);
+            setOccurrencesError("No se pudieron cargar las ocurrencias de vuelo.");
+          }
         }
       } finally {
         requestInFlight = false;
@@ -383,6 +391,17 @@ const ActiveFlightsDrawer = ({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [idSimulacion, occurrenceQueryDates]);
+
+  useEffect(() => {
+    setVisibleFlightLimit(FLIGHT_LIST_PAGE_SIZE);
+  }, [
+    flightSearch,
+    selectedAirport,
+    selectedRegion,
+    semaphoreFilter,
+    sortMode,
+    statusFilter,
+  ]);
 
   const panelFlights = useMemo(
     () => buildOccurrencePanelFlights(
@@ -537,6 +556,11 @@ const ActiveFlightsDrawer = ({
       }),
     [filteredFlights, sortMode]
   );
+  const visibleSortedFlights = useMemo(
+    () => sortedFlights.slice(0, visibleFlightLimit),
+    [sortedFlights, visibleFlightLimit]
+  );
+  const hiddenFlightCount = sortedFlights.length - visibleSortedFlights.length;
 
   const handleCancelFlight = async (flight: PanelFlight) => {
     if (!flight.departureIso) {
@@ -568,18 +592,13 @@ const ActiveFlightsDrawer = ({
       onClose={close}
       footer={
         <div className="flex items-center justify-between text-secondary text-text-primary">
-          <span>Vuelos filtrados</span>
+          <span>Vuelos mostrados</span>
           <span className="text-button text-text-primary">
-            {filteredFlights.length}/{displayedPanelFlights.length}
+            {visibleSortedFlights.length}/{filteredFlights.length}
           </span>
         </div>
       }
     >
-      <FlightCancellationPopup
-        message={cancelPopup?.message ?? null}
-        tone={cancelPopup?.tone}
-        onClose={dismissCancelPopup}
-      />
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-3">
           <div>
@@ -765,10 +784,7 @@ const ActiveFlightsDrawer = ({
           </div>
         ) : (
           <div className="space-y-2">
-            {cancelError && (
-              <p className="text-secondary text-danger">{cancelError}</p>
-            )}
-            {sortedFlights.map((flight) => {
+            {visibleSortedFlights.map((flight) => {
               const progressPct = Math.round(flight.progress * 100);
 
               return (
@@ -796,7 +812,10 @@ const ActiveFlightsDrawer = ({
                   isCancelling={cancellingFlightKey === flight.detailCode}
                   notice={
                     cancelNotice?.actionKey === flight.detailCode
-                      ? cancelNotice.message
+                      ? {
+                          message: cancelNotice.message,
+                          tone: cancelNotice.tone,
+                        }
                       : null
                   }
                   onOpen={() =>
@@ -816,6 +835,19 @@ const ActiveFlightsDrawer = ({
                 />
               );
             })}
+            {hiddenFlightCount > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setVisibleFlightLimit((currentLimit) =>
+                    currentLimit + FLIGHT_LIST_PAGE_SIZE
+                  )
+                }
+                className="w-full rounded-input border border-border bg-field px-3 py-2 text-button text-primary hover:border-primary hover:bg-primary-soft transition-colors"
+              >
+                Mostrar más ({hiddenFlightCount})
+              </button>
+            )}
           </div>
         )}
       </div>

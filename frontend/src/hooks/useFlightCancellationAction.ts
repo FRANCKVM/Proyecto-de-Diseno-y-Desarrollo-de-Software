@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { cancelFlightOccurrence } from "@/services/flightService";
-import { useCancellationAnimationStore } from "@/store/cancellationAnimationStore";
 import { resolveFlightCancellationTiming } from "@/utils/flightCancellation";
 import type { VueloDetalle } from "@/types/flight.types";
 
@@ -23,14 +22,13 @@ interface UseFlightCancellationActionOptions {
   simulationStart?: string | null;
 }
 
+type CancelNoticeTone = "warning" | "error" | "success";
+
 export const useFlightCancellationAction = ({
   idSimulacion,
   referenceMinute,
   simulationStart,
 }: UseFlightCancellationActionOptions) => {
-  const addFlightCancellationEvent = useCancellationAnimationStore(
-    (s) => s.addFlightCancellationEvent
-  );
   const [cancellingFlightKey, setCancellingFlightKey] = useState<string | null>(
     null
   );
@@ -38,38 +36,32 @@ export const useFlightCancellationAction = ({
   const [cancelNotice, setCancelNotice] = useState<{
     actionKey: string;
     message: string;
-  } | null>(null);
-  const [cancelPopup, setCancelPopup] = useState<{
-    message: string;
-    tone: "warning" | "error" | "success";
+    tone: CancelNoticeTone;
   } | null>(null);
 
   useEffect(() => {
-    if (!cancelPopup) {
+    if (!cancelNotice) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
-      setCancelPopup(null);
-    }, 3000);
+      setCancelNotice(null);
+    }, 4000);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [cancelPopup]);
+  }, [cancelNotice]);
 
   const cancelFlight = async ({
     actionKey,
     idOcurrencia,
     fechaSalida,
     departureMinute,
-    fallbackAirportIcao,
-    fallbackFlightCode,
     onCancelled,
   }: CancelFlightInput) => {
     setCancelError(null);
     setCancelNotice(null);
-    setCancelPopup(null);
 
     try {
       const cancellationTiming = resolveFlightCancellationTiming({
@@ -87,12 +79,14 @@ export const useFlightCancellationAction = ({
         const message =
           cancellationTiming.notice ??
           "El vuelo actual esta dentro de la ultima hora antes del despegue. Se cancelo la siguiente ocurrencia.";
-        setCancelPopup({
+        setCancelNotice({
+          actionKey,
           tone: "warning",
           message,
         });
       } else {
-        setCancelPopup({
+        setCancelNotice({
+          actionKey,
           tone: "success",
           message: "Vuelo cancelado correctamente.",
         });
@@ -102,17 +96,14 @@ export const useFlightCancellationAction = ({
         updatedFlight,
         shiftedToNextDay: cancellationTiming.shiftedToNextDay,
       });
-      addFlightCancellationEvent({
-        airportIcao: updatedFlight.origenIcao || fallbackAirportIcao || "",
-        flightCode: updatedFlight.codigo || fallbackFlightCode,
-      });
     } catch (error: any) {
       const message =
         typeof error?.response?.data === "string"
           ? error.response.data
           : "No se pudo cancelar el vuelo.";
       setCancelError(message);
-      setCancelPopup({
+      setCancelNotice({
+        actionKey,
         tone: "error",
         message,
       });
@@ -126,7 +117,5 @@ export const useFlightCancellationAction = ({
     cancellingFlightKey,
     cancelError,
     cancelNotice,
-    cancelPopup,
-    dismissCancelPopup: () => setCancelPopup(null),
   };
 };

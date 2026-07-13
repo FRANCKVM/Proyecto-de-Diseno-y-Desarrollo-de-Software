@@ -5,14 +5,21 @@ import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
 import { getShipmentByCode } from "@/services/shipmentService";
 import { useDrawerStore } from "@/store/drawerStore";
-import { formatUtcDateTime } from "@/utils/utcDateTime";
+import { formatUtcDateTime, parseUtcDateTimeMs } from "@/utils/utcDateTime";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
-import type { BloquePaquetes, EnvioDetalle } from "@/types/shipment.types";
+import type {
+  BloquePaquetes,
+  EnvioDetalle,
+  EstadoEnvio,
+  HitoRuta,
+} from "@/types/shipment.types";
 
 interface ShipmentDrawerProps {
   codigo: string;
   displayCodigo?: string;
   idSimulacion?: number | null;
+  referenceMinute?: number | null;
+  simulationStart?: string | null;
 }
 
 const PANEL_REFRESH_MS_SIMULATION = 3000;
@@ -64,6 +71,172 @@ interface RouteSummaryStep {
   isLast: boolean;
 }
 
+const resolveReferenceMs = (
+  referenceMinute: number | null | undefined,
+  simulationStart: string | null | undefined
+): number => {
+  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
+
+  if (
+    simulationStartMs !== null &&
+    referenceMinute !== null &&
+    referenceMinute !== undefined
+  ) {
+    return simulationStartMs + referenceMinute * 60_000;
+  }
+
+  return Date.now();
+};
+
+const formatRemainingDuration = (minutes: number): string => {
+  const safeMinutes = Math.max(0, Math.ceil(minutes));
+  const days = Math.floor(safeMinutes / (24 * 60));
+  const hours = Math.floor((safeMinutes % (24 * 60)) / 60);
+  const remainingMinutes = safeMinutes % 60;
+  const parts: string[] = [];
+
+  if (days > 0) {
+    parts.push(`${days} dia${days === 1 ? "" : "s"}`);
+  }
+
+  if (hours > 0) {
+    parts.push(`${hours} h`);
+  }
+
+  if (remainingMinutes > 0 || parts.length === 0) {
+    parts.push(`${remainingMinutes} min`);
+  }
+
+  return parts.join(" ");
+};
+
+const getHitoMs = (hito: HitoRuta | null | undefined): number | null =>
+  parseUtcDateTimeMs(hito?.fecha);
+
+const resolveRouteStepStatus = (
+  startMs: number | null,
+  endMs: number | null,
+  referenceMs: number,
+  fallbackStatus: string
+): string => {
+  if (startMs === null) {
+    return fallbackStatus;
+  }
+
+  if (referenceMs < startMs) {
+    return "pendiente";
+  }
+
+  if (endMs !== null && referenceMs < endMs) {
+    return "activo";
+  }
+
+  return "completado";
+};
+
+const resolveDerivedShipmentStatus = (
+  shipment: EnvioDetalle,
+  referenceMs: number
+): EstadoEnvio => {
+  if (shipment.estado === "cancelado") {
+    return "cancelado";
+  }
+
+  const route = shipment.ruta;
+  if (route.length === 0) {
+    return "planificado";
+  }
+
+  const firstFlight = route.find((hito) => hito.tipo === "vuelo");
+  const firstFlightMs = getHitoMs(firstFlight);
+  const delivery = [...route].reverse().find((hito) => hito.tipo === "entrega");
+  const deliveryMs = getHitoMs(delivery ?? route[route.length - 1]);
+
+  if (deliveryMs !== null && referenceMs >= deliveryMs) {
+    return "entregado";
+  }
+
+  const hasActiveFlight = route.some((hito, index) => {
+    if (hito.tipo !== "vuelo") {
+      return false;
+    }
+
+    const startMs = getHitoMs(hito);
+    const nextStop = route
+      .slice(index + 1)
+      .find((candidate) => candidate.tipo !== "vuelo");
+    const endMs = getHitoMs(nextStop);
+
+    return (
+      startMs !== null &&
+      referenceMs >= startMs &&
+      (endMs === null || referenceMs < endMs)
+    );
+  });
+
+  if (hasActiveFlight) {
+    return "en_transito";
+  }
+
+  if (firstFlightMs !== null && referenceMs >= firstFlightMs) {
+    return "en_escala";
+  }
+
+  return "planificado";
+};
+
+const resolveDerivedPackageStatus = (
+  originalStatus: string,
+  shipmentStatus: EstadoEnvio
+): string => {
+  if (shipmentStatus === "entregado") {
+    return "Entregado";
+  }
+
+  if (shipmentStatus === "en_transito") {
+    return "En transito";
+  }
+
+  if (shipmentStatus === "en_escala") {
+    return "En escala";
+  }
+
+  return originalStatus;
+};
+
+const getDeliveryMs = (shipment: EnvioDetalle): number | null => {
+  const delivery = [...shipment.ruta]
+    .reverse()
+    .find((hito) => hito.tipo === "entrega");
+
+  return getHitoMs(delivery ?? shipment.ruta[shipment.ruta.length - 1]);
+};
+
+const getDeadlineMs = (shipment: EnvioDetalle): number | null => {
+  const registrationMs = parseUtcDateTimeMs(shipment.fechaRegistro);
+
+  if (registrationMs === null || !Number.isFinite(shipment.plazoMaximoDias)) {
+    return null;
+  }
+
+  return registrationMs + shipment.plazoMaximoDias * 24 * 60 * 60_000;
+};
+
+const getShipmentStatusLabel = (status: EstadoEnvio): string => {
+  switch (status) {
+    case "en_transito":
+      return "En transito";
+    case "en_escala":
+      return "En escala";
+    case "entregado":
+      return "Entregado";
+    case "planificado":
+      return "Planificado";
+    case "cancelado":
+      return "Cancelado";
+  }
+};
+
 const parseSequentialCode = (
   code: string
 ): { prefix: string; value: number; padding: number } | null => {
@@ -109,7 +282,8 @@ const formatBagDisplayCode = (shipmentCode: string, sequence: number): string =>
 
 const buildPackageItems = (
   blocks: BloquePaquetes[],
-  shipmentCode: string
+  shipmentCode: string,
+  shipmentStatus: EstadoEnvio
 ): PackageListItem[] => {
   let sequence = 1;
 
@@ -120,7 +294,7 @@ const buildPackageItems = (
       return {
         codigo: buildPackageCodeAt(block, offset),
         displayCodigo: formatBagDisplayCode(shipmentCode, packageSequence),
-        estado: block.estado,
+        estado: resolveDerivedPackageStatus(block.estado, shipmentStatus),
         sequence: packageSequence,
       };
     })
@@ -177,7 +351,10 @@ const formatFlightRouteCode = (
     : `${fromIcao}>${toIcao}-${flightCode}`;
 };
 
-const buildRouteSummarySteps = (shipment: EnvioDetalle): RouteSummaryStep[] => {
+const buildRouteSummarySteps = (
+  shipment: EnvioDetalle,
+  referenceMs: number
+): RouteSummaryStep[] => {
   const flightSteps = shipment.ruta
     .map((hito, index) => ({ hito, index }))
     .filter(({ hito }) => hito.tipo === "vuelo");
@@ -196,6 +373,8 @@ const buildRouteSummarySteps = (shipment: EnvioDetalle): RouteSummaryStep[] => {
       ? formatFechaCorta(previousStop.fecha)
       : formatFechaCorta(hito.fecha);
     const arrivalLabel = nextStop ? formatFechaCorta(nextStop.fecha) : null;
+    const startMs = getHitoMs(hito);
+    const endMs = getHitoMs(nextStop);
 
     return {
       key: `${hito.vueloCodigo ?? hito.aeropuertoIcao}-${index}`,
@@ -203,7 +382,7 @@ const buildRouteSummarySteps = (shipment: EnvioDetalle): RouteSummaryStep[] => {
       sublabel: arrivalLabel
         ? `${departureLabel} → ${arrivalLabel}`
         : `${departureLabel} — En vuelo`,
-      estado: hito.estado,
+      estado: resolveRouteStepStatus(startMs, endMs, referenceMs, hito.estado),
       isLast: summaryIndex === flightSteps.length - 1,
     };
   });
@@ -222,7 +401,12 @@ const buildRouteSummarySteps = (shipment: EnvioDetalle): RouteSummaryStep[] => {
         ? "Escala"
         : "Entrega"
     }`,
-    estado: hito.estado,
+    estado: resolveRouteStepStatus(
+      getHitoMs(hito),
+      getHitoMs(shipment.ruta[index + 1]),
+      referenceMs,
+      hito.estado
+    ),
     isLast: index === shipment.ruta.length - 1,
   }));
 };
@@ -238,6 +422,8 @@ const ShipmentDrawer = ({
   codigo,
   displayCodigo,
   idSimulacion,
+  referenceMinute,
+  simulationStart,
 }: ShipmentDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const focusShipmentRouteSegments = useDrawerStore(
@@ -246,9 +432,20 @@ const ShipmentDrawer = ({
 
   const [shipment, setShipment] = useState<EnvioDetalle | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const referenceMs = resolveReferenceMs(referenceMinute, simulationStart);
+  const derivedShipmentStatus = shipment
+    ? resolveDerivedShipmentStatus(shipment, referenceMs)
+    : null;
   const packageItems = useMemo(
-    () => (shipment ? buildPackageItems(shipment.paquetes, shipment.codigo) : []),
-    [shipment]
+    () =>
+      shipment && derivedShipmentStatus
+        ? buildPackageItems(
+            shipment.paquetes,
+            shipment.codigo,
+            derivedShipmentStatus
+          )
+        : [],
+    [derivedShipmentStatus, shipment]
   );
   const packageRouteLabel = useMemo(
     () => (shipment ? buildShipmentRouteLabel(shipment) : ""),
@@ -259,8 +456,8 @@ const ShipmentDrawer = ({
     [shipment]
   );
   const routeSummarySteps = useMemo(
-    () => (shipment ? buildRouteSummarySteps(shipment) : []),
-    [shipment]
+    () => (shipment ? buildRouteSummarySteps(shipment, referenceMs) : []),
+    [referenceMs, shipment]
   );
 
   useEffect(() => {
@@ -334,6 +531,25 @@ const ShipmentDrawer = ({
       : shipment.estado === "planificado"
       ? "Planificado"
       : shipment.estado;
+  const visibleShipmentStatus = derivedShipmentStatus ?? shipment.estado;
+  const visibleEstadoLabel =
+    visibleShipmentStatus === shipment.estado
+      ? estadoLabel
+      : getShipmentStatusLabel(visibleShipmentStatus);
+  const deliveryMs = getDeliveryMs(shipment);
+  const deadlineMs = getDeadlineMs(shipment);
+  const dentroDePlazo =
+    deadlineMs !== null
+      ? (deliveryMs !== null && referenceMs >= deliveryMs
+          ? deliveryMs <= deadlineMs
+          : referenceMs <= deadlineMs)
+      : shipment.dentroDePlazo;
+  const tiempoRestante =
+    visibleShipmentStatus === "entregado"
+      ? "Entregado"
+      : deliveryMs !== null
+      ? formatRemainingDuration((deliveryMs - referenceMs) / 60_000)
+      : shipment.tiempoRestante;
 
   const handleFocusPackageRoute = () => {
     if (packageRouteSegments.length === 0) {
@@ -352,8 +568,8 @@ const ShipmentDrawer = ({
   return (
     <DrawerBase eyebrow="Envío" title={displayCodigo ?? shipment.codigo} onClose={close}>
       <div className="mb-5">
-        <Tag variant={shipment.estado === "entregado" ? "normal" : "primary"}>
-          {estadoLabel}
+        <Tag variant={visibleShipmentStatus === "entregado" ? "normal" : "primary"}>
+          {visibleEstadoLabel}
         </Tag>
       </div>
 
@@ -457,18 +673,18 @@ const ShipmentDrawer = ({
           </span>
           <span
             className={`text-button ${
-              shipment.dentroDePlazo ? "text-success" : "text-danger"
+              dentroDePlazo ? "text-success" : "text-danger"
             }`}
           >
-            {shipment.tiempoRestante}
+            {tiempoRestante}
           </span>
         </div>
         <p
           className={`text-secondary mt-1 ${
-            shipment.dentroDePlazo ? "text-success" : "text-danger"
+            dentroDePlazo ? "text-success" : "text-danger"
           }`}
         >
-          {shipment.dentroDePlazo
+          {dentroDePlazo
             ? "Dentro del plazo comprometido"
             : "Fuera del plazo comprometido"}
         </p>

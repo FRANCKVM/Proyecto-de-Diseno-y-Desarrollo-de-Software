@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import TopBar from "@/components/organisms/TopBar";
 import WorldMap from "@/components/map/WorldMap";
 import DrawerHost from "@/components/organisms/DrawerHost";
@@ -133,8 +133,29 @@ const OperacionDiaADiaPage = () => {
   const activeFlightSemaphoreFilter = useDrawerStore(
     (s) => s.activeFlightSemaphoreFilter
   );
+  const activeFlightAirportFilter = useDrawerStore(
+    (s) => s.activeFlightAirportFilter
+  );
+  const activeFlightStatusFilter = useDrawerStore(
+    (s) => s.activeFlightStatusFilter
+  );
+  const activeFlightSearchFilter = useDrawerStore(
+    (s) => s.activeFlightSearchFilter
+  );
   const activeFlightOnlyId = useDrawerStore((s) => s.activeFlightOnlyId);
   const shipmentRouteSegments = useDrawerStore((s) => s.shipmentRouteSegments);
+  const handleAirportClick = useCallback(
+    (airport: { icao: string }) => openAirport(airport.icao),
+    [openAirport]
+  );
+  const handleFlightClick = useCallback(
+    (id: string) => openFlight(`occ-${id}`),
+    [openFlight]
+  );
+  const flightCancellationEvents = useMemo(
+    () => mapa?.cancelacionesRecientes ?? [],
+    [mapa?.cancelacionesRecientes]
+  );
 
   return (
     <>
@@ -158,11 +179,14 @@ const OperacionDiaADiaPage = () => {
             warehouseSemaphoreFilter={warehouseSemaphoreFilter}
             activeFlightRegionFilter={activeFlightRegionFilter}
             activeFlightSemaphoreFilter={activeFlightSemaphoreFilter}
+            activeFlightAirportFilter={activeFlightAirportFilter}
+            activeFlightStatusFilter={activeFlightStatusFilter}
+            activeFlightSearchFilter={activeFlightSearchFilter}
             activeFlightOnlyId={activeFlightOnlyId}
-            flightCancellationEvents={mapa?.cancelacionesRecientes ?? []}
+            flightCancellationEvents={flightCancellationEvents}
             shipmentRouteSegments={shipmentRouteSegments}
-            onAirportClick={(a) => openAirport(a.icao)}
-            onFlightClick={(id) => openFlight(`occ-${id}`)}
+            onAirportClick={handleAirportClick}
+            onFlightClick={handleFlightClick}
           />
         )}
         <MapQuickActions

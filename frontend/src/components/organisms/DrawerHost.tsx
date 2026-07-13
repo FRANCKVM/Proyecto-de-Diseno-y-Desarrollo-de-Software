@@ -134,6 +134,8 @@ const DrawerHost = ({
           codigo={selection.codigo}
           idSimulacion={selection.idSimulacion}
           shipments={shipments}
+          referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "shipment":
@@ -143,6 +145,8 @@ const DrawerHost = ({
           codigo={selection.codigo}
           displayCodigo={selection.displayCodigo}
           idSimulacion={selection.idSimulacion}
+          referenceMinute={referenceMinute}
+          simulationStart={simulationStart}
         />
       );
     case "shipment-form":

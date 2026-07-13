@@ -18,12 +18,14 @@ import {
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
-import type { VueloDetalle } from "@/types/flight.types";
+import type { EstadoVuelo, VueloDetalle } from "@/types/flight.types";
 
 interface FlightDrawerProps {
   codigo: string;
   idSimulacion?: number | null;
   shipments?: BackendSolicitudEnvio[];
+  referenceMinute?: number | null;
+  simulationStart?: string | null;
 }
 
 const PANEL_REFRESH_MS_SIMULATION = 3000;
@@ -40,9 +42,57 @@ const parseFlightDateMs = (iso: string | null | undefined): number => {
   return parseUtcDateTimeMs(iso) ?? NaN;
 };
 
+const resolveReferenceMs = (
+  referenceMinute: number | null | undefined,
+  simulationStart: string | null | undefined,
+  fallbackMs: number
+): number => {
+  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
+
+  if (
+    simulationStartMs !== null &&
+    referenceMinute !== null &&
+    referenceMinute !== undefined
+  ) {
+    return simulationStartMs + referenceMinute * 60_000;
+  }
+
+  return fallbackMs;
+};
+
+const resolveTemporalFlightStatus = (
+  flight: VueloDetalle,
+  referenceMs: number
+): EstadoVuelo => {
+  if (flight.estado === "cancelado") {
+    return "cancelado";
+  }
+
+  const departureMs = parseFlightDateMs(flight.fechaSalida);
+  const arrivalMs = parseFlightDateMs(flight.fechaLlegadaEstimada);
+
+  if (
+    !Number.isFinite(departureMs) ||
+    !Number.isFinite(arrivalMs) ||
+    arrivalMs <= departureMs
+  ) {
+    return flight.estado;
+  }
+
+  if (referenceMs < departureMs) {
+    return "programado";
+  }
+
+  if (referenceMs < arrivalMs) {
+    return "en_vuelo";
+  }
+
+  return "completado";
+};
+
 const formatTiempoRestante = (
   arrivalIso: string | null | undefined,
-  nowMs: number,
+  referenceMs: number,
   estado?: VueloDetalle["estado"]
 ): string => {
   if (estado === "completado") {
@@ -57,7 +107,7 @@ const formatTiempoRestante = (
 
   const diffMinutes = Math.max(
     0,
-    Math.ceil((arrivalMs - nowMs) / 60_000)
+    Math.ceil((arrivalMs - referenceMs) / 60_000)
   );
 
   if (diffMinutes === 0) {
@@ -123,6 +173,8 @@ const FlightDrawer = ({
   codigo,
   idSimulacion,
   shipments = [],
+  referenceMinute,
+  simulationStart,
 }: FlightDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
@@ -230,24 +282,26 @@ const FlightDrawer = ({
 
   const ocupacionPct =
     flight.capacidad > 0 ? (flight.ocupacion / flight.capacidad) * 100 : 0;
+  const referenceMs = resolveReferenceMs(referenceMinute, simulationStart, nowMs);
+  const temporalStatus = resolveTemporalFlightStatus(flight, referenceMs);
   const estadoLabel =
-    flight.estado === "en_vuelo"
+    temporalStatus === "en_vuelo"
       ? "En vuelo"
-      : flight.estado === "programado"
+      : temporalStatus === "programado"
       ? "Programado"
-      : flight.estado === "completado"
+      : temporalStatus === "completado"
       ? "Completado"
-      : flight.estado === "cancelado"
+      : temporalStatus === "cancelado"
       ? "Cancelado"
-      : flight.estado;
+      : temporalStatus;
   const displayFlightCode = formatFlightDisplayCode(flight);
   const flightEnvios = Array.isArray(flight.envios) ? flight.envios : [];
-  const isCancelled = flight.estado === "cancelado";
-  const isCompleted = flight.estado === "completado";
+  const isCancelled = temporalStatus === "cancelado";
+  const isCompleted = temporalStatus === "completado";
   const remainingTimeValue = isCancelled ? (
     <Tag variant="critico">Cancelado</Tag>
   ) : (
-    formatTiempoRestante(flight.fechaLlegadaEstimada, nowMs, flight.estado)
+    formatTiempoRestante(flight.fechaLlegadaEstimada, referenceMs, temporalStatus)
   );
   const openShipmentFromFlight = (shipmentCode: string) => {
     const shipmentId = parseShipmentIdentifier(shipmentCode);
@@ -289,7 +343,7 @@ const FlightDrawer = ({
     <DrawerBase eyebrow="Vuelo" title={displayFlightCode} onClose={close}>
       {!isCancelled && (
         <div className="mb-5">
-          <Tag variant={getFlightTagVariant(flight.estado)}>
+          <Tag variant={getFlightTagVariant(temporalStatus)}>
             {estadoLabel}
           </Tag>
         </div>
