@@ -42,12 +42,6 @@ const QuickActionButton = ({
   >
     {icon}
     <span>{label}</span>
-    {active && (
-      <span
-        className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-primary"
-        aria-hidden
-      />
-    )}
   </button>
 );
 

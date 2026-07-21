@@ -11,13 +11,14 @@ import {
   TileLayer,
   useMap,
 } from "react-leaflet";
-import { Route, RouteOff } from "lucide-react";
+import { Layers, Route, RouteOff } from "lucide-react";
 import L from "leaflet";
 import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
+import { cn } from "@/utils/cn";
 import {
   UMBRAL_SEMAFORO_AMBAR_DEFAULT,
   UMBRAL_SEMAFORO_VERDE_DEFAULT,
@@ -94,12 +95,83 @@ const WORLD_BOUNDS: LatLngBoundsExpression = [
   [85, 180],
 ];
 
-/**
- * Capa base Stamen Toner Lite.
- * Fondo gris de alto contraste para monitoreo operativo.
- */
-const BASE_TILE_URL =
-  "https://tiles.stadiamaps.com/tiles/stamen_toner_lite/{z}/{x}/{y}{r}.png";
+type MapTileStyleId =
+  | "voyager"
+  | "toner-lite"
+  | "gray-canvas"
+  | "openstreetmap"
+  | "positron"
+  | "dark-matter";
+
+interface MapTileStyle {
+  id: MapTileStyleId;
+  label: string;
+  url: string;
+  subdomains?: string | string[];
+  overlayUrl?: string;
+  overlaySubdomains?: string | string[];
+}
+
+const MAP_STYLE_STORAGE_KEY = "tasf-map-tile-style-v3";
+const DEFAULT_MAP_STYLE_ID: MapTileStyleId = "voyager";
+const CARTO_SUBDOMAINS = "abcd";
+const OSM_SUBDOMAINS = "abc";
+const MAX_TILE_ERRORS_BEFORE_FALLBACK = 4;
+
+const MAP_TILE_STYLES: MapTileStyle[] = [
+  {
+    id: "voyager",
+    label: "CartoDB Voyager",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    subdomains: CARTO_SUBDOMAINS,
+  },
+  {
+    id: "toner-lite",
+    label: "CartoDB Voyager sin etiquetas",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
+    subdomains: CARTO_SUBDOMAINS,
+  },
+  {
+    id: "gray-canvas",
+    label: "CartoDB Positron sin etiquetas",
+    url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    subdomains: CARTO_SUBDOMAINS,
+  },
+  {
+    id: "openstreetmap",
+    label: "OpenStreetMap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    subdomains: OSM_SUBDOMAINS,
+  },
+  {
+    id: "positron",
+    label: "CartoDB Positron",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    subdomains: CARTO_SUBDOMAINS,
+  },
+  {
+    id: "dark-matter",
+    label: "CartoDB Dark Matter",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    subdomains: CARTO_SUBDOMAINS,
+  },
+];
+
+const getMapTileStyleById = (id: string | null | undefined): MapTileStyle =>
+  MAP_TILE_STYLES.find((style) => style.id === id) ??
+  MAP_TILE_STYLES.find((style) => style.id === DEFAULT_MAP_STYLE_ID)!;
+
+const readStoredMapTileStyle = (): MapTileStyle => {
+  if (typeof window === "undefined") {
+    return getMapTileStyleById(DEFAULT_MAP_STYLE_ID);
+  }
+
+  try {
+    return getMapTileStyleById(window.localStorage.getItem(MAP_STYLE_STORAGE_KEY));
+  } catch {
+    return getMapTileStyleById(DEFAULT_MAP_STYLE_ID);
+  }
+};
 
 /**
  * Centro inicial: [20, 0] permite ver Sudamerica, Europa y Asia.
@@ -403,6 +475,81 @@ const FlightRouteVisibilityButton = ({
   );
 };
 
+const MapTileStyleSelector = ({
+  selectedStyle,
+  onSelect,
+}: {
+  selectedStyle: MapTileStyle;
+  onSelect: (style: MapTileStyle) => void;
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-auto absolute bottom-4 left-[4.25rem] z-[950]"
+    >
+      {isOpen && (
+        <div className="absolute bottom-14 left-0 w-56 overflow-hidden rounded-card border border-border bg-card/95 py-1 shadow-card backdrop-blur-sm">
+          {MAP_TILE_STYLES.map((style) => {
+            const active = style.id === selectedStyle.id;
+
+            return (
+              <button
+                key={style.id}
+                type="button"
+                onClick={() => {
+                  onSelect(style);
+                  setIsOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between px-3 py-2 text-left text-secondary transition-colors",
+                  active
+                    ? "bg-primary-soft text-primary"
+                    : "text-text-primary hover:bg-field"
+                )}
+              >
+                <span>{style.label}</span>
+                {active && (
+                  <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className={cn(
+          "inline-flex h-11 w-11 items-center justify-center rounded-full border bg-card/95 shadow-card backdrop-blur-sm transition-colors",
+          isOpen
+            ? "border-primary text-primary"
+            : "border-border text-text-primary hover:border-primary hover:text-primary",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        )}
+        aria-label="Cambiar textura del mapa"
+        title={`Textura: ${selectedStyle.label}`}
+        aria-expanded={isOpen}
+      >
+        <Layers size={20} strokeWidth={2.2} aria-hidden />
+      </button>
+    </div>
+  );
+};
+
 const MapFocusController = ({
   airport,
   flight,
@@ -556,6 +703,8 @@ const WorldMap = ({
   onFlightClick,
 }: WorldMapProps) => {
   const [showFlightRoutes, setShowFlightRoutes] = useState(true);
+  const [selectedMapStyle, setSelectedMapStyle] = useState(readStoredMapTileStyle);
+  const tileErrorCountRef = useRef(0);
   const [visibleCancellationAlerts, setVisibleCancellationAlerts] = useState<
     VisibleCancellationAlert[]
   >([]);
@@ -593,6 +742,34 @@ const WorldMap = ({
       );
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MAP_STYLE_STORAGE_KEY, selectedMapStyle.id);
+    } catch {
+      // Si el navegador bloquea localStorage, el cambio queda activo en memoria.
+    }
+  }, [selectedMapStyle.id]);
+
+  useEffect(() => {
+    tileErrorCountRef.current = 0;
+  }, [selectedMapStyle.id]);
+
+  const tileEventHandlers = useMemo(
+    () => ({
+      tileerror: () => {
+        tileErrorCountRef.current += 1;
+
+        if (
+          selectedMapStyle.id !== DEFAULT_MAP_STYLE_ID &&
+          tileErrorCountRef.current >= MAX_TILE_ERRORS_BEFORE_FALLBACK
+        ) {
+          setSelectedMapStyle(getMapTileStyleById(DEFAULT_MAP_STYLE_ID));
+        }
+      },
+    }),
+    [selectedMapStyle.id]
+  );
 
   // Lookup O(1) de aeropuertos por ICAO para resolver origen/destino
   // de cada vuelo sin recorrer el array en cada render.
@@ -799,9 +976,21 @@ const WorldMap = ({
       className="w-full h-full bg-map-bg"
     >
       <TileLayer
-        url={BASE_TILE_URL}
+        key={selectedMapStyle.id}
+        url={selectedMapStyle.url}
+        subdomains={selectedMapStyle.subdomains}
         detectRetina
+        eventHandlers={tileEventHandlers}
       />
+      {selectedMapStyle.overlayUrl ? (
+        <TileLayer
+          key={`${selectedMapStyle.id}-overlay`}
+          url={selectedMapStyle.overlayUrl}
+          subdomains={selectedMapStyle.overlaySubdomains}
+          detectRetina
+          eventHandlers={tileEventHandlers}
+        />
+      ) : null}
       <MapAutoFitController
         positions={overviewPositions}
         disabled={hasFocusedMapItem}
@@ -907,6 +1096,10 @@ const WorldMap = ({
       <FlightRouteVisibilityButton
         visible={showFlightRoutes}
         onToggle={() => setShowFlightRoutes((current) => !current)}
+      />
+      <MapTileStyleSelector
+        selectedStyle={selectedMapStyle}
+        onSelect={setSelectedMapStyle}
       />
       <SemaphoreLegendCard rangosSemaforo={rangosSemaforo} />
     </LeafletMap>

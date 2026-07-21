@@ -87,6 +87,7 @@ const CAPACITY_TEXT_CLASS: Record<EstadoSemaforo, string> = {
   elevado: "text-warning",
   critico: "text-danger",
 };
+const TIME_VALUE_CLASS = "text-primary";
 
 const formatHourMinute = (time: string) => time.split(":").slice(0, 2).join(":");
 
@@ -255,14 +256,16 @@ const FloatingTopBar = ({
     className="absolute left-0 top-0 z-[800] flex max-w-full items-start gap-2.5"
     style={drawerAwareStyle}
   >
-    <FloatingCard className="w-fit">
-      <div className="grid grid-cols-1 gap-2">{main}</div>
-    </FloatingCard>
-    {simulation ? (
+    <div className="flex flex-col gap-2.5">
+      {simulation ? (
+        <FloatingCard className="w-fit">
+          <div className="grid grid-cols-1 gap-2">{simulation}</div>
+        </FloatingCard>
+      ) : null}
       <FloatingCard className="w-fit">
-        <div className="grid grid-cols-1 gap-2">{simulation}</div>
+        <div className="grid grid-cols-1 gap-2">{main}</div>
       </FloatingCard>
-    ) : null}
+    </div>
     <FloatingCard className="w-fit">
       {day}
     </FloatingCard>
@@ -359,10 +362,12 @@ const TopBar = (props: TopBarProps) => {
               <KpiInline
                 label="Fecha/hora actual:"
                 value={props.reloj.fechaHoraActual}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline
                 label="Transcurrido real:"
                 value={props.reloj.tiempoRealTranscurrido}
+                valueClass={TIME_VALUE_CLASS}
               />
             </>
           }
@@ -371,16 +376,19 @@ const TopBar = (props: TopBarProps) => {
               <KpiInline
                 label="Inicio simulación:"
                 value={props.reloj.inicioSimulacion}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline
                 label="Fecha simulación:"
                 value={`${props.reloj.fechaSimulacionActual}, ${formatHourMinute(
                   props.reloj.horaSimulacion
                 )}`}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline
                 label="Transcurrido simulación:"
                 value={props.reloj.tiempoSimulacionTranscurrido}
+                valueClass={TIME_VALUE_CLASS}
               />
             </>
           }
@@ -422,6 +430,7 @@ const TopBar = (props: TopBarProps) => {
               <KpiInline
                 label="Fecha/hora actual:"
                 value={props.fechaActual}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline label="Envíos hoy:" value={props.kpis.enviosHoy} />
               <KpiCompactLine
@@ -450,10 +459,12 @@ const TopBar = (props: TopBarProps) => {
               <KpiInline
                 label="Fecha/hora actual:"
                 value={props.reloj.fechaHoraActual}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline
                 label="Transcurrido real:"
                 value={props.reloj.tiempoRealTranscurrido}
+                valueClass={TIME_VALUE_CLASS}
               />
             </>
           }
@@ -462,6 +473,7 @@ const TopBar = (props: TopBarProps) => {
               <KpiInline
                 label="Inicio simulación:"
                 value={props.reloj.inicioSimulacion}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline
                 label="Demanda:"
@@ -478,10 +490,12 @@ const TopBar = (props: TopBarProps) => {
                 value={`${props.reloj.fechaSimulacionActual}, ${formatHourMinute(
                   props.reloj.horaSimulacion
                 )}`}
+                valueClass={TIME_VALUE_CLASS}
               />
               <KpiInline
                 label="Transcurrido simulación:"
                 value={props.reloj.tiempoSimulacionTranscurrido}
+                valueClass={TIME_VALUE_CLASS}
               />
             </>
           }
