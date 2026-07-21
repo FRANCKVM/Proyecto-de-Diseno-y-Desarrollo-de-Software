@@ -6,14 +6,14 @@ import ShipmentRegistrationForm from "@/components/organisms/ShipmentRegistratio
 import { useAirports } from "@/hooks/useAirports";
 import { useUserStore } from "@/store/userStore";
 import {
-  buildHomeKpis,
+  buildHomeKpisFromSummary,
   buildRecentActivity,
   type HomeKpis,
 } from "@/services/homeService";
-import { listOperationShipments } from "@/services/operationService";
+import { getOperationHomeSummary } from "@/services/operationService";
 import { ROUTES } from "@/utils/routes";
 import type { ActividadReciente } from "@/types/activity.types";
-import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
+import type { BackendOperacionHomeResumen } from "@/types/backendSimulation.types";
 
 const HOME_REFRESH_INTERVAL_MS = 15000;
 
@@ -36,7 +36,8 @@ const HomePage = () => {
     error: airportsError,
   } = useAirports();
 
-  const [envios, setEnvios] = useState<BackendSolicitudEnvio[]>([]);
+  const [homeSummary, setHomeSummary] =
+    useState<BackendOperacionHomeResumen | null>(null);
   const [isLoadingHome, setIsLoadingHome] = useState(true);
   const [homeError, setHomeError] = useState<string | null>(null);
 
@@ -45,13 +46,17 @@ const HomePage = () => {
 
     const loadHomeData = async () => {
       try {
-        const enviosActuales = await listOperationShipments();
+        const resumenActual = await getOperationHomeSummary(5);
+
+        if (!resumenActual) {
+          throw new Error("No se pudo cargar el resumen del panel principal.");
+        }
 
         if (!isMounted) {
           return;
         }
 
-        setEnvios(enviosActuales);
+        setHomeSummary(resumenActual);
         setHomeError(null);
       } catch (error) {
         if (!isMounted) {
@@ -82,18 +87,21 @@ const HomePage = () => {
   }, []);
 
   const refreshHomeData = async () => {
-    const enviosActuales = await listOperationShipments();
-    setEnvios(enviosActuales);
+    const resumenActual = await getOperationHomeSummary(5);
+    if (!resumenActual) {
+      throw new Error("No se pudo cargar el resumen del panel principal.");
+    }
+    setHomeSummary(resumenActual);
     setHomeError(null);
   };
 
   const kpis: HomeKpis | null = useMemo(() => {
-    if (isLoadingHome || isLoadingAirports || airportsError) {
+    if (isLoadingHome || isLoadingAirports || airportsError || !homeSummary) {
       return null;
     }
 
-    return buildHomeKpis({ airports, envios });
-  }, [airports, airportsError, envios, isLoadingAirports, isLoadingHome]);
+    return buildHomeKpisFromSummary(airports, homeSummary);
+  }, [airports, airportsError, homeSummary, isLoadingAirports, isLoadingHome]);
 
   const actividad: ActividadReciente[] = useMemo(() => {
     if (isLoadingHome) {
@@ -111,8 +119,13 @@ const HomePage = () => {
       ];
     }
 
-    return buildRecentActivity(envios);
-  }, [envios, homeError, isLoadingHome]);
+    return buildRecentActivity(homeSummary?.actividadReciente ?? []);
+  }, [homeError, homeSummary?.actividadReciente, isLoadingHome]);
+
+  const occupancyByIcao = useMemo(
+    () => homeSummary?.ocupacionPorAeropuerto ?? {},
+    [homeSummary?.ocupacionPorAeropuerto]
+  );
 
   return (
     <div className="p-8 max-w-ref-screen">
@@ -140,7 +153,7 @@ const HomePage = () => {
         />
         <KpiCard
           dotVariant="elevado"
-          label="Envios en curso"
+          label="Envios en transito"
           value={kpis?.enviosEnCurso.total ?? "—"}
           subtitulo={kpis?.enviosEnCurso.sublabel}
         />
@@ -156,11 +169,7 @@ const HomePage = () => {
       {/* Dos columnas: Registro + Actividad reciente */}
       <div className="grid grid-cols-2 gap-5 mb-5">
         <section className="bg-card border border-border rounded-card p-6 shadow-card">
-          <h2 className="text-section-title mb-1">Registrar nuevo envio</h2>
-          <p className="text-body text-text-secondary mb-4">
-            Ingresa el envio desde la pantalla de inicio. El plazo maximo se
-            calcula automaticamente segun la region del trayecto.
-          </p>
+          <h2 className="text-section-title mb-4">Registrar nuevo envio</h2>
 
           {isLoadingAirports ? (
             <p className="text-body text-text-secondary">
@@ -178,6 +187,7 @@ const HomePage = () => {
           ) : (
             <ShipmentRegistrationForm
               airports={airports}
+              occupancyByIcao={occupancyByIcao}
               onCreated={refreshHomeData}
             />
           )}
@@ -212,7 +222,7 @@ const HomePage = () => {
         </p>
         <ul className="space-y-2 mb-5">
           <li className="bg-field rounded-input px-3 py-2 text-body text-text-primary">
-            Sim. periodo (semanal)
+            Sim. periodo de 5 dias
           </li>
           <li className="bg-field rounded-input px-3 py-2 text-body text-text-primary">
             Sim. hasta colapso

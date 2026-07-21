@@ -20,14 +20,14 @@ import type { TipoSimulacion } from "@/types/common.types";
 
 /**
  * Opciones de tipo de periodo disponibles.
- * La UI solo permite simulacion semanal de 5 dias o simulacion al colapso.
+ * La UI solo permite simulacion de periodo de 5 dias o simulacion al colapso.
  */
 const PERIOD_OPTIONS: Array<{
   tipo: TipoSimulacion;
   label: string;
   sublabel: string;
 }> = [
-  { tipo: "semanal", label: "Semanal", sublabel: "5 dias" },
+  { tipo: "semanal", label: "Periodo de 5 dias", sublabel: "Tiempo corto" },
   { tipo: "colapso", label: "Colapso", sublabel: "" },
 ];
 

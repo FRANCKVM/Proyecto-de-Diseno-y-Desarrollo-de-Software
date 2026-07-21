@@ -24,7 +24,7 @@ export const COLORS = {
     page: "#F6F7F9",
     card: "#FFFFFF",
     field: "#F8F9FA",
-    // Color base de CartoDB Positron, usado como fallback
+    // Color base aproximado de Stamen Toner Lite, usado como fallback
     // para cualquier zona sin tile renderizado.
     map: "#F6F6F6",
   },

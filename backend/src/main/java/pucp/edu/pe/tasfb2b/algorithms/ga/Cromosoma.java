@@ -47,10 +47,19 @@ public class Cromosoma {
     public boolean contieneAeropuerto(Aeropuerto aeropuerto) { return genes.contains(aeropuerto); }
 
     public void evaluar(Grafo grafo, SolicitudEnvio solicitud) {
-        evaluar(grafo, solicitud, solicitud.getFechaHoraRegistro());
+        evaluar(grafo, solicitud, solicitud.getFechaHoraRegistro(), 0);
     }
 
     public void evaluar(Grafo grafo, SolicitudEnvio solicitud, LocalDateTime fechaHoraInicio) {
+        evaluar(grafo, solicitud, fechaHoraInicio, 0);
+    }
+
+    public void evaluar(
+            Grafo grafo,
+            SolicitudEnvio solicitud,
+            LocalDateTime fechaHoraInicio,
+            int minutosEsperaMinimaEscala
+    ) {
         Ruta rutaCandidato = new Ruta();
         boolean valido = true;
 
@@ -72,6 +81,9 @@ public class Cromosoma {
         for (int i = 0; i < genes.size() - 1; i++) {
             Aeropuerto desde = genes.get(i);
             Aeropuerto hasta = genes.get(i + 1);
+            LocalDateTime salidaMinima = i == 0
+                    ? cursor
+                    : cursor.plusMinutes(Math.max(0, minutosEsperaMinimaEscala));
             if (!visitados.add(desde)) {
                 valido = false;
                 break;
@@ -82,6 +94,7 @@ public class Cromosoma {
                     desde,
                     hasta,
                     solicitud.getContarBolsas(),
+                    salidaMinima,
                     cursor,
                     rutaCandidato.getTiempoTotal(),
                     solicitud.getDiasTiempoMaximo()
@@ -117,6 +130,7 @@ public class Cromosoma {
             Aeropuerto desde,
             Aeropuerto hasta,
             int bolsas,
+            LocalDateTime salidaMinima,
             LocalDateTime cursor,
             double tiempoAcumuladoDias,
             double plazoMaximoDias
@@ -127,7 +141,7 @@ public class Cromosoma {
         for (VueloOcurrencia ocurrencia : grafo.getOcurrenciasSalientes(desde)) {
             Vuelo vuelo = ocurrencia.getVuelo();
             if (!vuelo.getHasta().equals(hasta)
-                    || ocurrencia.getFechaHoraSalida().isBefore(cursor)
+                    || ocurrencia.getFechaHoraSalida().isBefore(salidaMinima)
                     || !ocurrencia.tieneCapacidad(bolsas)) {
                 continue;
             }

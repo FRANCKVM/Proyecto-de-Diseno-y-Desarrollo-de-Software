@@ -135,8 +135,8 @@ CREATE TABLE solicitud_envio (
     contar_bolsas INT NOT NULL,
     dias_tiempo_maximo DECIMAL(10, 4) NOT NULL,
 
-    estado ENUM('INGRESADO', 'EN_PROCESO', 'COMPLETADO') 
-        NOT NULL DEFAULT 'INGRESADO',
+    estado ENUM('REGISTRADO', 'PLANIFICADO', 'EN_TRANSITO', 'COMPLETADO', 'ENTREGADO')
+        NOT NULL DEFAULT 'REGISTRADO',
 
     CONSTRAINT fk_solicitud_ruta
         FOREIGN KEY (id_ruta)

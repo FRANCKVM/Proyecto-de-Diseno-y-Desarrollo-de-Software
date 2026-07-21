@@ -89,26 +89,26 @@ const SEMAPHORE_FILTER_OPTIONS: Array<{
   {
     value: "vacios",
     label: "Vacíos",
-    className: "border-[#4b5563] bg-[#d1d5db] hover:bg-[#9ca3af]",
-    activeClassName: "border-[#111827] bg-[#374151] shadow-card ring-2 ring-[#111827]/25",
+    className: "border-[#4b5563] bg-[#6B7280] hover:ring-2 hover:ring-[#6B7280]/30",
+    activeClassName: "border-[#374151] bg-[#6B7280] shadow-card ring-2 ring-[#6B7280]/45",
   },
   {
     value: "normal",
     label: "Verde",
-    className: "border-[#16a34a] bg-[#bbf7d0] hover:bg-[#86efac]",
-    activeClassName: "border-[#15803d] bg-[#16a34a] shadow-card ring-2 ring-[#16a34a]/25",
+    className: "border-[#16a34a] bg-success hover:ring-2 hover:ring-success/30",
+    activeClassName: "border-[#15803d] bg-success shadow-card ring-2 ring-success/45",
   },
   {
     value: "elevado",
     label: "Ámbar",
-    className: "border-[#f59e0b] bg-[#fde68a] hover:bg-[#fcd34d]",
-    activeClassName: "border-[#d97706] bg-[#f59e0b] shadow-card ring-2 ring-[#f59e0b]/25",
+    className: "border-[#f59e0b] bg-warning hover:ring-2 hover:ring-warning/30",
+    activeClassName: "border-[#d97706] bg-warning shadow-card ring-2 ring-warning/45",
   },
   {
     value: "critico",
     label: "Rojo",
-    className: "border-[#ef4444] bg-[#fecaca] hover:bg-[#fca5a5]",
-    activeClassName: "border-[#dc2626] bg-[#ef4444] shadow-card ring-2 ring-[#ef4444]/25",
+    className: "border-[#ef4444] bg-danger hover:ring-2 hover:ring-danger/30",
+    activeClassName: "border-[#dc2626] bg-danger shadow-card ring-2 ring-danger/45",
   },
 ];
 
@@ -589,6 +589,7 @@ const ActiveFlightsDrawer = ({
   return (
     <DrawerBase
       title="Panel de vuelos"
+      hideHeader
       onClose={close}
       footer={
         <div className="flex items-center justify-between text-secondary text-text-primary">
@@ -613,8 +614,8 @@ const ActiveFlightsDrawer = ({
               type="search"
               value={flightSearch}
               onChange={(event) => setFlightSearch(event.target.value)}
-              placeholder="Inicio del ID, ej. SKBO>SPIM-23"
-              className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
+              placeholder="Ej. SKBO>SPIM-23"
+              className="tasf-input-placeholder w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
             />
           </div>
 

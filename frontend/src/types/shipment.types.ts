@@ -9,9 +9,10 @@ import type { TipoVuelo, EstadoVuelo } from "@/types/flight.types";
 
 /** Estado puntual de un envio en su ciclo de vida. */
 export type EstadoEnvio =
+  | "registrado"
   | "planificado"
   | "en_transito"
-  | "en_escala"
+  | "completado"
   | "entregado"
   | "cancelado";
 

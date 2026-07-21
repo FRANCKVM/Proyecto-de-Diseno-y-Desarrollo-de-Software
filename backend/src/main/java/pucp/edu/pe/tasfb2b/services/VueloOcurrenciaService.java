@@ -1,7 +1,10 @@
 package pucp.edu.pe.tasfb2b.services;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +27,7 @@ import java.util.HashSet;
 @Service
 public class VueloOcurrenciaService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(VueloOcurrenciaService.class);
     public static final int DIAS_VENTANA_OPERATIVA = 5;
     private static final int MINUTOS_DIA = 24 * 60;
 
@@ -39,10 +43,17 @@ public class VueloOcurrenciaService {
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    @Transactional
     public void completarVentanaOperativaAlIniciar() {
-        completarVentanaOperativa(LocalDate.now(ZoneOffset.UTC));
-        actualizarEstadosOperativos();
+        try {
+            completarVentanaOperativa(LocalDate.now(ZoneOffset.UTC));
+            actualizarEstadosOperativos();
+        } catch (ObjectOptimisticLockingFailureException ex) {
+            LOGGER.warn(
+                    "No se pudo sincronizar la ventana operativa al iniciar por una actualizacion concurrente. "
+                            + "El siguiente ciclo programado volvera a actualizar los vuelos.",
+                    ex
+            );
+        }
     }
 
     @Scheduled(cron = "0 5 0 * * *", zone = "UTC")

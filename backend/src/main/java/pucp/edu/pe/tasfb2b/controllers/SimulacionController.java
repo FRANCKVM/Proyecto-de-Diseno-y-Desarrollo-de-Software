@@ -77,6 +77,58 @@ public class SimulacionController {
         }
     }
 
+    @GetMapping("/{idSimulacion}/envios/pagina")
+    public ResponseEntity<?> obtenerEnviosPaginados(
+            @PathVariable Integer idSimulacion,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "80") int size,
+            @RequestParam(required = false) String codigo,
+            @RequestParam(defaultValue = "todos") String estado,
+            @RequestParam(defaultValue = "todos") String aeropuerto,
+            @RequestParam(defaultValue = "todos") String direccion,
+            @RequestParam(required = false) Integer horasEntregados
+    ) {
+        try {
+            return ResponseEntity.ok(simulacionService.obtenerEnviosSimulacionPaginados(
+                    idSimulacion,
+                    page,
+                    size,
+                    codigo,
+                    estado,
+                    aeropuerto,
+                    direccion,
+                    horasEntregados
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @GetMapping("/{idSimulacion}/maletas")
+    public ResponseEntity<?> obtenerMaletasPaginadas(
+            @PathVariable Integer idSimulacion,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size,
+            @RequestParam(required = false) String codigo,
+            @RequestParam(defaultValue = "todos") String estado,
+            @RequestParam(defaultValue = "todos") String aeropuerto,
+            @RequestParam(required = false) Integer horasEntregados
+    ) {
+        try {
+            return ResponseEntity.ok(simulacionService.obtenerMaletasSimulacionPaginadas(
+                    idSimulacion,
+                    page,
+                    size,
+                    codigo,
+                    estado,
+                    aeropuerto,
+                    horasEntregados
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @GetMapping("/{idSimulacion}/mapa")
     public ResponseEntity<?> obtenerMapa(@PathVariable Integer idSimulacion) {
         try {

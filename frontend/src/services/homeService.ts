@@ -1,10 +1,12 @@
 import type { ActividadReciente } from "@/types/activity.types";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type {
+  BackendOperacionHomeResumen,
   BackendSolicitudEnvio,
   BackendVuelo,
 } from "@/types/backendSimulation.types";
 import { getAssignedBags, getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import { resolveShipmentListStatus } from "@/utils/shipmentStatus";
 import {
   buildUtcDateTime,
   formatUtcDateTime,
@@ -42,17 +44,7 @@ const isIntercontinentalFlight = (vuelo: BackendVuelo) =>
   vuelo.hasta.region.trim().toLowerCase();
 
 const isShipmentInCourse = (envio: BackendSolicitudEnvio) => {
-  const ocurrencias = getShipmentRouteGroups(envio).flatMap(
-    (group) => group.ruta?.ocurrencias ?? []
-  );
-
-  if (ocurrencias.length === 0) {
-    return false;
-  }
-
-  return ocurrencias.some((ocurrencia) =>
-    ocurrencia.estado === "PROGRAMADO" || ocurrencia.estado === "EN_VUELO"
-  );
+  return resolveShipmentListStatus(envio) === "en-transito";
 };
 
 const isShipmentCompliant = (envio: BackendSolicitudEnvio) => {
@@ -110,12 +102,22 @@ const buildActivityMessage = (
     maletasAsignadas > 0 ? maletasAsignadas : (envio.contarBolsas ?? 0)
   );
 
-  if (routeGroups.length === 0 || tramos === 0) {
+  const status = resolveShipmentListStatus(envio);
+
+  if (status === "registrados" || routeGroups.length === 0 || tramos === 0) {
     return `Envio ${idLabel} registrado sin ruta: ${origen} -> ${destino}.`;
   }
 
-  if (isShipmentInCourse(envio)) {
-    return `Envio ${idLabel} en curso: ${origen} -> ${destino} con ${tramos} tramo(s) y ${maletas} maletas.`;
+  if (status === "en-transito") {
+    return `Envio ${idLabel} en transito: ${origen} -> ${destino} con ${tramos} tramo(s) y ${maletas} maletas.`;
+  }
+
+  if (status === "completados") {
+    return `Envio ${idLabel} completado: ${origen} -> ${destino}.`;
+  }
+
+  if (status === "entregados") {
+    return `Envio ${idLabel} entregado: ${origen} -> ${destino}.`;
   }
 
   if (tramos > 1) {
@@ -134,11 +136,13 @@ const buildActivitySeverity = (
     0
   );
 
-  if (routeGroups.length === 0 || tramos === 0) {
+  const status = resolveShipmentListStatus(envio);
+
+  if (status === "registrados" || routeGroups.length === 0 || tramos === 0) {
     return "error";
   }
 
-  if (isShipmentInCourse(envio)) {
+  if (status === "en-transito") {
     return "informacion";
   }
 
@@ -200,7 +204,7 @@ export const buildHomeKpis = ({
     },
     vuelosActivos: {
       total: vuelosActivosIds.size,
-      sublabel: `${vuelosIntercontinentalesIds.size} rutas inter`,
+      sublabel: "vuelos operativos",
     },
     enviosEnCurso: {
       total: enviosEnCurso.length,
@@ -212,6 +216,39 @@ export const buildHomeKpis = ({
         envios.length === 0
           ? "sin envios registrados"
           : `${enviosCumplen} de ${envios.length} dentro de plazo`,
+    },
+  };
+};
+
+export const buildHomeKpisFromSummary = (
+  airports: AirportWithCoords[],
+  summary: BackendOperacionHomeResumen
+): HomeKpis => {
+  const regiones = new Set(
+    airports
+      .map((airport) => airport.region?.trim())
+      .filter((region): region is string => Boolean(region))
+  );
+
+  return {
+    aeropuertos: {
+      total: airports.length,
+      sublabel: `${regiones.size} continentes`,
+    },
+    vuelosActivos: {
+      total: summary.vuelosActivos,
+      sublabel: "vuelos operativos",
+    },
+    enviosEnCurso: {
+      total: summary.enviosEnCurso,
+      sublabel: `${numberFormatter.format(summary.maletasEnCurso)} maletas`,
+    },
+    cumplimiento: {
+      porcentaje: summary.cumplimiento,
+      sublabel:
+        summary.totalEnvios === 0
+          ? "sin envios registrados"
+          : `${summary.enviosDentroDePlazo} de ${summary.totalEnvios} dentro de plazo`,
     },
   };
 };

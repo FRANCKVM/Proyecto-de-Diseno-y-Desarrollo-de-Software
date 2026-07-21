@@ -47,7 +47,7 @@ const SimulacionEjecucionPage = () => {
     occupancyByIcao,
     estado,
     mapa,
-    envios,
+    shipmentsRefreshVersion,
     flights: backendMapFlights,
   } = useLiveSimulation({ autoStart: true, pollingMode: "sse" });
 
@@ -224,7 +224,7 @@ const SimulacionEjecucionPage = () => {
           airports={airports}
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
-          shipments={envios}
+          shipmentsRefreshKey={shipmentsRefreshVersion}
           activeFlights={flights}
           referenceMinute={liveReferenceMinute}
           simulationStart={estado?.fechaHoraInicioSimulacion}

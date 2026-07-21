@@ -11,7 +11,7 @@ import type {
 export const RESULTADO_PERIODO_MOCK: ResultadoPeriodo = {
   id: "demo-periodo",
   tipo: "semanal",
-  rango: "Semanal 07-13/09/2026",
+  rango: "Periodo 5 dias 07-11/09/2026",
   totalMaletas: 4230,
   cumplimiento: 100,
   vuelosEjecutados: 124,

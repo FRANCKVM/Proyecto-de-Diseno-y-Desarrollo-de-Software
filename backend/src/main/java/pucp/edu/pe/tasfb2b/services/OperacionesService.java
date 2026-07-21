@@ -3,7 +3,12 @@ package pucp.edu.pe.tasfb2b.services;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import pucp.edu.pe.tasfb2b.controllers.dto.EstadoOperacionResponse;
+import pucp.edu.pe.tasfb2b.controllers.dto.BaggageItemResponse;
+import pucp.edu.pe.tasfb2b.controllers.dto.PagedResponse;
+import pucp.edu.pe.tasfb2b.controllers.dto.OperacionHomeResumenResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.RegistrarOperacionEnvioRequest;
 import pucp.edu.pe.tasfb2b.algorithms.ga.PlanificadorGenetico;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
@@ -27,6 +32,7 @@ import java.time.LocalTime;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -44,6 +50,7 @@ public class OperacionesService {
     private static final double TASA_MUTACION = 0.25;
     private static final int TAMANO_TORNEO = 3;
     private static final int ESCALAS_INTERMEDIAS_MAX = 4;
+    private static final int MINUTOS_ESPERA_MINIMA_ESCALA = 10;
     private static final double PLAZO_INTRACONTINENTAL_DIAS = 1.0;
     private static final double PLAZO_INTERCONTINENTAL_DIAS = 2.0;
     private static final long VENTANA_CANCELACIONES_MAPA_REAL_MIN = 5;
@@ -57,6 +64,8 @@ public class OperacionesService {
     private final VueloCancelacionService vueloCancelacionService;
     private final EstadoLogisticoService estadoLogisticoService;
     private final VueloOcurrenciaService vueloOcurrenciaService;
+    private final OperationSseService operationSseService;
+    private final EnvioListadoService envioListadoService;
     private final List<VueloCancelacion> cancelacionesOperacionRecientes = new CopyOnWriteArrayList<>();
     private int siguienteIdCancelacionVolatil = 1;
 
@@ -69,7 +78,9 @@ public class OperacionesService {
             VueloRepository vueloRepository,
             VueloCancelacionService vueloCancelacionService,
             EstadoLogisticoService estadoLogisticoService,
-            VueloOcurrenciaService vueloOcurrenciaService
+            VueloOcurrenciaService vueloOcurrenciaService,
+            OperationSseService operationSseService,
+            EnvioListadoService envioListadoService
     ) {
         this.grafoService = grafoService;
         this.aeropuertoRepository = aeropuertoRepository;
@@ -80,6 +91,8 @@ public class OperacionesService {
         this.vueloCancelacionService = vueloCancelacionService;
         this.estadoLogisticoService = estadoLogisticoService;
         this.vueloOcurrenciaService = vueloOcurrenciaService;
+        this.operationSseService = operationSseService;
+        this.envioListadoService = envioListadoService;
     }
 
     @Transactional
@@ -104,6 +117,7 @@ public class OperacionesService {
         LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
         LocalDate hoy = ahora.toLocalDate();
         List<LocalDate> fechas = List.of(hoy, hoy.plusDays(1));
+        boolean huboCambios = false;
 
         for (Vuelo vuelo : vueloRepository.findAll()) {
             for (LocalDate fecha : fechas) {
@@ -146,7 +160,12 @@ public class OperacionesService {
                 cancelacionesOperacionRecientes.add(cancelacion);
                 vueloOcurrenciaService.cancelarOperativa(vuelo, fechaHoraSalida);
                 replanificarEnviosAfectadosOperacion(cancelacion);
+                huboCambios = true;
             }
+        }
+
+        if (huboCambios) {
+            publicarOperacionActualizada("flight.cancelled");
         }
     }
 
@@ -187,6 +206,7 @@ public class OperacionesService {
         cancelacionesOperacionRecientes.add(cancelacion);
         vueloOcurrenciaService.cancelarOperativa(vuelo, fechaHoraSalida);
         replanificarEnviosAfectadosOperacion(cancelacion);
+        publicarOperacionActualizada("flight.cancelled");
         return cancelacion;
     }
 
@@ -206,8 +226,57 @@ public class OperacionesService {
 
     @Transactional(readOnly = true)
     public List<SolicitudEnvio> obtenerEnviosOperacion() {
-        return adjuntarAsignaciones(
+        List<SolicitudEnvio> envios = adjuntarAsignaciones(
                 solicitudEnvioRepository.findAllByOrderByIdEnvioAsc()
+        );
+        LocalDateTime referencia = LocalDateTime.now(ZoneOffset.UTC);
+        envios.forEach(envio -> envio.setEstado(
+                estadoLogisticoService.resolverEstadoEnvio(envio, referencia, false)
+        ));
+        return envios;
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<SolicitudEnvio> obtenerEnviosOperacionPaginados(
+            int page,
+            int size,
+            String codigo,
+            String estado,
+            String aeropuerto,
+            String direccion,
+            Integer horasEntregados
+    ) {
+        return envioListadoService.paginarEnvios(
+                obtenerEnviosOperacion(),
+                page,
+                size,
+                codigo,
+                estado,
+                aeropuerto,
+                direccion,
+                horasEntregados,
+                LocalDateTime.now(ZoneOffset.UTC)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<BaggageItemResponse> obtenerMaletasOperacionPaginadas(
+            int page,
+            int size,
+            String codigo,
+            String estado,
+            String aeropuerto,
+            Integer horasEntregados
+    ) {
+        return envioListadoService.paginarMaletas(
+                obtenerEnviosOperacion(),
+                page,
+                size,
+                codigo,
+                estado,
+                aeropuerto,
+                horasEntregados,
+                LocalDateTime.now(ZoneOffset.UTC)
         );
     }
 
@@ -250,7 +319,9 @@ public class OperacionesService {
                 calcularPlazoMaximoDias(origen, destino)
         );
 
-        return adjuntarAsignaciones(procesarBloqueReal(Collections.singletonList(solicitud)).get(0));
+        SolicitudEnvio envio = adjuntarAsignaciones(procesarBloqueReal(Collections.singletonList(solicitud)).get(0));
+        publicarOperacionActualizada("shipment.created");
+        return envio;
     }
 
     @Transactional(readOnly = true)
@@ -260,13 +331,8 @@ public class OperacionesService {
         int enviosHoy = (int) envios.stream()
                 .filter(envio -> hoy.equals(envio.getFecha()))
                 .count();
-        int minutoActualUtc = estadoLogisticoService.obtenerMinutoActualUtc();
         int entregadas = (int) envios.stream()
-                .filter(envio -> estadoLogisticoService.estaEnvioEntregado(
-                        envio,
-                        minutoActualUtc,
-                        false
-                ))
+                .filter(envio -> envio.getEstado() == EstadoEnvio.ENTREGADO)
                 .count();
         int cumplimiento = envios.isEmpty()
                 ? 100
@@ -285,6 +351,47 @@ public class OperacionesService {
     }
 
     @Transactional(readOnly = true)
+    public OperacionHomeResumenResponse obtenerResumenHomeOperacion(int limiteActividad) {
+        List<SolicitudEnvio> envios = obtenerEnviosOperacion();
+        LocalDateTime ahoraUtc = LocalDateTime.now(ZoneOffset.UTC);
+        List<VueloOcurrencia> vuelosActivos = vueloOcurrenciaService.listarOperativas(
+                ahoraUtc.toLocalDate().atStartOfDay(),
+                ahoraUtc.toLocalDate().plusDays(1).atStartOfDay()
+        ).stream()
+                .filter(ocurrencia -> ocurrencia.getEstado()
+                        == pucp.edu.pe.tasfb2b.entities.EstadoVueloOcurrencia.EN_VUELO)
+                .toList();
+        int vuelosIntercontinentales = (int) vuelosActivos.stream()
+                .filter(ocurrencia -> !ocurrencia.getVuelo().getDesde().getRegion()
+                        .equalsIgnoreCase(ocurrencia.getVuelo().getHasta().getRegion()))
+                .count();
+        List<SolicitudEnvio> enviosEnCurso = envios.stream()
+                .filter(this::estaEnvioEnCursoHome)
+                .toList();
+        int maletasEnCurso = enviosEnCurso.stream()
+                .mapToInt(this::contarMaletasAsignadasHome)
+                .sum();
+        int enviosDentroDePlazo = (int) envios.stream()
+                .filter(this::envioCumplePlazoHome)
+                .count();
+        int cumplimiento = envios.isEmpty()
+                ? 100
+                : (int) Math.round((enviosDentroDePlazo * 100.0) / envios.size());
+
+        return new OperacionHomeResumenResponse(
+                vuelosActivos.size(),
+                vuelosIntercontinentales,
+                enviosEnCurso.size(),
+                maletasEnCurso,
+                enviosDentroDePlazo,
+                envios.size(),
+                cumplimiento,
+                construirOcupacionPorAeropuertoOperacion(envios),
+                obtenerActividadRecienteHome(envios, limiteActividad)
+        );
+    }
+
+    @Transactional(readOnly = true)
     public MapaSimulacionEstado obtenerMapaOperacion() {
         List<SolicitudEnvio> envios = obtenerEnviosOperacion();
         return new MapaSimulacionEstado(
@@ -293,6 +400,37 @@ public class OperacionesService {
                 construirVuelosMapaOperacion(envios),
                 construirCancelacionesRecientesMapaOperacion()
         );
+    }
+
+    @Scheduled(fixedRate = 5000)
+    @Transactional(readOnly = true)
+    public void publicarSnapshotMapaOperacionProgramado() {
+        if (!operationSseService.hasSubscribers()) {
+            return;
+        }
+
+        operationSseService.publish("operation.map.snapshot", obtenerMapaOperacion());
+    }
+
+    private void publicarOperacionActualizada(String reason) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publicarOperacionActualizadaAhora(reason);
+                }
+            });
+            return;
+        }
+
+        publicarOperacionActualizadaAhora(reason);
+    }
+
+    private void publicarOperacionActualizadaAhora(String reason) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("reason", reason);
+
+        operationSseService.publish("operation.updated", payload);
     }
 
     private List<MapaSimulacionEstado.CancelacionVueloMapa> construirCancelacionesRecientesMapaOperacion() {
@@ -337,6 +475,71 @@ public class OperacionesService {
         return desde + ">" + hasta + "-" + idVuelo;
     }
 
+    private List<SolicitudEnvio> obtenerActividadRecienteHome(
+            List<SolicitudEnvio> envios,
+            int limite
+    ) {
+        int safeLimit = Math.max(1, Math.min(20, limite));
+        return envios.stream()
+                .sorted(Comparator.comparing(
+                        SolicitudEnvio::getFechaHoraRegistro,
+                        Comparator.nullsLast(Comparator.reverseOrder())
+                ))
+                .limit(safeLimit)
+                .toList();
+    }
+
+    private boolean estaEnvioEnCursoHome(SolicitudEnvio envio) {
+        return estadoLogisticoService.resolverEstadoEnvio(
+                envio,
+                LocalDateTime.now(ZoneOffset.UTC),
+                false
+        ) == EstadoEnvio.EN_TRANSITO;
+    }
+
+    private boolean envioCumplePlazoHome(SolicitudEnvio envio) {
+        double tiempoTotal = 0.0;
+        for (Ruta ruta : obtenerRutasEnvioHome(envio)) {
+            if (ruta.getTiempoTotal() != null) {
+                tiempoTotal = Math.max(tiempoTotal, ruta.getTiempoTotal());
+            }
+        }
+
+        return tiempoTotal > 0.0
+                && envio.getDiasTiempoMaximo() != null
+                && tiempoTotal <= envio.getDiasTiempoMaximo();
+    }
+
+    private int contarMaletasAsignadasHome(SolicitudEnvio envio) {
+        int asignadas = envio.getAsignaciones().stream()
+                .mapToInt(asignacion -> asignacion.getCantidadBolsas() != null
+                        ? asignacion.getCantidadBolsas()
+                        : 0)
+                .sum();
+        return asignadas > 0
+                ? asignadas
+                : envio.getContarBolsas() != null ? envio.getContarBolsas() : 0;
+    }
+
+    private List<Ruta> obtenerRutasEnvioHome(SolicitudEnvio envio) {
+        List<Ruta> rutas = envio.getAsignaciones().stream()
+                .map(SolicitudEnvio.AsignacionEnvioVista::getRuta)
+                .filter(Objects::nonNull)
+                .filter(ruta -> ruta.getOcurrencias() != null && !ruta.getOcurrencias().isEmpty())
+                .toList();
+
+        if (!rutas.isEmpty()) {
+            return rutas;
+        }
+
+        Ruta ruta = envio.getRuta();
+        if (ruta == null || ruta.getOcurrencias() == null || ruta.getOcurrencias().isEmpty()) {
+            return List.of();
+        }
+
+        return List.of(ruta);
+    }
+
     private List<SolicitudEnvio> normalizarSolicitudes(List<SolicitudEnvio> solicitudesEntrantes) {
         List<SolicitudEnvio> solicitudes = new ArrayList<>();
 
@@ -378,7 +581,7 @@ public class OperacionesService {
         validarSolicitud(solicitud);
         validarCapacidadOrigen(solicitud);
 
-        solicitud.setEstado(EstadoEnvio.INGRESADO);
+        solicitud.setEstado(EstadoEnvio.REGISTRADO);
         solicitud.setIdSimulacionVolatil(null);
         SolicitudEnvio solicitudGuardada = solicitudEnvioRepository.save(solicitud);
         return planificarSolicitudRealGuardada(solicitudGuardada);
@@ -391,7 +594,7 @@ public class OperacionesService {
             return solicitudGuardada;
         }
 
-        solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
+        solicitudGuardada.setEstado(EstadoEnvio.PLANIFICADO);
         solicitudEnvioRepository.save(solicitudGuardada);
 
         Ruta mejorRuta = encontrarMejorRutaFactible(solicitudGuardada);
@@ -401,7 +604,7 @@ public class OperacionesService {
 
         List<AsignacionPlanificada> asignaciones = planificarSolicitudDividida(solicitudGuardada);
         if (asignaciones.isEmpty()) {
-            solicitudGuardada.setEstado(EstadoEnvio.INGRESADO);
+            solicitudGuardada.setEstado(EstadoEnvio.REGISTRADO);
             return solicitudEnvioRepository.save(solicitudGuardada);
         }
 
@@ -450,14 +653,12 @@ public class OperacionesService {
                     solicitudGuardada,
                     rutaGuardada,
                     asignacion.bolsas(),
-                    EstadoEnvio.EN_PROCESO
+                    EstadoEnvio.PLANIFICADO
             ));
         }
 
         solicitudGuardada.setRuta(rutaPrincipal);
-        solicitudGuardada.setEstado(totalAsignado >= solicitudGuardada.getContarBolsas()
-                ? EstadoEnvio.EN_PROCESO
-                : EstadoEnvio.PARCIAL);
+        solicitudGuardada.setEstado(EstadoEnvio.PLANIFICADO);
         return adjuntarAsignaciones(solicitudEnvioRepository.save(solicitudGuardada));
     }
 
@@ -589,20 +790,21 @@ public class OperacionesService {
                 TASA_MUTACION,
                 TAMANO_TORNEO,
                 ESCALAS_INTERMEDIAS_MAX,
-                fechaHoraInicio
+                fechaHoraInicio,
+                MINUTOS_ESPERA_MINIMA_ESCALA
         );
     }
 
     private void replanificarEnviosAfectadosOperacion(VueloCancelacion cancelacion) {
         for (SolicitudEnvio envio : solicitudEnvioRepository.findAllByOrderByIdEnvioAsc()) {
-            if (envio.getEstado() == EstadoEnvio.COMPLETADO
+            if ((envio.getEstado() == EstadoEnvio.COMPLETADO || envio.getEstado() == EstadoEnvio.ENTREGADO)
                     || !envioUsaOcurrenciaCancelada(envio, cancelacion)) {
                 continue;
             }
 
             liberarRutaOperacion(envio);
             envio.setRuta(null);
-            envio.setEstado(EstadoEnvio.INGRESADO);
+            envio.setEstado(EstadoEnvio.REGISTRADO);
             solicitudEnvioRepository.save(envio);
             planificarSolicitudRealGuardada(envio);
         }

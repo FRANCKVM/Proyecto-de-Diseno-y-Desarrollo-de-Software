@@ -46,26 +46,26 @@ const SEMAPHORE_FILTER_OPTIONS: Array<{
   {
     value: "vacios",
     label: "Vacíos",
-    className: "border-[#4b5563] bg-[#d1d5db] hover:bg-[#9ca3af]",
-    activeClassName: "border-[#111827] bg-[#374151] shadow-card ring-2 ring-[#111827]/25",
+    className: "border-[#4b5563] bg-[#6B7280] hover:ring-2 hover:ring-[#6B7280]/30",
+    activeClassName: "border-[#374151] bg-[#6B7280] shadow-card ring-2 ring-[#6B7280]/45",
   },
   {
     value: "normal",
     label: "Verde",
-    className: "border-[#16a34a] bg-[#bbf7d0] hover:bg-[#86efac]",
-    activeClassName: "border-[#15803d] bg-[#16a34a] shadow-card ring-2 ring-[#16a34a]/25",
+    className: "border-[#16a34a] bg-success hover:ring-2 hover:ring-success/30",
+    activeClassName: "border-[#15803d] bg-success shadow-card ring-2 ring-success/45",
   },
   {
     value: "elevado",
     label: "Ámbar",
-    className: "border-[#f59e0b] bg-[#fde68a] hover:bg-[#fcd34d]",
-    activeClassName: "border-[#d97706] bg-[#f59e0b] shadow-card ring-2 ring-[#f59e0b]/25",
+    className: "border-[#f59e0b] bg-warning hover:ring-2 hover:ring-warning/30",
+    activeClassName: "border-[#d97706] bg-warning shadow-card ring-2 ring-warning/45",
   },
   {
     value: "critico",
     label: "Rojo",
-    className: "border-[#ef4444] bg-[#fecaca] hover:bg-[#fca5a5]",
-    activeClassName: "border-[#dc2626] bg-[#ef4444] shadow-card ring-2 ring-[#ef4444]/25",
+    className: "border-[#ef4444] bg-danger hover:ring-2 hover:ring-danger/30",
+    activeClassName: "border-[#dc2626] bg-danger shadow-card ring-2 ring-danger/45",
   },
 ];
 
@@ -212,8 +212,8 @@ const WarehouseListDrawer = ({
 
   const sortedAirports = [...filteredAirports].sort((a, b) => {
     if (sortMode === "ocupacion-desc" || sortMode === "ocupacion-asc") {
-      const occupancyA = occupancyByIcao?.[a.icao] ?? -1;
-      const occupancyB = occupancyByIcao?.[b.icao] ?? -1;
+      const occupancyA = occupancyByIcao?.[a.icao] ?? 0;
+      const occupancyB = occupancyByIcao?.[b.icao] ?? 0;
       if (occupancyA !== occupancyB) {
         return sortMode === "ocupacion-desc"
           ? occupancyB - occupancyA
@@ -246,12 +246,9 @@ const WarehouseListDrawer = ({
   return (
     <DrawerBase
       title="Panel de almacenes"
+      hideHeader
       onClose={close}
     >
-      <p className="text-body text-text-primary mb-5">
-        Selecciona un almacén para revisar sus envíos entrantes o salientes.
-      </p>
-
       <div className="space-y-3 mb-5">
         <div>
           <label
@@ -272,7 +269,7 @@ const WarehouseListDrawer = ({
               value={searchCode}
               onChange={(event) => setSearchCode(event.target.value)}
               placeholder="Ej. SPIM"
-              className="w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
+              className="tasf-input-placeholder w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
             />
           </div>
         </div>
@@ -372,10 +369,8 @@ const WarehouseListDrawer = ({
       ) : (
         <ul className="space-y-2">
           {sortedAirports.map((airport) => {
-            const ocupacion = occupancyByIcao?.[airport.icao];
-            const estado = ocupacion !== undefined
-              ? getEstadoSemaforo(ocupacion, rangosSemaforo)
-              : null;
+            const ocupacion = occupancyByIcao?.[airport.icao] ?? 0;
+            const estado = getEstadoSemaforo(ocupacion, rangosSemaforo);
             const schedule = flightScheduleByIcao.get(airport.icao);
 
             return (
@@ -420,18 +415,18 @@ const WarehouseListDrawer = ({
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {estado ? (
-                      <div className="flex min-w-[3.5rem] justify-end">
-                        <span
-                          className={cn(
-                            "text-button font-semibold",
-                            SEMAPHORE_TEXT_CLASS[estado]
-                          )}
-                        >
-                          {Math.round(ocupacion ?? 0)}%
-                        </span>
-                      </div>
-                    ) : null}
+                    <div className="flex min-w-[3.5rem] justify-end">
+                      <span
+                        className={cn(
+                          "text-button font-semibold",
+                          ocupacion <= 0
+                            ? "text-[#6B7280]"
+                            : SEMAPHORE_TEXT_CLASS[estado]
+                        )}
+                      >
+                        {Math.round(ocupacion)}%
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => focusWarehouseOnMap(airport.icao)}

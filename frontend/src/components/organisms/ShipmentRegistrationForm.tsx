@@ -1,6 +1,8 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { MapPin } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { createOperationShipment } from "@/services/operationService";
+import { resolveBrowserOriginAirport } from "@/utils/browserOriginAirport";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { CreateOperationShipmentRequest } from "@/types/backendSimulation.types";
 
@@ -20,14 +22,18 @@ const INITIAL_FORM: CreateOperationShipmentRequest = {
 };
 
 const inputClassName =
-  "w-full bg-field border border-border rounded-input px-3 py-2 text-body text-text-primary focus:outline-none focus:border-primary";
+  "w-full bg-field border border-border rounded-input px-3 py-2 text-body focus:outline-none focus:border-primary";
+
+const selectPlaceholderClassName = "text-[#8A92A3] text-[12px] font-normal";
+const DEFAULT_NOTICE = "Se planificara la mejor ruta para los envios.";
+const NOTICE_VISIBLE_MS = 3500;
 
 const ShipmentRegistrationForm = ({
   airports,
   occupancyByIcao = {},
   onCreated,
   onCancel,
-  submitLabel = "Registrar envío",
+  submitLabel = "Registrar envio",
   className,
 }: ShipmentRegistrationFormProps) => {
   const [form, setForm] = useState<CreateOperationShipmentRequest>(INITIAL_FORM);
@@ -42,25 +48,66 @@ const ShipmentRegistrationForm = ({
       ),
     [airports]
   );
-  const selectedOrigin = airportOptions.find(
-    (airport) => airport.icao === form.origenIcao
+
+  const originResolution = useMemo(
+    () => resolveBrowserOriginAirport(airportOptions),
+    [airportOptions]
+  );
+  const selectedOrigin = originResolution.airport;
+  const selectedOriginIcao = selectedOrigin?.icao ?? "";
+  const destinationOptions = useMemo(
+    () => airportOptions.filter((airport) => airport.icao !== selectedOriginIcao),
+    [airportOptions, selectedOriginIcao]
   );
   const originCapacity = selectedOrigin?.capacity ?? null;
-  const originOccupancy = form.origenIcao
-    ? occupancyByIcao[form.origenIcao]
+  const originOccupancy = selectedOriginIcao
+    ? occupancyByIcao[selectedOriginIcao]
     : undefined;
   const originAvailableBags =
     originCapacity !== null ? Math.max(0, Math.floor(originCapacity)) : null;
   const exceedsOriginCapacity =
     originAvailableBags !== null && form.contarBolsas > originAvailableBags;
+  const capacityErrorMessage =
+    "La cantidad de maletas excede la capacidad disponible del almacen de origen.";
 
   const canSubmit =
     !isSubmitting &&
-    form.origenIcao.trim() !== "" &&
+    selectedOriginIcao !== "" &&
     form.destinoIcao.trim() !== "" &&
-    form.origenIcao !== form.destinoIcao &&
+    selectedOriginIcao !== form.destinoIcao &&
     form.contarBolsas > 0 &&
     !exceedsOriginCapacity;
+
+  useEffect(() => {
+    setForm((current) => {
+      if (
+        current.origenIcao === selectedOriginIcao &&
+        current.destinoIcao !== selectedOriginIcao
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        origenIcao: selectedOriginIcao,
+        destinoIcao:
+          current.destinoIcao === selectedOriginIcao ? "" : current.destinoIcao,
+      };
+    });
+  }, [selectedOriginIcao]);
+
+  useEffect(() => {
+    if (!error && !success) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setError(null);
+      setSuccess(null);
+    }, NOTICE_VISIBLE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [error, success]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -68,8 +115,10 @@ const ShipmentRegistrationForm = ({
     if (!canSubmit) {
       setError(
         exceedsOriginCapacity
-          ? `El almacén origen solo tiene ${originAvailableBags ?? 0} maletas disponibles.`
-          : "Completa los campos requeridos antes de registrar el envío."
+          ? `El almacen origen solo tiene ${originAvailableBags ?? 0} maletas disponibles.`
+          : selectedOriginIcao === ""
+            ? "No se pudo determinar el aeropuerto origen desde tu navegador."
+            : "Completa los campos requeridos antes de registrar el envio."
       );
       setSuccess(null);
       return;
@@ -80,42 +129,88 @@ const ShipmentRegistrationForm = ({
     setSuccess(null);
 
     try {
-      await createOperationShipment(form);
-      setForm(INITIAL_FORM);
-      setSuccess("Envío registrado correctamente.");
+      await createOperationShipment({
+        ...form,
+        origenIcao: selectedOriginIcao,
+      });
+      setForm({
+        ...INITIAL_FORM,
+        origenIcao: selectedOriginIcao,
+      });
+      setSuccess("Envio registrado correctamente.");
       await onCreated?.();
     } catch (submitError) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "No se pudo registrar el envío."
+          : "No se pudo registrar el envio."
       );
     } finally {
       setIsSubmitting(false);
     }
   };
+  const noticeError = error ?? (exceedsOriginCapacity ? capacityErrorMessage : null);
+  const noticeMessage = noticeError ?? success ?? DEFAULT_NOTICE;
 
   return (
-    <form className={cn("space-y-5", className)} onSubmit={handleSubmit}>
-      <label className="block space-y-1.5">
-        <span className="text-label-sm text-text-secondary">Origen</span>
-        <select
-          value={form.origenIcao}
-          onChange={(event) => {
-            setForm((current) => ({ ...current, origenIcao: event.target.value }));
-            setError(null);
-            setSuccess(null);
-          }}
-          className={inputClassName}
-        >
-          <option value="">Selecciona un aeropuerto</option>
-          {airportOptions.map((airport) => (
-            <option key={airport.icao} value={airport.icao}>
-              {airport.icao} - {airport.name}, {airport.country}
-            </option>
-          ))}
-        </select>
-      </label>
+    <form className={cn("space-y-4", className)} onSubmit={handleSubmit}>
+      <div
+        className={cn(
+          "rounded-input border px-3 py-2.5",
+          exceedsOriginCapacity
+            ? "bg-danger-soft border-danger/25"
+            : "bg-field/50 border-border"
+        )}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-primary">
+              <MapPin size={17} aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-label-sm text-text-secondary">Origen detectado</p>
+              <p className="truncate text-body font-semibold text-text-primary">
+                {selectedOrigin
+                  ? `${selectedOrigin.icao} - ${selectedOrigin.name}, ${selectedOrigin.country}`
+                  : "Detectando aeropuerto..."}
+              </p>
+              <p className="truncate text-secondary text-text-tertiary">
+                {originResolution.timeZone
+                  ? originResolution.timeZone
+                  : "Zona horaria no disponible"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 border-t border-border-subtle pt-2 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+            <div>
+              <p className="text-secondary text-text-tertiary">Disponible</p>
+              <p
+                className={cn(
+                  "text-body font-semibold",
+                  exceedsOriginCapacity ? "text-danger" : "text-success"
+                )}
+              >
+                {originAvailableBags ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-secondary text-text-tertiary">Ocupacion</p>
+              <p className="text-body font-semibold text-text-primary">
+                {originOccupancy !== undefined
+                  ? `${Math.round(originOccupancy)}%`
+                  : "Sin dato"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {!originResolution.isExactMatch && selectedOrigin && (
+          <p className="mt-2 text-secondary text-text-tertiary">
+            No se encontro una coincidencia configurada, se usa este origen por defecto.
+          </p>
+        )}
+      </div>
 
       <label className="block space-y-1.5">
         <span className="text-label-sm text-text-secondary">Destino</span>
@@ -126,11 +221,18 @@ const ShipmentRegistrationForm = ({
             setError(null);
             setSuccess(null);
           }}
-          className={inputClassName}
+          className={cn(
+            inputClassName,
+            form.destinoIcao === ""
+              ? selectPlaceholderClassName
+              : "text-text-primary"
+          )}
         >
-          <option value="">Selecciona un aeropuerto</option>
-          {airportOptions.map((airport) => (
-            <option key={airport.icao} value={airport.icao}>
+          <option value="" disabled className="text-[#8A92A3]">
+            Selecciona un aeropuerto
+          </option>
+          {destinationOptions.map((airport) => (
+            <option key={airport.icao} value={airport.icao} className="text-text-primary">
               {airport.icao} - {airport.name}, {airport.country}
             </option>
           ))}
@@ -152,54 +254,33 @@ const ShipmentRegistrationForm = ({
             setError(null);
             setSuccess(null);
           }}
-          className={inputClassName}
+          className={cn(inputClassName, "text-text-primary")}
         />
       </label>
 
-      {selectedOrigin && (
-        <div
+      <div
+        className={cn(
+          "rounded-input border px-3 py-2 transition-colors",
+          noticeError
+            ? "bg-danger-soft border-danger/25"
+            : success
+              ? "bg-success-soft border-success/25"
+              : "bg-field/50 border-border-subtle"
+        )}
+      >
+        <p
           className={cn(
-            "rounded-input border px-3 py-2",
-            exceedsOriginCapacity
-              ? "bg-danger-soft border-danger/20"
-              : "bg-field border-border"
+            "text-secondary",
+            noticeError
+              ? "text-danger"
+              : success
+                ? "text-success"
+                : "text-text-secondary"
           )}
         >
-          <p className="text-secondary text-text-primary">
-            Capacidad disponible en {selectedOrigin.icao}:{" "}
-            <span className={exceedsOriginCapacity ? "text-danger" : "text-success"}>
-              {originAvailableBags ?? 0} maletas
-            </span>
-          </p>
-          {originOccupancy !== undefined && (
-            <p className="text-secondary text-text-tertiary mt-0.5">
-              Ocupación actual: {Math.round(originOccupancy)}%
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="rounded-input bg-primary-soft border border-primary/20 px-3 py-2">
-        <p className="text-secondary text-text-primary">
-          El plazo maximo se calcula automaticamente en backend segun si el
-          envío es intracontinental o intercontinental.
+          {noticeMessage}
         </p>
       </div>
-
-      {form.origenIcao !== "" && form.origenIcao === form.destinoIcao && (
-        <p className="text-secondary text-danger">
-          El aeropuerto de origen debe ser distinto al de destino.
-        </p>
-      )}
-
-      {exceedsOriginCapacity && (
-        <p className="text-secondary text-danger">
-          La cantidad de maletas excede la capacidad disponible del almacén de origen.
-        </p>
-      )}
-
-      {error && <p className="text-secondary text-danger">{error}</p>}
-      {success && <p className="text-secondary text-success">{success}</p>}
 
       <div className="flex items-center justify-end gap-3">
         {onCancel && (

@@ -11,6 +11,7 @@ import {
   TileLayer,
   useMap,
 } from "react-leaflet";
+import { Route, RouteOff } from "lucide-react";
 import L from "leaflet";
 import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
@@ -94,11 +95,11 @@ const WORLD_BOUNDS: LatLngBoundsExpression = [
 ];
 
 /**
- * Capa base OpenStreetMap.
- * La base se pinta con opacidad reducida para bajar el peso visual del mapa.
+ * Capa base Stamen Toner Lite.
+ * Fondo gris de alto contraste para monitoreo operativo.
  */
-const BASE_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-const BASE_TILE_SUBDOMAINS = "abc";
+const BASE_TILE_URL =
+  "https://tiles.stadiamaps.com/tiles/stamen_toner_lite/{z}/{x}/{y}{r}.png";
 
 /**
  * Centro inicial: [20, 0] permite ver Sudamerica, Europa y Asia.
@@ -183,9 +184,15 @@ const buildSemaphoreLegendItems = (rangosSemaforo?: RangoSemaforo) => {
 
   return [
     {
+      key: "vacios",
+      label: "Vacios",
+      range: "0%",
+      colorClass: "bg-[#6B7280]",
+    },
+    {
       key: "normal",
       label: "Verde",
-      range: `0 - ${verde}%`,
+      range: `>0 - ${verde}%`,
       colorClass: "bg-success",
     },
     {
@@ -352,6 +359,50 @@ const SemaphoreLegendCard = ({
   );
 };
 
+const FlightRouteVisibilityButton = ({
+  visible,
+  onToggle,
+}: {
+  visible: boolean;
+  onToggle: () => void;
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const title = visible
+    ? "Ocultar rutas de vuelos"
+    : "Mostrar rutas de vuelos";
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-auto absolute bottom-4 left-4 z-[950]"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card/95 text-text-primary shadow-card backdrop-blur-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        aria-label={title}
+        title={title}
+      >
+        {visible ? (
+          <RouteOff size={20} strokeWidth={2.2} aria-hidden />
+        ) : (
+          <Route size={20} strokeWidth={2.2} aria-hidden />
+        )}
+      </button>
+    </div>
+  );
+};
+
 const MapFocusController = ({
   airport,
   flight,
@@ -472,7 +523,7 @@ const MapAutoFitController = ({
 /**
  * Mapa mundial operativo del sistema Tasf.B2B.
  *
- * Capa base: CartoDB Positron (gris claro minimalista).
+ * Capa base: Stamen Toner Lite (gris de alto contraste).
  * Capas operacionales (orden de pintado, de fondo a frente):
  *   1. Rutas (lineas dashed)
  *   2. Aeropuertos (marcadores concentricos)
@@ -504,6 +555,7 @@ const WorldMap = ({
   onAirportClick,
   onFlightClick,
 }: WorldMapProps) => {
+  const [showFlightRoutes, setShowFlightRoutes] = useState(true);
   const [visibleCancellationAlerts, setVisibleCancellationAlerts] = useState<
     VisibleCancellationAlert[]
   >([]);
@@ -748,8 +800,6 @@ const WorldMap = ({
     >
       <TileLayer
         url={BASE_TILE_URL}
-        subdomains={BASE_TILE_SUBDOMAINS}
-        opacity={0.55}
         detectRetina
       />
       <MapAutoFitController
@@ -777,7 +827,7 @@ const WorldMap = ({
         );
       })}
 
-      {visibleFlights.map((f) => {
+      {showFlightRoutes && visibleFlights.map((f) => {
         const from = airportsByIcao.get(f.fromIcao);
         const to = airportsByIcao.get(f.toIcao);
         if (!from || !to) return null;
@@ -795,11 +845,8 @@ const WorldMap = ({
 
       {/* Capa 2: aeropuertos */}
       {visibleAirports.map((a) => {
-        const ocupacion = occupancyByIcao[a.icao];
-        const estado =
-          ocupacion !== undefined
-            ? getEstadoSemaforo(ocupacion, rangosSemaforo)
-            : "normal";
+        const ocupacion = occupancyByIcao[a.icao] ?? 0;
+        const estado = getEstadoSemaforo(ocupacion, rangosSemaforo);
         return (
           <AirportMarker
             key={a.id}
@@ -857,6 +904,10 @@ const WorldMap = ({
         );
       })}
 
+      <FlightRouteVisibilityButton
+        visible={showFlightRoutes}
+        onToggle={() => setShowFlightRoutes((current) => !current)}
+      />
       <SemaphoreLegendCard rangosSemaforo={rangosSemaforo} />
     </LeafletMap>
   );

@@ -9,6 +9,8 @@ import {
   listFlightsByAirport,
   resolveFlightQueryDate,
 } from "@/services/flightService";
+import { listOperationShipmentsPage } from "@/services/operationService";
+import { listLiveSimulationShipmentsPage } from "@/services/simulationService";
 import { useFlightCancellationAction } from "@/hooks/useFlightCancellationAction";
 import { useDrawerStore } from "@/store/drawerStore";
 import {
@@ -25,8 +27,22 @@ import {
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
 import { cacheFlightsForAirport } from "@/store/referenceDataStore";
+import { USE_MOCK_DATA } from "@/utils/constants";
+import {
+  EMPTY_SHIPMENT_STATUS_COUNTS,
+  SHIPMENT_STATUS_BADGE_LABEL,
+  SHIPMENT_STATUS_LABEL,
+  SHIPMENT_STATUS_OPTIONS,
+  getShipmentStatusTagVariant,
+  resolveShipmentListStatus,
+  type ShipmentViewMode,
+} from "@/utils/shipmentStatus";
 import type { AirportWithCoords } from "@/types/airport.types";
-import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
+import type {
+  BackendPagedResponse,
+  BackendPageQuery,
+  BackendSolicitudEnvio,
+} from "@/types/backendSimulation.types";
 import type { EstadoVuelo, VueloDetalle } from "@/types/flight.types";
 import type { RangoSemaforo } from "@/types/common.types";
 
@@ -44,6 +60,7 @@ interface AirportDrawerProps {
   showFlights?: boolean;
   referenceMinute?: number | null;
   simulationStart?: string | null;
+  refreshKey?: number;
 }
 
 const VUELO_ESTADO_LABEL: Record<string, string> = {
@@ -61,13 +78,6 @@ const VUELO_ESTADO_TAG_VARIANT: Record<
   en_vuelo: "primary",
   completado: "normal",
   cancelado: "critico",
-};
-
-const ENVIO_ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
-  INGRESADO: "Ingresado",
-  PARCIAL: "Parcial",
-  EN_PROCESO: "En proceso",
-  COMPLETADO: "Completado",
 };
 
 const formatFlightDateTime = (iso: string): string => {
@@ -184,90 +194,13 @@ const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
     ? formatShipmentDisplayCode(shipment.idEnvio)
     : `Envío ${shipment.origen.codigo}-${shipment.destino.codigo}`;
 
-type ShipmentStatus = "planificados" | "en-curso" | "entregados";
-
-const getShipmentTimeline = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): { firstDeparture: number | null; lastArrival: number | null } => {
-  const routeGroups = getShipmentRouteGroups(shipment);
-  let firstDeparture: number | null = null;
-  let lastArrival: number | null = null;
-
-  for (const group of routeGroups) {
-    for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const baseMs =
-        parseDateTimeMs(simulationStart) ??
-        parseDateTimeMs(`${shipment.fecha}T00:00:00`);
-      const departureMs = parseDateTimeMs(occurrence.fechaHoraSalida);
-      const arrivalMs = parseDateTimeMs(occurrence.fechaHoraLlegada);
-
-      if (baseMs === null || departureMs === null || arrivalMs === null) {
-        continue;
-      }
-
-      const departure = Math.round((departureMs - baseMs) / 60_000);
-      const arrival = Math.round((arrivalMs - baseMs) / 60_000);
-      firstDeparture =
-        firstDeparture === null ? departure : Math.min(firstDeparture, departure);
-      lastArrival = lastArrival === null ? arrival : Math.max(lastArrival, arrival);
-    }
-  }
-
-  return { firstDeparture, lastArrival };
-};
-
-const resolveDerivedShipmentStatus = (
-  shipment: BackendSolicitudEnvio,
-  referenceMinute: number | null | undefined,
-  simulationStart?: string | null
-): ShipmentStatus => {
-  if (shipment.estado === "COMPLETADO") {
-    return "entregados";
-  }
-
-  if (referenceMinute === null || referenceMinute === undefined) {
-    return shipment.estado === "PARCIAL" || shipment.estado === "EN_PROCESO"
-      ? "en-curso"
-      : "planificados";
-  }
-
-  const timeline = getShipmentTimeline(shipment, simulationStart);
-  if (timeline.lastArrival !== null && referenceMinute >= timeline.lastArrival) {
-    return "entregados";
-  }
-
-  if (
-    shipment.estado === "PARCIAL" ||
-    shipment.estado === "EN_PROCESO" ||
-    (timeline.firstDeparture !== null && referenceMinute >= timeline.firstDeparture)
-  ) {
-    return "en-curso";
-  }
-
-  return "planificados";
-};
-
-const getDerivedShipmentStatusLabel = (
-  shipment: BackendSolicitudEnvio,
-  status: ShipmentStatus
-): string => {
-  if (status === "entregados") {
-    return "Completado";
-  }
-
-  if (status === "en-curso") {
-    return "En curso";
-  }
-
-  return ENVIO_ESTADO_LABEL[shipment.estado];
-};
-
 type FlightFilter = "todos" | EstadoVuelo;
 type AirportViewMode = "vuelos" | "envios";
 type DirectionFilter = "todos" | "entrantes" | "salientes";
+type ShipmentFilter = ShipmentViewMode;
 const PANEL_REFRESH_MS_SIMULATION = 5000;
 const PANEL_REFRESH_MS_OPERATION = 15000;
+const AIRPORT_SHIPMENT_PAGE_SIZE = 80;
 
 const DIRECTION_LABEL: Record<DirectionFilter, string> = {
   todos: "Todos",
@@ -310,6 +243,7 @@ const AirportDrawer = ({
   showFlights = true,
   referenceMinute,
   simulationStart,
+  refreshKey = 0,
 }: AirportDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openFlight = useDrawerStore((s) => s.openFlight);
@@ -331,6 +265,15 @@ const AirportDrawer = ({
     useState<DirectionFilter>("todos");
   const [selectedShipmentDirection, setSelectedShipmentDirection] =
     useState<DirectionFilter>("todos");
+  const [selectedShipmentStatus, setSelectedShipmentStatus] =
+    useState<ShipmentFilter>("todos");
+  const [visibleShipmentLimit, setVisibleShipmentLimit] = useState(
+    AIRPORT_SHIPMENT_PAGE_SIZE
+  );
+  const [shipmentPage, setShipmentPage] =
+    useState<BackendPagedResponse<BackendSolicitudEnvio> | null>(null);
+  const [isShipmentsLoading, setIsShipmentsLoading] = useState(false);
+  const usesBackendShipmentPaging = !USE_MOCK_DATA;
   const queryDate = resolveFlightQueryDate(
     idSimulacion,
     simulationStart,
@@ -416,7 +359,80 @@ const AirportDrawer = ({
     setFlightSearch("");
     setSelectedFlightDirection("todos");
     setSelectedShipmentDirection("todos");
+    setSelectedShipmentStatus("todos");
+    setVisibleShipmentLimit(AIRPORT_SHIPMENT_PAGE_SIZE);
+    setShipmentPage(null);
   }, [icao, idSimulacion, showFlights]);
+
+  useEffect(() => {
+    setVisibleShipmentLimit(AIRPORT_SHIPMENT_PAGE_SIZE);
+  }, [icao, selectedShipmentDirection, selectedShipmentStatus]);
+
+  useEffect(() => {
+    if (!usesBackendShipmentPaging || activeView !== "envios") {
+      setShipmentPage(null);
+      return;
+    }
+
+    let cancelled = false;
+    const params: BackendPageQuery = {
+      page: 0,
+      size: visibleShipmentLimit,
+      estado: selectedShipmentStatus,
+      aeropuerto: icao,
+      direccion: selectedShipmentDirection,
+    };
+    const request =
+      idSimulacion != null
+        ? listLiveSimulationShipmentsPage(idSimulacion, params)
+        : listOperationShipmentsPage(params);
+
+    setIsShipmentsLoading(true);
+    request
+      .then((response) => {
+        if (!cancelled) {
+          setShipmentPage(response);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setShipmentPage({
+            items: [],
+            page: 0,
+            size: visibleShipmentLimit,
+            totalItems: 0,
+            totalPages: 0,
+            hasMore: false,
+            countsByStatus: {
+              ...EMPTY_SHIPMENT_STATUS_COUNTS,
+            },
+            countsByDirection: {
+              todos: 0,
+              entrantes: 0,
+              salientes: 0,
+            },
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsShipmentsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeView,
+    icao,
+    idSimulacion,
+    refreshKey,
+    selectedShipmentDirection,
+    selectedShipmentStatus,
+    usesBackendShipmentPaging,
+    visibleShipmentLimit,
+  ]);
 
   const capacity = airport?.capacity ?? 300;
   const ocupadas = ocupacion !== undefined
@@ -459,31 +475,92 @@ const AirportDrawer = ({
 
     return matchesEstado && matchesDirection && matchesSearch;
   });
-  const shipmentRelations = shipments.map((shipment) => ({
+  const sourceShipments = usesBackendShipmentPaging
+    ? shipmentPage?.items ?? []
+    : shipments;
+  const shipmentRelations = sourceShipments.map((shipment) => ({
     shipment,
     incoming: hasIncomingShipmentAtAirport(shipment, icao),
     outgoing: hasOutgoingShipmentAtAirport(shipment, icao),
+    status: resolveShipmentListStatus(
+      shipment,
+      referenceMinute,
+      simulationStart
+    ),
   }));
-  const incomingShipmentsCount = shipmentRelations.filter(
+  const directionCounts = shipmentPage?.countsByDirection;
+  const statusCounts = shipmentPage?.countsByStatus;
+  const localIncomingShipmentsCount = shipmentRelations.filter(
     (relation) => relation.incoming
   ).length;
-  const outgoingShipmentsCount = shipmentRelations.filter(
+  const localOutgoingShipmentsCount = shipmentRelations.filter(
     (relation) => relation.outgoing
   ).length;
-  const airportShipmentsCount = shipmentRelations.filter(
+  const localAirportShipmentsCount = shipmentRelations.filter(
     (relation) => relation.incoming || relation.outgoing
   ).length;
-  const filteredShipmentRelations = shipmentRelations.filter((relation) => {
-    if (selectedShipmentDirection === "entrantes") {
-      return relation.incoming;
-    }
+  const incomingShipmentsCount =
+    directionCounts?.entrantes ?? localIncomingShipmentsCount;
+  const outgoingShipmentsCount =
+    directionCounts?.salientes ?? localOutgoingShipmentsCount;
+  const airportShipmentsCount =
+    directionCounts?.todos ?? localAirportShipmentsCount;
+  const shipmentRelationsByDirection = usesBackendShipmentPaging
+    ? shipmentRelations
+    : shipmentRelations.filter((relation) => {
+        if (selectedShipmentDirection === "entrantes") {
+          return relation.incoming;
+        }
 
-    if (selectedShipmentDirection === "salientes") {
-      return relation.outgoing;
-    }
+        if (selectedShipmentDirection === "salientes") {
+          return relation.outgoing;
+        }
 
-    return relation.incoming || relation.outgoing;
-  });
+        return relation.incoming || relation.outgoing;
+      });
+  const plannedShipmentRelations = shipmentRelationsByDirection.filter(
+    (relation) => relation.status === "planificados"
+  );
+  const registeredShipmentRelations = shipmentRelationsByDirection.filter(
+    (relation) => relation.status === "registrados"
+  );
+  const inTransitShipmentRelations = shipmentRelationsByDirection.filter(
+    (relation) => relation.status === "en-transito"
+  );
+  const completedShipmentRelations = shipmentRelationsByDirection.filter(
+    (relation) => relation.status === "completados"
+  );
+  const deliveredShipmentRelations = shipmentRelationsByDirection.filter(
+    (relation) => relation.status === "entregados"
+  );
+  const countRelationsByStatus = (status: Exclude<ShipmentFilter, "todos">) => {
+    switch (status) {
+      case "registrados":
+        return registeredShipmentRelations.length;
+      case "planificados":
+        return plannedShipmentRelations.length;
+      case "en-transito":
+        return inTransitShipmentRelations.length;
+      case "completados":
+        return completedShipmentRelations.length;
+      case "entregados":
+        return deliveredShipmentRelations.length;
+    }
+  };
+  const filteredShipmentRelations =
+    usesBackendShipmentPaging
+      ? shipmentRelations
+      : selectedShipmentStatus === "todos"
+      ? shipmentRelationsByDirection
+      : shipmentRelationsByDirection.filter(
+          (relation) => relation.status === selectedShipmentStatus
+        );
+  const totalFilteredShipmentRelations =
+    shipmentPage?.totalItems ?? filteredShipmentRelations.length;
+  const hiddenShipmentRelationsCount = Math.max(
+    0,
+    totalFilteredShipmentRelations - filteredShipmentRelations.length
+  );
   const handleOpenShipment = (shipment: BackendSolicitudEnvio) => {
     if (shipment.idEnvio === null) {
       return;
@@ -610,8 +687,8 @@ const AirportDrawer = ({
                     type="search"
                     value={flightSearch}
                     onChange={(event) => setFlightSearch(event.target.value)}
-                    placeholder="Inicio del ID, ej. SKBO>SPIM-23"
-                    className="w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
+                    placeholder="Ej. SKBO>SPIM-23"
+                    className="tasf-input-placeholder w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
                   />
                 </div>
               </div>
@@ -730,7 +807,7 @@ const AirportDrawer = ({
         ) : (
           <>
             <h3 className="text-section-title mb-3">
-              Envíos del almacén{filteredShipmentRelations.length > 0 && ` (${filteredShipmentRelations.length})`}
+              Envíos del almacén{totalFilteredShipmentRelations > 0 && ` (${totalFilteredShipmentRelations})`}
             </h3>
             <div className="mb-4">
               <label
@@ -759,19 +836,43 @@ const AirportDrawer = ({
               </select>
             </div>
 
-            {filteredShipmentRelations.length === 0 ? (
+            <div className="mb-4">
+              <label
+                htmlFor="airport-shipment-status-filter"
+                className="block text-label-sm text-text-primary mb-1"
+              >
+                Filtrar por estado
+              </label>
+              <select
+                id="airport-shipment-status-filter"
+                value={selectedShipmentStatus}
+                onChange={(event) =>
+                  setSelectedShipmentStatus(event.target.value as ShipmentFilter)
+                }
+                className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
+              >
+                <option value="todos">
+                  Todos ({statusCounts?.todos ?? shipmentRelationsByDirection.length})
+                </option>
+                {SHIPMENT_STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>
+                    {SHIPMENT_STATUS_LABEL[status]} ({statusCounts?.[status] ?? countRelationsByStatus(status)})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {isShipmentsLoading && filteredShipmentRelations.length === 0 ? (
+              <p className="text-body text-text-primary">
+                Cargando envíos del almacén...
+              </p>
+            ) : filteredShipmentRelations.length === 0 ? (
               <p className="text-body text-text-primary">
                 No hay envíos asociados a este almacén para el filtro seleccionado.
               </p>
             ) : (
               <ul className="space-y-2">
-                {filteredShipmentRelations.map(({ shipment, incoming, outgoing }) => {
-                  const derivedShipmentStatus = resolveDerivedShipmentStatus(
-                    shipment,
-                    referenceMinute,
-                    simulationStart
-                  );
-
+                {filteredShipmentRelations.map(({ shipment, incoming, outgoing, status }) => {
                   return (
                     <li
                       key={getShipmentKey(shipment)}
@@ -811,9 +912,9 @@ const AirportDrawer = ({
                       {outgoing && <Tag variant="primary">Saliente</Tag>}
                       {incoming && <Tag variant="neutral">Entrante</Tag>}
                       <Tag
-                        variant={derivedShipmentStatus === "entregados" ? "normal" : "primary"}
+                        variant={getShipmentStatusTagVariant(status)}
                       >
-                        {getDerivedShipmentStatusLabel(shipment, derivedShipmentStatus)}
+                        {SHIPMENT_STATUS_BADGE_LABEL[status]}
                       </Tag>
                       <span className="text-secondary text-text-primary">
                         {shipment.contarBolsas} maletas
@@ -822,6 +923,21 @@ const AirportDrawer = ({
                     </li>
                   );
                 })}
+                {hiddenShipmentRelationsCount > 0 && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVisibleShipmentLimit((currentLimit) =>
+                          currentLimit + AIRPORT_SHIPMENT_PAGE_SIZE
+                        )
+                      }
+                      className="mt-2 w-full rounded-input border border-border bg-field px-3 py-2 text-button text-primary hover:border-primary hover:bg-primary-soft transition-colors"
+                    >
+                      Mostrar más ({hiddenShipmentRelationsCount})
+                    </button>
+                  </li>
+                )}
               </ul>
             )}
           </>

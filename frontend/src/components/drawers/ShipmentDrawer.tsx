@@ -5,6 +5,7 @@ import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
 import { getShipmentByCode } from "@/services/shipmentService";
 import { useDrawerStore } from "@/store/drawerStore";
+import { DELIVERY_RELEASE_DELAY_MINUTES } from "@/utils/shipmentStatus";
 import { formatUtcDateTime, parseUtcDateTimeMs } from "@/utils/utcDateTime";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 import type {
@@ -144,7 +145,7 @@ const resolveDerivedShipmentStatus = (
 
   const route = shipment.ruta;
   if (route.length === 0) {
-    return "planificado";
+    return "registrado";
   }
 
   const firstFlight = route.find((hito) => hito.tipo === "vuelo");
@@ -152,8 +153,15 @@ const resolveDerivedShipmentStatus = (
   const delivery = [...route].reverse().find((hito) => hito.tipo === "entrega");
   const deliveryMs = getHitoMs(delivery ?? route[route.length - 1]);
 
-  if (deliveryMs !== null && referenceMs >= deliveryMs) {
+  if (
+    deliveryMs !== null &&
+    referenceMs >= deliveryMs + DELIVERY_RELEASE_DELAY_MINUTES * 60_000
+  ) {
     return "entregado";
+  }
+
+  if (deliveryMs !== null && referenceMs >= deliveryMs) {
+    return "completado";
   }
 
   const hasActiveFlight = route.some((hito, index) => {
@@ -179,7 +187,7 @@ const resolveDerivedShipmentStatus = (
   }
 
   if (firstFlightMs !== null && referenceMs >= firstFlightMs) {
-    return "en_escala";
+    return "en_transito";
   }
 
   return "planificado";
@@ -197,8 +205,8 @@ const resolveDerivedPackageStatus = (
     return "En transito";
   }
 
-  if (shipmentStatus === "en_escala") {
-    return "En escala";
+  if (shipmentStatus === "completado") {
+    return "Completado";
   }
 
   return originalStatus;
@@ -210,6 +218,13 @@ const getDeliveryMs = (shipment: EnvioDetalle): number | null => {
     .find((hito) => hito.tipo === "entrega");
 
   return getHitoMs(delivery ?? shipment.ruta[shipment.ruta.length - 1]);
+};
+
+const getDeliveredMs = (shipment: EnvioDetalle): number | null => {
+  const deliveryMs = getDeliveryMs(shipment);
+  return deliveryMs !== null
+    ? deliveryMs + DELIVERY_RELEASE_DELAY_MINUTES * 60_000
+    : null;
 };
 
 const getDeadlineMs = (shipment: EnvioDetalle): number | null => {
@@ -224,10 +239,12 @@ const getDeadlineMs = (shipment: EnvioDetalle): number | null => {
 
 const getShipmentStatusLabel = (status: EstadoEnvio): string => {
   switch (status) {
+    case "registrado":
+      return "Registrado";
     case "en_transito":
       return "En transito";
-    case "en_escala":
-      return "En escala";
+    case "completado":
+      return "Completado";
     case "entregado":
       return "Entregado";
     case "planificado":
@@ -523,11 +540,13 @@ const ShipmentDrawer = ({
 
   const estadoLabel =
     shipment.estado === "en_transito"
-      ? "En tránsito"
-      : shipment.estado === "en_escala"
-      ? "En escala"
+      ? "En transito"
+      : shipment.estado === "completado"
+      ? "Completado"
       : shipment.estado === "entregado"
       ? "Entregado"
+      : shipment.estado === "registrado"
+      ? "Registrado"
       : shipment.estado === "planificado"
       ? "Planificado"
       : shipment.estado;
@@ -537,6 +556,7 @@ const ShipmentDrawer = ({
       ? estadoLabel
       : getShipmentStatusLabel(visibleShipmentStatus);
   const deliveryMs = getDeliveryMs(shipment);
+  const deliveredMs = getDeliveredMs(shipment);
   const deadlineMs = getDeadlineMs(shipment);
   const dentroDePlazo =
     deadlineMs !== null
@@ -547,9 +567,21 @@ const ShipmentDrawer = ({
   const tiempoRestante =
     visibleShipmentStatus === "entregado"
       ? "Entregado"
-      : deliveryMs !== null
-      ? formatRemainingDuration((deliveryMs - referenceMs) / 60_000)
+      : visibleShipmentStatus === "completado"
+      ? "Listo para entrega"
+      : visibleShipmentStatus === "registrado"
+      ? "Pendiente de planificacion"
+      : deliveredMs !== null
+      ? formatRemainingDuration((deliveredMs - referenceMs) / 60_000)
       : shipment.tiempoRestante;
+  const statusTagVariant =
+    visibleShipmentStatus === "entregado"
+      ? "normal"
+      : visibleShipmentStatus === "completado"
+      ? "neutral"
+      : visibleShipmentStatus === "registrado"
+      ? "elevado"
+      : "primary";
 
   const handleFocusPackageRoute = () => {
     if (packageRouteSegments.length === 0) {
@@ -568,7 +600,7 @@ const ShipmentDrawer = ({
   return (
     <DrawerBase eyebrow="Envío" title={displayCodigo ?? shipment.codigo} onClose={close}>
       <div className="mb-5">
-        <Tag variant={visibleShipmentStatus === "entregado" ? "normal" : "primary"}>
+        <Tag variant={statusTagVariant}>
           {visibleEstadoLabel}
         </Tag>
       </div>

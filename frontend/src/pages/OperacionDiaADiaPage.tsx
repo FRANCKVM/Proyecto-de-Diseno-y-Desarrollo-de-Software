@@ -8,7 +8,6 @@ import { useAirports } from "@/hooks/useAirports";
 import { useFlightSimulation } from "@/hooks/useFlightSimulation";
 import { useOperationData } from "@/hooks/useOperationData";
 import { useDrawerStore } from "@/store/drawerStore";
-import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import { USE_MOCK_DATA } from "@/utils/constants";
 import { formatStartDateTime } from "@/utils/simulationClock";
 import {
@@ -19,54 +18,6 @@ import {
   getFlightOccupancyMetric,
   getWarehouseOccupancyMetric,
 } from "@/utils/capacityMetrics";
-import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
-import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
-
-const getUtcDateKey = (date: Date): string => date.toISOString().slice(0, 10);
-
-const isShipmentDelivered = (
-  shipment: BackendSolicitudEnvio,
-  now: Date
-): boolean => {
-  const routeGroups = getShipmentRouteGroups(shipment);
-
-  if (routeGroups.length === 0) {
-    return false;
-  }
-
-  let lastArrival: number | null = null;
-
-  for (const group of routeGroups) {
-    for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const arrival = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
-      if (arrival === null) {
-        continue;
-      }
-      lastArrival = lastArrival === null ? arrival : Math.max(lastArrival, arrival);
-    }
-  }
-
-  return lastArrival !== null && now.getTime() >= lastArrival;
-};
-
-const buildOperationKpis = (
-  shipments: BackendSolicitudEnvio[],
-  activeFlights: number,
-  now: Date
-) => {
-  const todayUtc = getUtcDateKey(now);
-  const delivered = shipments.filter((shipment) =>
-    isShipmentDelivered(shipment, now)
-  ).length;
-
-  return {
-    enviosHoy: shipments.filter((shipment) => shipment.fecha === todayUtc).length,
-    enTransito: activeFlights,
-    entregadas: delivered,
-    cumplimiento:
-      shipments.length === 0 ? 100 : Math.round((delivered * 100) / shipments.length),
-  };
-};
 
 /**
  * Pantalla de operacion dia a dia.
@@ -76,7 +27,7 @@ const buildOperationKpis = (
  */
 const OperacionDiaADiaPage = () => {
   const { airports, isLoading } = useAirports();
-  const { mapa, envios, refresh } = useOperationData();
+  const { estado, mapa, refresh, refreshVersion } = useOperationData();
   const [systemDate, setSystemDate] = useState(() => new Date());
 
   useEffect(() => {
@@ -102,8 +53,6 @@ const OperacionDiaADiaPage = () => {
     () => mergeMapFlights(animatedFlights, backendMapFlights),
     [animatedFlights, backendMapFlights]
   );
-  const operationKpis = buildOperationKpis(envios, flights.length, systemDate);
-
   const occupancy = USE_MOCK_DATA
     ? OCCUPANCY_NORMAL
     : (mapa?.ocupacionPorAeropuerto ?? {});
@@ -164,7 +113,7 @@ const OperacionDiaADiaPage = () => {
           variant="dia-a-dia"
           fechaActual={formatStartDateTime(systemDate)}
           kpis={{
-            enviosHoy: USE_MOCK_DATA ? 23 : operationKpis.enviosHoy,
+            enviosHoy: USE_MOCK_DATA ? 23 : estado?.enviosHoy ?? 0,
             ...capacityKpis,
           }}
         />
@@ -198,7 +147,7 @@ const OperacionDiaADiaPage = () => {
         <DrawerHost
           occupancyByIcao={occupancy}
           airports={airports}
-          shipments={envios}
+          shipmentsRefreshKey={refreshVersion}
           activeFlights={flights}
           onShipmentCreated={refresh}
         />

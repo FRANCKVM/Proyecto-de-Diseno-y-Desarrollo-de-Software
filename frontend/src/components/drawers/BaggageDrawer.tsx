@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Eye } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Eye, Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import Tag from "@/components/atoms/Tag";
 import { useDrawerStore } from "@/store/drawerStore";
@@ -12,25 +12,38 @@ import {
   formatShipmentDisplayCode,
   getShipmentApiIdentifier,
 } from "@/utils/shipmentCode";
+import { USE_MOCK_DATA } from "@/utils/constants";
+import {
+  DELIVERY_RELEASE_DELAY_MINUTES,
+  EMPTY_SHIPMENT_STATUS_COUNTS,
+  SHIPMENT_STATUS_BADGE_LABEL,
+  SHIPMENT_STATUS_LABEL,
+  SHIPMENT_STATUS_OPTIONS,
+  getShipmentStatusTagVariant,
+  getShipmentTimelineMinutes,
+  resolveShipmentListStatus,
+  type ShipmentViewMode,
+} from "@/utils/shipmentStatus";
+import { listOperationBaggagePage } from "@/services/operationService";
+import { listLiveSimulationBaggagePage } from "@/services/simulationService";
 import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
-import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
+import type {
+  BackendBaggageItem,
+  BackendPagedResponse,
+  BackendPageQuery,
+  BackendSolicitudEnvio,
+} from "@/types/backendSimulation.types";
 
 interface BaggageDrawerProps {
   shipments: BackendSolicitudEnvio[];
   idSimulacion?: number | null;
   referenceMinute?: number | null;
   simulationStart?: string | null;
+  refreshKey?: number;
+  airportOptions?: string[];
 }
 
-type ShipmentStatus = "planificados" | "en-curso" | "entregados";
-type ShipmentViewMode = "todos" | "en-curso" | "entregados";
-
-const ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
-  INGRESADO: "Ingresado",
-  PARCIAL: "Parcial",
-  EN_PROCESO: "En proceso",
-  COMPLETADO: "Completado",
-};
+const BAGGAGE_LIST_PAGE_SIZE = 100;
 
 const getShipmentCodeLabel = (shipment: BackendSolicitudEnvio): string =>
   shipment.idEnvio !== null
@@ -54,49 +67,6 @@ const getUtcMinutesSinceShipmentDay = (
   return Math.floor((Date.now() - shipmentDayMs) / 60_000);
 };
 
-const parseTimelineDateTimeMs = (value: string | null | undefined): number | null => {
-  return parseUtcDateTimeMs(value);
-};
-
-const getShipmentTimeline = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): { firstDeparture: number | null; lastArrival: number | null } => {
-  const routeGroups = getShipmentRouteGroups(shipment);
-
-  if (routeGroups.length === 0) {
-    return { firstDeparture: null, lastArrival: null };
-  }
-
-  let firstDeparture: number | null = null;
-  let lastArrival: number | null = null;
-
-  for (const group of routeGroups) {
-    for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const baseMs = parseTimelineDateTimeMs(simulationStart)
-        ?? parseUtcDateTimeMs(`${shipment.fecha}T00:00:00`);
-      const departureMs = parseUtcDateTimeMs(occurrence.fechaHoraSalida);
-      const arrivalMs = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
-
-      if (baseMs === null || departureMs === null || arrivalMs === null) {
-        continue;
-      }
-
-      const departure = Math.round((departureMs - baseMs) / 60_000);
-      const arrival = Math.round((arrivalMs - baseMs) / 60_000);
-
-      firstDeparture =
-        firstDeparture === null
-          ? departure
-          : Math.min(firstDeparture, departure);
-      lastArrival =
-        lastArrival === null ? arrival : Math.max(lastArrival, arrival);
-    }
-  }
-
-  return { firstDeparture, lastArrival };
-};
-
 const getElapsedMinutes = (
   eventMinute: number | null,
   referenceMinute: number
@@ -111,47 +81,16 @@ const getElapsedMinutes = (
 const getLastArrivalMinute = (
   shipment: BackendSolicitudEnvio,
   simulationStart?: string | null
-): number | null => getShipmentTimeline(shipment, simulationStart).lastArrival;
+): number | null => getShipmentTimelineMinutes(shipment, simulationStart).lastArrival;
 
-const resolveDerivedShipmentStatus = (
+const getDeliveredMinute = (
   shipment: BackendSolicitudEnvio,
-  referenceMinute: number,
   simulationStart?: string | null
-): ShipmentStatus => {
-  if (shipment.estado === "COMPLETADO") {
-    return "entregados";
-  }
-
-  const timeline = getShipmentTimeline(shipment, simulationStart);
-
-  if (timeline.lastArrival !== null && referenceMinute >= timeline.lastArrival) {
-    return "entregados";
-  }
-
-  if (
-    shipment.estado === "PARCIAL" ||
-    shipment.estado === "EN_PROCESO" ||
-    (timeline.firstDeparture !== null && referenceMinute >= timeline.firstDeparture)
-  ) {
-    return "en-curso";
-  }
-
-  return "planificados";
-};
-
-const getStatusLabel = (
-  shipment: BackendSolicitudEnvio,
-  status: ShipmentStatus
-): string => {
-  if (status === "en-curso") {
-    return "En curso";
-  }
-
-  if (status === "entregados") {
-    return "Completado";
-  }
-
-  return ESTADO_LABEL[shipment.estado];
+): number | null => {
+  const lastArrival = getLastArrivalMinute(shipment, simulationStart);
+  return lastArrival !== null
+    ? lastArrival + DELIVERY_RELEASE_DELAY_MINUTES
+    : null;
 };
 
 const countBags = (shipments: BackendSolicitudEnvio[]): number =>
@@ -165,8 +104,19 @@ interface VirtualBaggageItem {
   routeLabel: string;
   routeSegments: ShipmentRouteSegment[];
   assigned: boolean;
-  status: ShipmentStatus;
+  status: Exclude<ShipmentViewMode, "todos">;
 }
+
+type DisplayBaggageItem = VirtualBaggageItem | BackendBaggageItem;
+
+interface VirtualBaggageResult {
+  items: VirtualBaggageItem[];
+  total: number;
+}
+
+const isBackendBaggageItem = (
+  bag: DisplayBaggageItem
+): bag is BackendBaggageItem => "shipmentId" in bag;
 
 const formatBagCode = (shipment: BackendSolicitudEnvio, bagIndex: number): string => {
   const shipmentCode =
@@ -191,58 +141,102 @@ const buildRouteLabel = (
 
 const buildVirtualBaggageItems = (
   shipments: BackendSolicitudEnvio[],
-  getStatus: (shipment: BackendSolicitudEnvio) => ShipmentStatus
-): VirtualBaggageItem[] => {
+  getStatus: (shipment: BackendSolicitudEnvio) => Exclude<ShipmentViewMode, "todos">,
+  limit = Number.POSITIVE_INFINITY,
+  searchQuery = ""
+): VirtualBaggageResult => {
   const items: VirtualBaggageItem[] = [];
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const hasSearch = normalizedSearch.length > 0;
+  let total = hasSearch ? 0 : countBags(shipments);
 
-  shipments.forEach((shipment) => {
+  const addMatchingItem = (
+    bagCode: string,
+    buildItem: () => VirtualBaggageItem
+  ): boolean => {
+    if (hasSearch && !bagCode.toLowerCase().includes(normalizedSearch)) {
+      return false;
+    }
+
+    if (hasSearch) {
+      total += 1;
+    }
+
+    if (items.length < limit) {
+      items.push(buildItem());
+    }
+
+    return !hasSearch && items.length >= limit;
+  };
+
+  outer:
+  for (const shipment of shipments) {
     const shipmentCode = getShipmentCodeLabel(shipment);
     const totalBags = shipment.contarBolsas ?? 0;
     const groups = getShipmentRouteGroups(shipment);
-    const status = getStatus(shipment);
+    let status: Exclude<ShipmentViewMode, "todos"> | null = null;
+    const resolveStatus = () => {
+      status ??= getStatus(shipment);
+      return status;
+    };
     let nextBagIndex = 1;
 
-    groups.forEach((group) => {
+    for (const group of groups) {
       const quantity = Math.max(0, group.cantidadBolsas ?? 0);
       const start = nextBagIndex;
       const end = Math.min(totalBags, nextBagIndex + quantity - 1);
-      const routeSegments = buildRouteSegments(group.ruta, {
-        fromIcao: shipment.origen.codigo,
-        toIcao: shipment.destino.codigo,
-      });
-      const routeLabel = buildRouteLabel(routeSegments, shipment);
+      let routeSegments: ShipmentRouteSegment[] | null = null;
+      let routeLabel: string | null = null;
 
       for (let bagIndex = start; bagIndex <= end; bagIndex++) {
-        items.push({
-          id: formatBagCode(shipment, bagIndex),
-          shipment,
-          shipmentCode,
-          bagIndex,
-          routeLabel,
-          routeSegments,
-          assigned: true,
-          status,
+        const bagCode = formatBagCode(shipment, bagIndex);
+        const shouldStop = addMatchingItem(bagCode, () => {
+          routeSegments ??= buildRouteSegments(group.ruta, {
+            fromIcao: shipment.origen.codigo,
+            toIcao: shipment.destino.codigo,
+          });
+          routeLabel ??= buildRouteLabel(routeSegments, shipment);
+
+          return {
+            id: bagCode,
+            shipment,
+            shipmentCode,
+            bagIndex,
+            routeLabel,
+            routeSegments,
+            assigned: true,
+            status: resolveStatus(),
+          };
         });
+
+        if (shouldStop) {
+          break outer;
+        }
       }
 
       nextBagIndex = end + 1;
-    });
+    }
 
     for (let bagIndex = nextBagIndex; bagIndex <= totalBags; bagIndex++) {
-      items.push({
-        id: formatBagCode(shipment, bagIndex),
-        shipment,
-        shipmentCode,
-        bagIndex,
-        routeLabel: `${shipment.origen.codigo} > ${shipment.destino.codigo}`,
-        routeSegments: [],
-        assigned: false,
-        status,
-      });
-    }
-  });
+      const bagCode = formatBagCode(shipment, bagIndex);
+      const shouldStop = addMatchingItem(bagCode, () => ({
+          id: bagCode,
+          shipment,
+          shipmentCode,
+          bagIndex,
+          routeLabel: `${shipment.origen.codigo} > ${shipment.destino.codigo}`,
+          routeSegments: [],
+          assigned: false,
+          status: resolveStatus(),
+      }));
 
-  return items;
+      if (shouldStop) {
+        break outer;
+      }
+    }
+  }
+
+  return { items, total };
 };
 
 const BaggageDrawer = ({
@@ -250,6 +244,8 @@ const BaggageDrawer = ({
   idSimulacion,
   referenceMinute,
   simulationStart,
+  refreshKey = 0,
+  airportOptions: airportOptionsProp = [],
 }: BaggageDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
@@ -259,55 +255,173 @@ const BaggageDrawer = ({
   const [mode, setMode] = useState<ShipmentViewMode>("todos");
   const [deliveredHours, setDeliveredHours] = useState(6);
   const [airportFilter, setAirportFilter] = useState("todos");
+  const [baggageSearch, setBaggageSearch] = useState("");
+  const [visibleBaggageLimit, setVisibleBaggageLimit] = useState(
+    BAGGAGE_LIST_PAGE_SIZE
+  );
+  const [pagedBaggage, setPagedBaggage] =
+    useState<BackendPagedResponse<BackendBaggageItem> | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const usesBackendPaging = !USE_MOCK_DATA;
 
   const getReferenceMinuteForShipment = (shipment: BackendSolicitudEnvio) =>
     referenceMinute ?? getUtcMinutesSinceShipmentDay(shipment);
 
   const shipmentStatus = (shipment: BackendSolicitudEnvio) =>
-    resolveDerivedShipmentStatus(
+    resolveShipmentListStatus(
       shipment,
       getReferenceMinuteForShipment(shipment),
       simulationStart
     );
 
-  const inProgressShipments = shipments.filter(
-    (shipment) => shipmentStatus(shipment) === "en-curso"
-  );
-  const deliveredShipments = shipments.filter((shipment) => {
-    if (shipmentStatus(shipment) !== "entregados") {
-      return false;
-    }
+  const registeredShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "registrados");
+  const inTransitShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "en-transito");
+  const plannedShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "planificados");
+  const completedShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "completados");
+  const deliveredShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => {
+        if (shipmentStatus(shipment) !== "entregados") {
+          return false;
+        }
 
-    const elapsed = getElapsedMinutes(
-      getLastArrivalMinute(shipment, simulationStart),
-      getReferenceMinuteForShipment(shipment)
-    );
+        const elapsed = getElapsedMinutes(
+          getDeliveredMinute(shipment, simulationStart),
+          getReferenceMinuteForShipment(shipment)
+        );
 
-    return elapsed !== null && elapsed < deliveredHours * 60;
-  });
+        return elapsed !== null && elapsed < deliveredHours * 60;
+      });
   const visibleShipmentsByMode =
     mode === "todos"
       ? shipments
-      : mode === "en-curso"
-        ? inProgressShipments
+      : mode === "registrados"
+        ? registeredShipments
+      : mode === "planificados"
+        ? plannedShipments
+        : mode === "en-transito"
+        ? inTransitShipments
+        : mode === "completados"
+        ? completedShipments
         : deliveredShipments;
-  const airportOptions = Array.from(
-    new Set(
-      shipments.flatMap((shipment) => [
-        shipment.origen.codigo,
-        shipment.destino.codigo,
-      ])
-    )
-  ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
-  const visibleShipments =
-    airportFilter === "todos"
+  const airportOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...airportOptionsProp,
+            ...shipments.flatMap((shipment) => [
+              shipment.origen.codigo,
+              shipment.destino.codigo,
+            ]),
+          ]
+        )
+      ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" })),
+    [airportOptionsProp, shipments]
+  );
+  const visibleShipments = usesBackendPaging
+    ? []
+    : airportFilter === "todos"
       ? visibleShipmentsByMode
       : visibleShipmentsByMode.filter(
           (shipment) =>
             shipment.origen.codigo === airportFilter ||
             shipment.destino.codigo === airportFilter
         );
-  const baggageItems = buildVirtualBaggageItems(visibleShipments, shipmentStatus);
+  const baggageResult = usesBackendPaging
+    ? { items: [], total: 0 }
+    : buildVirtualBaggageItems(
+        visibleShipments,
+        shipmentStatus,
+        visibleBaggageLimit,
+        baggageSearch
+      );
+  const baggageItems: DisplayBaggageItem[] =
+    pagedBaggage?.items ?? baggageResult.items;
+  const totalVisibleBaggageCount =
+    pagedBaggage?.totalItems ?? baggageResult.total;
+  const hiddenBaggageCount = Math.max(
+    0,
+    totalVisibleBaggageCount - baggageItems.length
+  );
+  const statusCounts = pagedBaggage?.countsByStatus;
+  const getStatusCount = (key: ShipmentViewMode, fallback: number) =>
+    statusCounts?.[key] ?? fallback;
+
+  useEffect(() => {
+    setVisibleBaggageLimit(BAGGAGE_LIST_PAGE_SIZE);
+  }, [airportFilter, baggageSearch, deliveredHours, mode]);
+
+  useEffect(() => {
+    if (!usesBackendPaging) {
+      setPagedBaggage(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const params: BackendPageQuery = {
+      page: 0,
+      size: visibleBaggageLimit,
+      codigo: baggageSearch.trim() || undefined,
+      estado: mode,
+      aeropuerto: airportFilter,
+      horasEntregados: deliveredHours,
+    };
+
+    setIsPageLoading(true);
+    const request =
+      idSimulacion != null
+        ? listLiveSimulationBaggagePage(idSimulacion, params)
+        : listOperationBaggagePage(params);
+
+    request
+      .then((response) => {
+        if (!isCancelled) {
+          setPagedBaggage(response);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setPagedBaggage({
+            items: [],
+            page: 0,
+            size: visibleBaggageLimit,
+            totalItems: 0,
+            totalPages: 0,
+            hasMore: false,
+            countsByStatus: {
+              ...EMPTY_SHIPMENT_STATUS_COUNTS,
+            },
+          });
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsPageLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    airportFilter,
+    baggageSearch,
+    deliveredHours,
+    idSimulacion,
+    mode,
+    refreshKey,
+    usesBackendPaging,
+    visibleBaggageLimit,
+  ]);
 
   const handleHoursChange = (value: string) => {
     const nextValue = Number(value);
@@ -318,19 +432,56 @@ const BaggageDrawer = ({
     setDeliveredHours(Math.min(23, Math.max(1, Math.floor(nextValue))));
   };
 
-  const handleOpenShipment = (shipment: BackendSolicitudEnvio) => {
-    if (shipment.idEnvio === null) {
+  const countBagsByStatus = (status: Exclude<ShipmentViewMode, "todos">) => {
+    switch (status) {
+      case "registrados":
+        return countBags(registeredShipments);
+      case "planificados":
+        return countBags(plannedShipments);
+      case "en-transito":
+        return countBags(inTransitShipments);
+      case "completados":
+        return countBags(completedShipments);
+      case "entregados":
+        return countBags(deliveredShipments);
+    }
+  };
+
+  const handleOpenShipment = (bag: DisplayBaggageItem) => {
+    if (isBackendBaggageItem(bag)) {
+      if (!bag.shipmentApiCode) {
+        return;
+      }
+
+      openShipment(bag.shipmentApiCode, {
+        idSimulacion,
+        displayCodigo: bag.shipmentCode,
+      });
       return;
     }
 
-    openShipment(getShipmentApiIdentifier(shipment.idEnvio), {
+    if (bag.shipment.idEnvio === null) {
+      return;
+    }
+
+    openShipment(getShipmentApiIdentifier(bag.shipment.idEnvio), {
       idSimulacion,
-      displayCodigo: getShipmentCodeLabel(shipment),
+      displayCodigo: getShipmentCodeLabel(bag.shipment),
     });
   };
 
-  const handleFocusBag = (bag: VirtualBaggageItem) => {
+  const handleFocusBag = (bag: DisplayBaggageItem) => {
     if (bag.routeSegments.length === 0) {
+      if (isBackendBaggageItem(bag)) {
+        focusShipmentRouteSegments([
+          {
+            fromIcao: bag.originIcao,
+            toIcao: bag.destinationIcao,
+          },
+        ]);
+        return;
+      }
+
       focusShipmentRouteSegments([
         {
           fromIcao: bag.shipment.origen.codigo,
@@ -344,41 +495,65 @@ const BaggageDrawer = ({
   };
 
   return (
-    <DrawerBase title="Panel de maletas" onClose={close}>
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <button
-          type="button"
-          className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "todos"
-              ? "bg-primary border-primary text-text-inverse"
-              : "bg-card border-border text-text-primary hover:bg-field"
-          }`}
-          onClick={() => setMode("todos")}
+    <DrawerBase
+      title="Panel de maletas"
+      hideHeader
+      onClose={close}
+      footer={
+        <div className="flex items-center justify-between text-secondary text-text-primary">
+          <span>Maletas mostradas</span>
+          <span className="text-button text-text-primary">
+            {baggageItems.length}/{totalVisibleBaggageCount}
+          </span>
+        </div>
+      }
+    >
+      <div className="mb-5">
+        <label
+          htmlFor="baggage-status-filter"
+          className="block text-label-sm text-text-primary mb-1"
         >
-          Todos ({countBags(shipments)})
-        </button>
-        <button
-          type="button"
-          className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "en-curso"
-              ? "bg-primary border-primary text-text-inverse"
-              : "bg-card border-border text-text-primary hover:bg-field"
-          }`}
-          onClick={() => setMode("en-curso")}
+          Filtrar por estado
+        </label>
+        <select
+          id="baggage-status-filter"
+          value={mode}
+          onChange={(event) => setMode(event.target.value as ShipmentViewMode)}
+          className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
         >
-          En curso ({countBags(inProgressShipments)})
-        </button>
-        <button
-          type="button"
-          className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "entregados"
-              ? "bg-primary border-primary text-text-inverse"
-              : "bg-card border-border text-text-primary hover:bg-field"
-          }`}
-          onClick={() => setMode("entregados")}
+          <option value="todos">
+            Todos ({getStatusCount("todos", countBags(shipments))})
+          </option>
+          {SHIPMENT_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {SHIPMENT_STATUS_LABEL[status]} ({getStatusCount(status, countBagsByStatus(status))})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mb-5">
+        <label
+          htmlFor="baggage-search"
+          className="block text-label-sm text-text-primary mb-1"
         >
-          Entregados ({countBags(deliveredShipments)})
-        </button>
+          Buscar maleta
+        </label>
+        <div className="relative">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary"
+            aria-hidden
+          />
+          <input
+            id="baggage-search"
+            type="search"
+            value={baggageSearch}
+            onChange={(event) => setBaggageSearch(event.target.value)}
+            placeholder="Código de maleta"
+            className="tasf-input-placeholder w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
+          />
+        </div>
       </div>
 
       {mode === "entregados" && (
@@ -423,14 +598,20 @@ const BaggageDrawer = ({
         </select>
       </div>
 
-      {baggageItems.length === 0 ? (
+      {isPageLoading && baggageItems.length === 0 ? (
+        <p className="text-body text-text-primary">
+          Cargando maletas...
+        </p>
+      ) : baggageItems.length === 0 ? (
         <p className="text-body text-text-primary">
           No hay maletas registradas para esta vista.
         </p>
       ) : (
         <ul className="space-y-2">
           {baggageItems.map((bag) => {
-            const canOpen = bag.shipment.idEnvio !== null;
+            const canOpen = isBackendBaggageItem(bag)
+              ? Boolean(bag.shipmentApiCode)
+              : bag.shipment.idEnvio !== null;
             const legs = bag.routeSegments.length;
 
             return (
@@ -453,7 +634,7 @@ const BaggageDrawer = ({
                       <button
                         type="button"
                         className="mt-2 text-secondary text-primary hover:underline"
-                        onClick={() => handleOpenShipment(bag.shipment)}
+                        onClick={() => handleOpenShipment(bag)}
                       >
                         Ver envío completo ({bag.shipmentCode})
                       </button>
@@ -470,9 +651,9 @@ const BaggageDrawer = ({
                       <Eye size={16} strokeWidth={2.2} aria-hidden />
                     </button>
                     <Tag
-                      variant={bag.status === "entregados" ? "normal" : "primary"}
+                      variant={getShipmentStatusTagVariant(bag.status)}
                     >
-                      {getStatusLabel(bag.shipment, bag.status)}
+                      {SHIPMENT_STATUS_BADGE_LABEL[bag.status]}
                     </Tag>
                     <span className="text-secondary text-text-primary">
                       #{bag.bagIndex.toLocaleString("es-PE")}
@@ -482,6 +663,21 @@ const BaggageDrawer = ({
               </li>
             );
           })}
+          {hiddenBaggageCount > 0 && (
+            <li>
+              <button
+                type="button"
+                onClick={() =>
+                  setVisibleBaggageLimit((currentLimit) =>
+                    currentLimit + BAGGAGE_LIST_PAGE_SIZE
+                  )
+                }
+                className="mt-2 w-full rounded-input border border-border bg-field px-3 py-2 text-button text-primary hover:border-primary hover:bg-primary-soft transition-colors"
+              >
+                Mostrar más ({hiddenBaggageCount})
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </DrawerBase>

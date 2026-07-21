@@ -17,11 +17,11 @@ const ShipmentFormDrawer = ({
   const close = useDrawerStore((s) => s.close);
 
   return (
-    <DrawerBase eyebrow="Nuevo envío" title="Registrar envío" onClose={close}>
+    <DrawerBase eyebrow="Nuevo envio" title="Registrar envio" onClose={close}>
       <section className="space-y-4">
         <p className="text-secondary text-text-primary">
-          Selecciona origen, destino y cantidad de maletas. El plazo se define
-          automaticamente en backend.
+          El origen se toma automaticamente desde la zona horaria del navegador.
+          Selecciona destino y cantidad de maletas.
         </p>
         <ShipmentRegistrationForm
           airports={airports}

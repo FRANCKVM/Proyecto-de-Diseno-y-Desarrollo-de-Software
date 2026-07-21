@@ -16,7 +16,7 @@ interface RouteLineProps {
   /**
    * Color del trazo. Por defecto gris secundario del estandar,
    * que se distingue claramente sobre el fondo claro de CartoDB
-   * Positron sin saturar la vista.
+   * Stamen Toner Lite sin saturar la vista.
    */
   color?: string;
   /** Muestra una punta sobre el segmento para indicar direccion. */

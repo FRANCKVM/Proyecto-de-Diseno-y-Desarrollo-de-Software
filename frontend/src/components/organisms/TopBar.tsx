@@ -157,6 +157,7 @@ const TopBarFrame = ({
 interface FloatingTopBarProps {
   drawerAwareStyle?: React.CSSProperties;
   main: ReactNode;
+  simulation?: ReactNode;
   day: ReactNode;
   metrics: ReactNode;
 }
@@ -246,6 +247,7 @@ const FloatingCard = ({
 const FloatingTopBar = ({
   drawerAwareStyle,
   main,
+  simulation,
   day,
   metrics,
 }: FloatingTopBarProps) => (
@@ -256,6 +258,11 @@ const FloatingTopBar = ({
     <FloatingCard className="w-fit">
       <div className="grid grid-cols-1 gap-2">{main}</div>
     </FloatingCard>
+    {simulation ? (
+      <FloatingCard className="w-fit">
+        <div className="grid grid-cols-1 gap-2">{simulation}</div>
+      </FloatingCard>
+    ) : null}
     <FloatingCard className="w-fit">
       {day}
     </FloatingCard>
@@ -357,6 +364,10 @@ const TopBar = (props: TopBarProps) => {
                 label="Transcurrido real:"
                 value={props.reloj.tiempoRealTranscurrido}
               />
+            </>
+          }
+          simulation={
+            <>
               <KpiInline
                 label="Inicio simulación:"
                 value={props.reloj.inicioSimulacion}
@@ -444,6 +455,10 @@ const TopBar = (props: TopBarProps) => {
                 label="Transcurrido real:"
                 value={props.reloj.tiempoRealTranscurrido}
               />
+            </>
+          }
+          simulation={
+            <>
               <KpiInline
                 label="Inicio simulación:"
                 value={props.reloj.inicioSimulacion}

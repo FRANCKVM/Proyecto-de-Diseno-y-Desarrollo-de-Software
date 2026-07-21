@@ -1,5 +1,6 @@
 import type { BackendRuta, BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
+import { normalizeBackendShipmentStatus } from "@/utils/shipmentStatus";
 import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
 
 export interface ShipmentRouteSegment {
@@ -29,10 +30,11 @@ export const resolveShipmentFocusTarget = (
   referenceMinute?: number | null,
   simulationStart?: string | null
 ): ShipmentFocusTarget => {
-  if (shipment.estado === "INGRESADO") {
+  const normalizedStatus = normalizeBackendShipmentStatus(shipment.estado);
+  if (normalizedStatus === "registrados") {
     return { focusedAirportIcao: shipment.origen.codigo, focusedFlightId: null };
   }
-  if (shipment.estado === "COMPLETADO") {
+  if (normalizedStatus === "completados" || normalizedStatus === "entregados") {
     return { focusedAirportIcao: shipment.destino.codigo, focusedFlightId: null };
   }
 

@@ -4,26 +4,20 @@ import DrawerBase from "@/components/drawers/DrawerBase";
 import InfoRow from "@/components/molecules/InfoRow";
 import Tag from "@/components/atoms/Tag";
 import { getFlightByCode } from "@/services/flightService";
+import { getShipmentByCode } from "@/services/shipmentService";
 import { useDrawerStore } from "@/store/drawerStore";
-import {
-  buildShipmentRouteSegments,
-} from "@/utils/shipmentFocus";
-import {
-  formatShipmentDisplayCode,
-  getShipmentApiIdentifier,
-  parseShipmentIdentifier,
-} from "@/utils/shipmentCode";
+import { parseShipmentIdentifier } from "@/utils/shipmentCode";
 import {
   formatUtcDateTimeWithYear,
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
-import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoVuelo, VueloDetalle } from "@/types/flight.types";
+import type { EnvioDetalle } from "@/types/shipment.types";
+import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 
 interface FlightDrawerProps {
   codigo: string;
   idSimulacion?: number | null;
-  shipments?: BackendSolicitudEnvio[];
   referenceMinute?: number | null;
   simulationStart?: string | null;
 }
@@ -147,6 +141,27 @@ const formatFlightDisplayCode = (flight: VueloDetalle): string => {
   return `${origen}>${destino}-${codigoVuelo}`;
 };
 
+const buildShipmentRouteSegmentsFromDetail = (
+  shipment: EnvioDetalle
+): ShipmentRouteSegment[] => {
+  const routeAirports = shipment.ruta
+    .filter((hito) => hito.tipo !== "vuelo")
+    .map((hito) => hito.aeropuertoIcao)
+    .filter((icao): icao is string => Boolean(icao));
+  const uniqueAirports = routeAirports.filter(
+    (icao, index, list) => index === 0 || icao !== list[index - 1]
+  );
+  const airports =
+    uniqueAirports.length >= 2
+      ? uniqueAirports
+      : [shipment.origenIcao, shipment.destinoIcao];
+
+  return airports.slice(0, -1).map((fromIcao, index) => ({
+    fromIcao,
+    toIcao: airports[index + 1],
+  }));
+};
+
 const getFlightTagVariant = (estado: VueloDetalle["estado"]) => {
   switch (estado) {
     case "en_vuelo":
@@ -172,7 +187,6 @@ const getFlightTagVariant = (estado: VueloDetalle["estado"]) => {
 const FlightDrawer = ({
   codigo,
   idSimulacion,
-  shipments = [],
   referenceMinute,
   simulationStart,
 }: FlightDrawerProps) => {
@@ -305,36 +319,25 @@ const FlightDrawer = ({
   );
   const openShipmentFromFlight = (shipmentCode: string) => {
     const shipmentId = parseShipmentIdentifier(shipmentCode);
-    const shipment = shipments.find(
-      (candidate) => candidate.idEnvio === shipmentId
-    );
-
-    if (!shipment || shipment.idEnvio === null) {
-      openShipment(shipmentId !== null ? String(shipmentId) : shipmentCode, {
-        idSimulacion,
-        displayCodigo: shipmentCode,
-      });
-      return;
-    }
-
-    openShipment(getShipmentApiIdentifier(shipment.idEnvio), {
+    openShipment(shipmentId !== null ? String(shipmentId) : shipmentCode, {
       idSimulacion,
-      displayCodigo: formatShipmentDisplayCode(shipment.idEnvio),
+      displayCodigo: shipmentCode,
     });
   };
 
-  const focusShipmentFromFlight = (
+  const focusShipmentFromFlight = async (
     shipmentCode: string,
     fallback: { origenIcao: string; destinoIcao: string }
   ) => {
     const shipmentId = parseShipmentIdentifier(shipmentCode);
-    const shipment = shipments.find(
-      (candidate) => candidate.idEnvio === shipmentId
+    const shipment = await getShipmentByCode(
+      shipmentId !== null ? String(shipmentId) : shipmentCode,
+      idSimulacion
     );
 
     focusShipmentRouteSegments(
       shipment
-        ? buildShipmentRouteSegments(shipment)
+        ? buildShipmentRouteSegmentsFromDetail(shipment)
         : [{ fromIcao: fallback.origenIcao, toIcao: fallback.destinoIcao }]
     );
   };
@@ -448,12 +451,12 @@ const FlightDrawer = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() =>
-                      focusShipmentFromFlight(e.codigo, {
+                    onClick={() => {
+                      void focusShipmentFromFlight(e.codigo, {
                         origenIcao: e.origenIcao,
                         destinoIcao: e.destinoIcao,
-                      })
-                    }
+                      });
+                    }}
                     className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-card text-primary transition-colors hover:bg-primary/10"
                     aria-label={`Enfocar ruta de ${e.codigo} en el mapa`}
                     title="Ver ruta en el mapa"

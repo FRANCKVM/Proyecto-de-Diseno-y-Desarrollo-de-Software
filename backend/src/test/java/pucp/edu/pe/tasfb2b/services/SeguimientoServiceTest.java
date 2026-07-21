@@ -62,9 +62,9 @@ class SeguimientoServiceTest {
         when(estadoSimulacion.isActiva()).thenReturn(true);
         when(estadoSimulacion.getPunteroConsumoMinutos()).thenReturn(0);
 
-        var detalle = service.obtenerEnvioDetalle("ENV--01", 7);
+        var detalle = service.obtenerEnvioDetalle("ENV-SIM-001", 7);
 
-        assertEquals("ENV--01", detalle.codigo());
+        assertEquals("ENV-SIM-001", detalle.codigo());
         verify(solicitudRepository, never()).findById(any());
         verify(asignacionRepository, never()).findByEnvio_IdEnvioOrderByIdAsignacionAsc(any());
     }
@@ -133,7 +133,7 @@ class SeguimientoServiceTest {
                 id, LocalDate.of(2026, 7, 11), LocalTime.NOON, 1,
                 origen, destino, 16, 2.0
         );
-        envio.setEstado(EstadoEnvio.INGRESADO);
+        envio.setEstado(EstadoEnvio.REGISTRADO);
         return envio;
     }
 

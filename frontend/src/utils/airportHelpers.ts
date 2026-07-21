@@ -56,3 +56,5 @@ export const ESTADO_COLOR_HEX: Record<EstadoSemaforo, string> = {
   elevado: COLORS.warning.base,
   critico: COLORS.danger.base,
 };
+
+export const ALMACEN_VACIO_COLOR_HEX = "#6B7280";

@@ -1,10 +1,15 @@
 import api from "@/services/api";
 import { mockResolve } from "@/services/sources2.0";
 import { USE_MOCK_DATA } from "@/utils/constants";
+import { EMPTY_SHIPMENT_STATUS_COUNTS } from "@/utils/shipmentStatus";
 import type {
   CreateOperationShipmentRequest,
+  BackendBaggageItem,
   BackendEstadoOperacion,
   BackendMapaSimulacionEstado,
+  BackendOperacionHomeResumen,
+  BackendPageQuery,
+  BackendPagedResponse,
   BackendSolicitudEnvio,
 } from "@/types/backendSimulation.types";
 
@@ -40,6 +45,74 @@ export const listOperationShipments = async (): Promise<BackendSolicitudEnvio[]>
   }
 
   const { data } = await api.get<BackendSolicitudEnvio[]>("/operacion/envios");
+  return data;
+};
+
+export const getOperationHomeSummary = async (
+  limiteActividad = 5
+): Promise<BackendOperacionHomeResumen | null> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<BackendOperacionHomeResumen | null>(null);
+  }
+
+  try {
+    const { data } = await api.get<BackendOperacionHomeResumen>(
+      "/operacion/resumen-home",
+      { params: { limiteActividad } }
+    );
+    return data;
+  } catch {
+    return null;
+  }
+};
+
+const emptyPagedResponse = <T>(
+  size: number,
+  countsByStatus: Record<string, number> = EMPTY_SHIPMENT_STATUS_COUNTS
+): BackendPagedResponse<T> => ({
+  items: [],
+  page: 0,
+  size,
+  totalItems: 0,
+  totalPages: 0,
+  hasMore: false,
+  countsByStatus,
+  countsByDirection: {
+    todos: 0,
+    entrantes: 0,
+    salientes: 0,
+  },
+});
+
+export const listOperationShipmentsPage = async (
+  params: BackendPageQuery
+): Promise<BackendPagedResponse<BackendSolicitudEnvio>> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<BackendPagedResponse<BackendSolicitudEnvio>>(
+      emptyPagedResponse<BackendSolicitudEnvio>(params.size ?? 80)
+    );
+  }
+
+  const { data } = await api.get<BackendPagedResponse<BackendSolicitudEnvio>>(
+    "/operacion/envios/pagina",
+    { params }
+  );
+  return data;
+};
+
+export const listOperationBaggagePage = async (
+  params: BackendPageQuery
+): Promise<BackendPagedResponse<BackendBaggageItem>> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<BackendPagedResponse<BackendBaggageItem>>(
+      emptyPagedResponse<BackendBaggageItem>(params.size ?? 100)
+    );
+  }
+
+  const { data } = await api.get<BackendPagedResponse<BackendBaggageItem>>(
+    "/operacion/maletas",
+    { params }
+  );
   return data;
 };
 
@@ -79,7 +152,7 @@ export const createOperationShipment = async (
       },
       contarBolsas: payload.contarBolsas,
       diasTiempoMaximo: payload.origenIcao === payload.destinoIcao ? 1 : 2,
-      estado: "INGRESADO",
+      estado: "REGISTRADO",
     });
   }
 

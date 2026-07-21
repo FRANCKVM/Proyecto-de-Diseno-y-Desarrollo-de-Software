@@ -25,6 +25,7 @@ public class PlanificadorGenetico {
     private final int escalasIntermediasMax;
     private final Random aleatorio;
     private final LocalDateTime fechaHoraInicio;
+    private final int minutosEsperaMinimaEscala;
 
     public PlanificadorGenetico(Grafo grafo,
                                 int tamanoPoblacion,
@@ -53,6 +54,28 @@ public class PlanificadorGenetico {
                                 int tamanoTorneo,
                                 int escalasIntermediasMax,
                                 LocalDateTime fechaHoraInicio) {
+        this(
+                grafo,
+                tamanoPoblacion,
+                generaciones,
+                tasaCruzamiento,
+                tasaMutacion,
+                tamanoTorneo,
+                escalasIntermediasMax,
+                fechaHoraInicio,
+                0
+        );
+    }
+
+    public PlanificadorGenetico(Grafo grafo,
+                                int tamanoPoblacion,
+                                int generaciones,
+                                double tasaCruzamiento,
+                                double tasaMutacion,
+                                int tamanoTorneo,
+                                int escalasIntermediasMax,
+                                LocalDateTime fechaHoraInicio,
+                                int minutosEsperaMinimaEscala) {
         this.grafo = grafo;
         this.tamanoPoblacion = tamanoPoblacion;
         this.generaciones = generaciones;
@@ -62,6 +85,7 @@ public class PlanificadorGenetico {
         this.escalasIntermediasMax = escalasIntermediasMax;
         this.aleatorio = new Random();
         this.fechaHoraInicio = fechaHoraInicio;
+        this.minutosEsperaMinimaEscala = Math.max(0, minutosEsperaMinimaEscala);
     }
 
     public Ruta encontrarMejorRuta(SolicitudEnvio solicitud) {
@@ -75,7 +99,7 @@ public class PlanificadorGenetico {
 
             // Elitismo: se conserva el mejor cromosoma encontrado.
             Cromosoma elite = new Cromosoma(mejorGlobal);
-            elite.evaluar(grafo, solicitud, fechaHoraInicio);
+            elite.evaluar(grafo, solicitud, fechaHoraInicio, minutosEsperaMinimaEscala);
             nuevaPoblacion.add(elite);
 
             while (nuevaPoblacion.size() < tamanoPoblacion) {
@@ -94,7 +118,7 @@ public class PlanificadorGenetico {
                     mutar(hijo, solicitud);
                 }
 
-                hijo.evaluar(grafo, solicitud, fechaHoraInicio);
+                hijo.evaluar(grafo, solicitud, fechaHoraInicio, minutosEsperaMinimaEscala);
                 nuevaPoblacion.add(hijo);
             }
 
@@ -294,7 +318,7 @@ public class PlanificadorGenetico {
 
     private void evaluarPoblacion(List<Cromosoma> poblacion, SolicitudEnvio solicitud) {
         for (Cromosoma cromosoma : poblacion) {
-            cromosoma.evaluar(grafo, solicitud, fechaHoraInicio);
+            cromosoma.evaluar(grafo, solicitud, fechaHoraInicio, minutosEsperaMinimaEscala);
         }
     }
 

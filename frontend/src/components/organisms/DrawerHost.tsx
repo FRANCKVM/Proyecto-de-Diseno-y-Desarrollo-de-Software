@@ -22,6 +22,7 @@ interface DrawerHostProps {
   rangosSemaforo?: RangoSemaforo;
   idSimulacion?: number | null;
   shipments?: BackendSolicitudEnvio[];
+  shipmentsRefreshKey?: number;
   activeFlights?: MapFlight[];
   referenceMinute?: number | null;
   simulationStart?: string | null;
@@ -47,6 +48,7 @@ const DrawerHost = ({
   rangosSemaforo,
   idSimulacion,
   shipments = [],
+  shipmentsRefreshKey = 0,
   referenceMinute,
   simulationStart,
   onShipmentCreated,
@@ -77,6 +79,7 @@ const DrawerHost = ({
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
           shipments={shipments}
+          refreshKey={shipmentsRefreshKey}
           showFlights={false}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
@@ -90,6 +93,8 @@ const DrawerHost = ({
           idSimulacion={idSimulacion}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
+          refreshKey={shipmentsRefreshKey}
+          airportOptions={airports.map((airport) => airport.icao)}
         />
       );
     case "baggage-panel":
@@ -100,6 +105,8 @@ const DrawerHost = ({
           idSimulacion={idSimulacion}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
+          refreshKey={shipmentsRefreshKey}
+          airportOptions={airports.map((airport) => airport.icao)}
         />
       );
     case "active-flights-panel":
@@ -121,8 +128,8 @@ const DrawerHost = ({
           ocupacion={occupancyByIcao?.[selection.icao]}
           rangosSemaforo={rangosSemaforo}
           idSimulacion={idSimulacion}
-          shipments={shipments}
           showFlights
+          refreshKey={shipmentsRefreshKey}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
         />
@@ -133,7 +140,6 @@ const DrawerHost = ({
           key={`flight-${selection.codigo}-${selection.idSimulacion ?? "real"}`}
           codigo={selection.codigo}
           idSimulacion={selection.idSimulacion}
-          shipments={shipments}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
         />

@@ -18,6 +18,11 @@ export const parseShipmentIdentifier = (codigo: string): number | null => {
     return Number(envMatch[1]);
   }
 
+  const simulationMatch = trimmed.match(/^ENV-SIM-(\d+)$/i);
+  if (simulationMatch) {
+    return -Number(simulationMatch[1]);
+  }
+
   const legacyNegativeMatch = trimmed.match(/^ENV-0-(\d+)$/i);
   if (legacyNegativeMatch) {
     return -Number(legacyNegativeMatch[1]);

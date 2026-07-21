@@ -14,7 +14,7 @@ export interface HomeKpis {
 
 export const HOME_KPIS_MOCK: HomeKpis = {
   aeropuertos: { total: 12, sublabel: "3 continentes" },
-  vuelosActivos: { total: 28, sublabel: "6 rutas inter" },
+  vuelosActivos: { total: 28, sublabel: "vuelos operativos" },
   enviosEnCurso: { total: 156, sublabel: "4,230 maletas" },
   cumplimiento: { porcentaje: 100, sublabel: "sin retrasos" },
 };
@@ -23,7 +23,7 @@ export const ACTIVIDAD_RECIENTE_MOCK: ActividadReciente[] = [
   {
     id: "act-01",
     cuando: "Hoy 09:15",
-    mensaje: "Simulacion semanal completada — 100% cumplimiento",
+    mensaje: "Simulacion de periodo 5 dias completada — 100% cumplimiento",
     severidad: "exito",
   },
   {

@@ -74,7 +74,7 @@ const DashboardPage = () => {
           (simulacion) => simulacion.id === runningSimulationId
         ).length
       : 0;
-    const semanales = simulaciones.filter(
+    const periodos = simulaciones.filter(
       (simulacion) => simulacion.tipo === "semanal"
     ).length;
     const colapso = simulaciones.filter(
@@ -85,7 +85,7 @@ const DashboardPage = () => {
       total,
       activas,
       finalizadas: total - activas,
-      semanales,
+      periodos,
       colapso,
     };
   }, [hasRunningSimulation, runningSimulationId, simulaciones]);
@@ -105,25 +105,21 @@ const DashboardPage = () => {
           dotVariant="primary"
           label="Simulaciones"
           value={resumen.total}
-          subtitulo="corridas registradas"
         />
         <KpiCard
           dotVariant="normal"
-          label="Finalizadas"
-          value={resumen.finalizadas}
-          subtitulo={`${resumen.activas} activas`}
+          label="Activas"
+          value={resumen.activas}
         />
         <KpiCard
           dotVariant="primary"
-          label="Semanales"
-          value={resumen.semanales}
-          subtitulo="escenarios de periodo"
+          label="Simulaciones de 5 dias"
+          value={resumen.periodos}
         />
         <KpiCard
           dotVariant="elevado"
-          label="Colapso"
+          label="Simulaciones de colapso"
           value={resumen.colapso}
-          subtitulo="escenarios de estres"
         />
       </section>
 
@@ -132,8 +128,8 @@ const DashboardPage = () => {
           <div>
             <h2 className="text-section-title mb-1">Historial de simulaciones</h2>
             <p className="text-body text-text-secondary">
-              Cada tarjeta resume una corrida y te lleva a su pantalla de
-              resultados.
+              Selecciona un historial para revisar sus resultados y metricas
+              principales.
             </p>
           </div>
 
@@ -188,7 +184,7 @@ const DashboardPage = () => {
                         <span className="text-secondary text-text-secondary uppercase tracking-wide">
                           {simulacion.tipo === "colapso"
                             ? "Simulacion al colapso"
-                            : "Simulacion semanal"}
+                            : "Simulacion de periodo 5 dias"}
                         </span>
                       </div>
                       <h3 className="text-body font-semibold text-text-primary">

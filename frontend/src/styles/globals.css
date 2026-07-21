@@ -71,6 +71,13 @@
    Animaciones y estilos compartidos no expresables como utilidades simples.
    ======================================================================== */
 @layer components {
+  .tasf-input-placeholder::placeholder {
+    color: #8a92a3;
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 1;
+  }
+
   /* Drawer slide-in 200ms desde la derecha (estandar 61, seccion 8) */
   .drawer-enter {
     transform: translateX(100%);
@@ -96,18 +103,42 @@
      desde AirportMarker.tsx y FlightMarker.tsx, asi que viven aqui (en CSS
      global) en vez de Tailwind utility classes.
 
-     Optimizados para CartoDB Positron (fondo gris claro): los labels usan
+     Optimizados para Stamen Toner Lite (fondo gris claro): los labels usan
      el color text-primary del estandar (#181B27) sin text-shadow, ya que
      la legibilidad es nativa sobre el mapa claro.
      ---------------------------------------------------------------------- */
 
   /* Marcador de aeropuerto: contenedor de SVG + label */
   .tasf-airport-marker {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     pointer-events: auto;
     cursor: pointer;
+  }
+
+  .tasf-airport-aura {
+    position: absolute;
+    left: 50%;
+    top: 14px;
+    z-index: 0;
+    width: 46px;
+    height: 46px;
+    border-radius: 999px;
+    background: var(--tasf-airport-aura-color, #16a34a);
+    opacity: 0.22;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    filter: blur(4px);
+    box-shadow: 0 0 18px var(--tasf-airport-aura-color, #16a34a);
+  }
+
+  .tasf-airport-marker svg,
+  .tasf-airport-label,
+  .tasf-airport-pct {
+    position: relative;
+    z-index: 1;
   }
 
   .tasf-airport-label {

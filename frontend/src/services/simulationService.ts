@@ -5,14 +5,18 @@ import {
   RESULTADO_COLAPSO_MOCK,
 } from "@/services/sources2.0/simulationResults.mock";
 import { USE_MOCK_DATA } from "@/utils/constants";
+import { EMPTY_SHIPMENT_STATUS_COUNTS } from "@/utils/shipmentStatus";
 import type {
   HistorialSimulacion,
   ResultadoPeriodo,
   ResultadoColapso,
 } from "@/types/simulationResult.types";
 import type {
+  BackendBaggageItem,
   BackendEstadoSimulacion,
   BackendMapaSimulacionEstado,
+  BackendPageQuery,
+  BackendPagedResponse,
   BackendSolicitudEnvio,
 } from "@/types/backendSimulation.types";
 import axios from "axios";
@@ -212,6 +216,58 @@ export const listLiveSimulationShipments = async (
 
   const { data } = await api.get<BackendSolicitudEnvio[]>(
     `/simulacion/${idSimulacion}/envios`
+  );
+  return data;
+};
+
+const emptyPagedResponse = <T>(
+  size: number,
+  countsByStatus: Record<string, number> = EMPTY_SHIPMENT_STATUS_COUNTS
+): BackendPagedResponse<T> => ({
+  items: [],
+  page: 0,
+  size,
+  totalItems: 0,
+  totalPages: 0,
+  hasMore: false,
+  countsByStatus,
+  countsByDirection: {
+    todos: 0,
+    entrantes: 0,
+    salientes: 0,
+  },
+});
+
+export const listLiveSimulationShipmentsPage = async (
+  idSimulacion: number,
+  params: BackendPageQuery
+): Promise<BackendPagedResponse<BackendSolicitudEnvio>> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<BackendPagedResponse<BackendSolicitudEnvio>>(
+      emptyPagedResponse<BackendSolicitudEnvio>(params.size ?? 80)
+    );
+  }
+
+  const { data } = await api.get<BackendPagedResponse<BackendSolicitudEnvio>>(
+    `/simulacion/${idSimulacion}/envios/pagina`,
+    { params }
+  );
+  return data;
+};
+
+export const listLiveSimulationBaggagePage = async (
+  idSimulacion: number,
+  params: BackendPageQuery
+): Promise<BackendPagedResponse<BackendBaggageItem>> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<BackendPagedResponse<BackendBaggageItem>>(
+      emptyPagedResponse<BackendBaggageItem>(params.size ?? 100)
+    );
+  }
+
+  const { data } = await api.get<BackendPagedResponse<BackendBaggageItem>>(
+    `/simulacion/${idSimulacion}/maletas`,
+    { params }
   );
   return data;
 };

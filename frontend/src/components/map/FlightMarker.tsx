@@ -19,7 +19,7 @@ interface FlightMarkerProps {
   /**
    * Color del avion segun estado del semaforo del vuelo.
    * Si no se provee, se pinta en text-primary (oscuro), el patron por
-   * defecto sobre el mapa claro de CartoDB Positron.
+   * defecto sobre el mapa claro de Stamen Toner Lite.
    */
   estado?: EstadoSemaforo;
   selected?: boolean;

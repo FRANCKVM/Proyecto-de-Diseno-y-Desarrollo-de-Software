@@ -57,7 +57,7 @@ public class SolicitudEnvio {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "estado", nullable = false)
-    private EstadoEnvio estado = EstadoEnvio.INGRESADO;
+    private EstadoEnvio estado = EstadoEnvio.REGISTRADO;
 
     @Transient
     private List<AsignacionEnvioVista> asignaciones = new ArrayList<>();
@@ -75,7 +75,7 @@ public class SolicitudEnvio {
         this.destino = destino;
         this.contarBolsas = contarBolsas;
         this.diasTiempoMaximo = diasTiempoMaximo;
-        this.estado = EstadoEnvio.INGRESADO;
+        this.estado = EstadoEnvio.REGISTRADO;
     }
 
     public SolicitudEnvio(
@@ -98,7 +98,7 @@ public class SolicitudEnvio {
         this.destino = destino;
         this.contarBolsas = contarBolsas;
         this.diasTiempoMaximo = diasTiempoMaximo;
-        this.estado = EstadoEnvio.INGRESADO;
+        this.estado = EstadoEnvio.REGISTRADO;
     }
 
     public SolicitudEnvio(
@@ -123,7 +123,7 @@ public class SolicitudEnvio {
         this.destino = destino;
         this.contarBolsas = contarBolsas;
         this.diasTiempoMaximo = diasTiempoMaximo;
-        this.estado = EstadoEnvio.INGRESADO;
+        this.estado = EstadoEnvio.REGISTRADO;
     }
 
     public SolicitudEnvio(
@@ -149,7 +149,7 @@ public class SolicitudEnvio {
         this.destino = destino;
         this.contarBolsas = contarBolsas;
         this.diasTiempoMaximo = diasTiempoMaximo;
-        this.estado = estado != null ? estado : EstadoEnvio.INGRESADO;
+        this.estado = estado != null ? estado : EstadoEnvio.REGISTRADO;
     }
 
     public Integer getIdEnvio() {
@@ -237,11 +237,11 @@ public class SolicitudEnvio {
     }
 
     public EstadoEnvio getEstado() {
-        return estado;
+        return estado != null ? estado : EstadoEnvio.REGISTRADO;
     }
 
     public void setEstado(EstadoEnvio estado) {
-        this.estado = estado;
+        this.estado = estado != null ? estado : EstadoEnvio.REGISTRADO;
     }
 
     public List<AsignacionEnvioVista> getAsignaciones() {
@@ -277,7 +277,7 @@ public class SolicitudEnvio {
             this.idAsignacion = idAsignacion;
             this.ruta = ruta;
             this.cantidadBolsas = cantidadBolsas;
-            this.estado = estado;
+            this.estado = estado != null ? estado : EstadoEnvio.PLANIFICADO;
         }
 
         public Integer getIdAsignacion() {
@@ -305,11 +305,11 @@ public class SolicitudEnvio {
         }
 
         public EstadoEnvio getEstado() {
-            return estado;
+            return estado != null ? estado : EstadoEnvio.PLANIFICADO;
         }
 
         public void setEstado(EstadoEnvio estado) {
-            this.estado = estado;
+            this.estado = estado != null ? estado : EstadoEnvio.PLANIFICADO;
         }
     }
 

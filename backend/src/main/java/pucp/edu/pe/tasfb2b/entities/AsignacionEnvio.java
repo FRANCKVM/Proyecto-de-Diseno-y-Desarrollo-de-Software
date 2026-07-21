@@ -24,7 +24,7 @@ public class AsignacionEnvio {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "estado", nullable = false)
-    private EstadoEnvio estado = EstadoEnvio.EN_PROCESO;
+    private EstadoEnvio estado = EstadoEnvio.PLANIFICADO;
 
     public AsignacionEnvio() {
     }
@@ -38,7 +38,7 @@ public class AsignacionEnvio {
         this.envio = envio;
         this.ruta = ruta;
         this.cantidadBolsas = cantidadBolsas;
-        this.estado = estado != null ? estado : EstadoEnvio.EN_PROCESO;
+        this.estado = estado != null ? estado : EstadoEnvio.PLANIFICADO;
     }
 
     public Integer getIdAsignacion() {
@@ -74,10 +74,10 @@ public class AsignacionEnvio {
     }
 
     public EstadoEnvio getEstado() {
-        return estado;
+        return estado != null ? estado : EstadoEnvio.PLANIFICADO;
     }
 
     public void setEstado(EstadoEnvio estado) {
-        this.estado = estado;
+        this.estado = estado != null ? estado : EstadoEnvio.PLANIFICADO;
     }
 }

@@ -42,6 +42,10 @@ public class SeguimientoService {
             "^(?:ENV-)?(-?\\d+)$",
             Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern ENVIO_SIM_PATTERN = Pattern.compile(
+            "^ENV-SIM-(\\d+)$",
+            Pattern.CASE_INSENSITIVE
+    );
     private static final int TAMANO_BLOQUE_PAQUETES = 20;
 
     private final AsignacionEnvioRepository asignacionEnvioRepository;
@@ -287,11 +291,20 @@ public class SeguimientoService {
                         envio, vista.getRuta(), vista.getCantidadBolsas(), vista.getEstado()))
                 .toList()
                 : asignacionEnvioRepository.findByEnvio_IdEnvioOrderByIdAsignacionAsc(envio.getIdEnvio());
+        envio.setAsignaciones(asignaciones.stream()
+                .map(asignacion -> new SolicitudEnvio.AsignacionEnvioVista(
+                        asignacion.getIdAsignacion(),
+                        asignacion.getRuta(),
+                        asignacion.getCantidadBolsas(),
+                        asignacion.getEstado()
+                ))
+                .toList());
         Integer minutoReferencia = obtenerMinutoReferenciaEnvio(envio);
+        LocalDateTime fechaHoraReferencia = obtenerFechaHoraReferenciaEnvio(envio);
         boolean contextoFinalizado = contextoFinalizadoEnvio(envio);
         String estadoDetalle = determinarEstadoEnvioDetalle(
                 envio,
-                minutoReferencia,
+                fechaHoraReferencia,
                 contextoFinalizado
         );
         List<EnvioDetalleResponse.HitoRutaResponse> hitos = construirHitosRuta(
@@ -408,7 +421,7 @@ public class SeguimientoService {
                         estadoEscala
                 ));
             } else {
-                String estadoEntrega = estadoLogisticoService.estaEnvioEntregado(
+                String estadoEntrega = estadoLogisticoService.estaEnvioCompletado(
                         envio,
                         minutoReferencia,
                         contextoFinalizado
@@ -493,16 +506,17 @@ public class SeguimientoService {
             Integer minutoReferencia,
             boolean contextoFinalizado
     ) {
-        if (estadoLogisticoService.estaEnvioEntregado(
-                construirEnvioConRuta(envio, ruta),
-                minutoReferencia,
-                contextoFinalizado
-        )) {
+        SolicitudEnvio envioConRuta = construirEnvioConRuta(envio, ruta);
+        if (estadoLogisticoService.estaEnvioEntregado(envioConRuta, minutoReferencia, contextoFinalizado)) {
             return "Entregado";
         }
 
         if (ruta == null || ruta.getOcurrencias().isEmpty()) {
-            return "Planificado";
+            return "Registrado";
+        }
+
+        if (estadoLogisticoService.estaEnvioCompletado(envioConRuta, minutoReferencia, contextoFinalizado)) {
+            return "Completado";
         }
 
         int minuto = minutoReferencia != null ? minutoReferencia : Integer.MIN_VALUE;
@@ -545,6 +559,14 @@ public class SeguimientoService {
             return "Entregado";
         }
 
+        if ("completado".equals(estadoDetalle)) {
+            return "Listo para entrega";
+        }
+
+        if ("registrado".equals(estadoDetalle)) {
+            return "Pendiente de planificacion";
+        }
+
         double restanteDias = (envio.getDiasTiempoMaximo() != null ? envio.getDiasTiempoMaximo() : 0.0) - tiempoRuta;
         int horasTotales = (int) Math.round(Math.abs(restanteDias) * 24);
         int dias = horasTotales / 24;
@@ -575,25 +597,56 @@ public class SeguimientoService {
 
     private String determinarEstadoEnvioDetalle(
             SolicitudEnvio envio,
-            Integer minutoReferencia,
+            LocalDateTime referencia,
             boolean contextoFinalizado
     ) {
-        if (!estadoLogisticoService.tieneRutaAsignada(envio)) {
-            return "planificado";
+        EstadoEnvio estado = estadoLogisticoService.resolverEstadoEnvio(
+                envio,
+                referencia,
+                contextoFinalizado
+        );
+        if (estado == null) {
+            estado = envio != null ? envio.getEstado() : EstadoEnvio.REGISTRADO;
+        }
+        return switch (estado) {
+            case REGISTRADO -> "registrado";
+            case PLANIFICADO -> "planificado";
+            case EN_TRANSITO -> "en_transito";
+            case COMPLETADO -> "completado";
+            case ENTREGADO -> "entregado";
+        };
+    }
+
+    private LocalDateTime obtenerFechaHoraReferenciaEnvio(SolicitudEnvio envio) {
+        if (envio.getIdSimulacion() == null) {
+            return LocalDateTime.now(ZoneOffset.UTC);
         }
 
-        if (estadoLogisticoService.estaEnvioEntregado(envio, minutoReferencia, contextoFinalizado)) {
-            return "entregado";
+        try {
+            EstadoSimulacion estado = simulacionService.obtenerEstado(envio.getIdSimulacion());
+            LocalDateTime inicio = parsearFechaHoraUtc(estado.getFechaHoraInicioSimulacion());
+            if (inicio != null && estado.getPunteroConsumoMinutos() != null) {
+                return inicio.plusMinutes(Math.max(0, estado.getPunteroConsumoMinutos()));
+            }
+            return LocalDateTime.now(ZoneOffset.UTC);
+        } catch (IllegalArgumentException e) {
+            return LocalDateTime.now(ZoneOffset.UTC);
+        }
+    }
+
+    private LocalDateTime parsearFechaHoraUtc(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
         }
 
-        if (envio.getRuta().getOcurrencias().stream()
-                .anyMatch(o -> o.getEstado() == EstadoVueloOcurrencia.EN_VUELO)) {
-            return "en_transito";
+        String normalized = value.endsWith("Z")
+                ? value.substring(0, value.length() - 1)
+                : value;
+        try {
+            return LocalDateTime.parse(normalized, ISO_FORMATTER);
+        } catch (RuntimeException e) {
+            return null;
         }
-        return envio.getRuta().getOcurrencias().stream()
-                .anyMatch(o -> o.getEstado() == EstadoVueloOcurrencia.COMPLETADO)
-                ? "en_escala"
-                : "planificado";
     }
 
     private Integer obtenerMinutoReferenciaEnvio(SolicitudEnvio envio) {
@@ -651,7 +704,13 @@ public class SeguimientoService {
             throw new IllegalArgumentException("El codigo del envio es obligatorio.");
         }
 
-        Matcher matcher = ENVIO_PATTERN.matcher(codigo.trim());
+        String codigoNormalizado = codigo.trim();
+        Matcher simulationMatcher = ENVIO_SIM_PATTERN.matcher(codigoNormalizado);
+        if (simulationMatcher.find()) {
+            return -Integer.parseInt(simulationMatcher.group(1));
+        }
+
+        Matcher matcher = ENVIO_PATTERN.matcher(codigoNormalizado);
         if (matcher.find()) {
             return Integer.parseInt(matcher.group(1));
         }
@@ -664,6 +723,10 @@ public class SeguimientoService {
     }
 
     private String formatearCodigoEnvio(Integer idEnvio) {
+        if (idEnvio != null && idEnvio < 0) {
+            return "ENV-SIM-" + String.format("%03d", Math.abs(idEnvio));
+        }
+
         return "ENV-" + String.format("%03d", idEnvio);
     }
 

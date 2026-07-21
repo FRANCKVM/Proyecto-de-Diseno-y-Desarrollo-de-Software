@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pucp.edu.pe.tasfb2b.algorithms.ga.PlanificadorGenetico;
+import pucp.edu.pe.tasfb2b.controllers.dto.BaggageItemResponse;
+import pucp.edu.pe.tasfb2b.controllers.dto.PagedResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.entities.EstadoEnvio;
 import pucp.edu.pe.tasfb2b.entities.Grafo;
@@ -58,6 +60,7 @@ public class SimulacionService {
     private static final double TASA_MUTACION = 0.25;
     private static final int TAMANO_TORNEO = 3;
     private static final int ESCALAS_INTERMEDIAS_MAX = 4;
+    private static final int MINUTOS_ESPERA_MINIMA_ESCALA = 10;
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     private final SimulacionCargaService simulacionCargaService;
@@ -70,6 +73,8 @@ public class SimulacionService {
     private final ResultadosSimulacionService resultadosSimulacionService;
     private final ObjectMapper objectMapper;
     private final SimulationSseService simulationSseService;
+    private final EnvioListadoService envioListadoService;
+    private final EstadoLogisticoService estadoLogisticoService;
 
     private boolean simulacionActiva = false;
     private boolean procesandoBloque = false;
@@ -112,7 +117,9 @@ public class SimulacionService {
             VueloOcurrenciaService vueloOcurrenciaService,
             ResultadosSimulacionService resultadosSimulacionService,
             ObjectMapper objectMapper,
-            SimulationSseService simulationSseService
+            SimulationSseService simulationSseService,
+            EnvioListadoService envioListadoService,
+            EstadoLogisticoService estadoLogisticoService
     ) {
         this.simulacionCargaService = simulacionCargaService;
         this.simulacionEstadoService = simulacionEstadoService;
@@ -124,6 +131,8 @@ public class SimulacionService {
         this.resultadosSimulacionService = resultadosSimulacionService;
         this.objectMapper = objectMapper;
         this.simulationSseService = simulationSseService;
+        this.envioListadoService = envioListadoService;
+        this.estadoLogisticoService = estadoLogisticoService;
     }
 
     @PostConstruct
@@ -334,7 +343,53 @@ public class SimulacionService {
 
     public synchronized List<SolicitudEnvio> obtenerEnviosSimulacion(Integer idSimulacion) {
         validarSimulacionSolicitada(idSimulacion);
-        return List.copyOf(enviosSimuladosProcesados);
+        return obtenerEnviosSimuladosConEstadoActual();
+    }
+
+    public synchronized PagedResponse<SolicitudEnvio> obtenerEnviosSimulacionPaginados(
+            Integer idSimulacion,
+            int page,
+            int size,
+            String codigo,
+            String estado,
+            String aeropuerto,
+            String direccion,
+            Integer horasEntregados
+    ) {
+        validarSimulacionSolicitada(idSimulacion);
+        return envioListadoService.paginarEnvios(
+                obtenerEnviosSimuladosConEstadoActual(),
+                page,
+                size,
+                codigo,
+                estado,
+                aeropuerto,
+                direccion,
+                horasEntregados,
+                obtenerReferenciaListadoSimulacion()
+        );
+    }
+
+    public synchronized PagedResponse<BaggageItemResponse> obtenerMaletasSimulacionPaginadas(
+            Integer idSimulacion,
+            int page,
+            int size,
+            String codigo,
+            String estado,
+            String aeropuerto,
+            Integer horasEntregados
+    ) {
+        validarSimulacionSolicitada(idSimulacion);
+        return envioListadoService.paginarMaletas(
+                obtenerEnviosSimuladosConEstadoActual(),
+                page,
+                size,
+                codigo,
+                estado,
+                aeropuerto,
+                horasEntregados,
+                obtenerReferenciaListadoSimulacion()
+        );
     }
 
     public synchronized MapaSimulacionEstado obtenerMapaSimulacion(Integer idSimulacion) {
@@ -440,6 +495,22 @@ public class SimulacionService {
                 .toLocalDate();
     }
 
+    private LocalDateTime obtenerReferenciaListadoSimulacion() {
+        if (fechaHoraInicioSimulacion == null) {
+            return LocalDateTime.now(ZoneOffset.UTC);
+        }
+
+        return fechaHoraInicioSimulacion.plusMinutes(Math.max(0, obtenerMinutoReferenciaMapa()));
+    }
+
+    private List<SolicitudEnvio> obtenerEnviosSimuladosConEstadoActual() {
+        LocalDateTime referencia = obtenerReferenciaListadoSimulacion();
+        enviosSimuladosProcesados.forEach(envio -> envio.setEstado(
+                estadoLogisticoService.resolverEstadoEnvio(envio, referencia, false)
+        ));
+        return List.copyOf(enviosSimuladosProcesados);
+    }
+
     public synchronized VueloOcurrencia cancelarVueloSimulado(
             Integer idSimulacion,
             Long idOcurrencia
@@ -539,7 +610,7 @@ public class SimulacionService {
 
         solicitud.setIdEnvio(siguienteIdEnvioVolatil--);
         solicitud.setIdSimulacionVolatil(simulacionActual.getIdSimulacion());
-        solicitud.setEstado(EstadoEnvio.INGRESADO);
+        solicitud.setEstado(EstadoEnvio.REGISTRADO);
         SolicitudEnvio solicitudGuardada = solicitud;
         enviosSimuladosProcesados.add(solicitudGuardada);
         int minutoSolicitud = calcularMinutoSimulacion(solicitudGuardada, fechaHoraInicioSimulacion);
@@ -552,7 +623,7 @@ public class SimulacionService {
             return;
         }
 
-        solicitudGuardada.setEstado(EstadoEnvio.EN_PROCESO);
+        solicitudGuardada.setEstado(EstadoEnvio.PLANIFICADO);
 
         long inicioPlanificacion = System.nanoTime();
         Ruta mejorRutaSimulada = encontrarRutaSimuladaFactible(solicitudGuardada, minutoSolicitud);
@@ -581,7 +652,7 @@ public class SimulacionService {
         if (asignaciones.isEmpty()) {
             metricas.incrementarNoResueltasPorRutaVueloPlazo();
 
-            solicitudGuardada.setEstado(EstadoEnvio.INGRESADO);
+            solicitudGuardada.setEstado(EstadoEnvio.REGISTRADO);
             return;
         }
 
@@ -841,14 +912,12 @@ public class SimulacionService {
                     null,
                     rutaGuardada,
                     asignacion.bolsas(),
-                    EstadoEnvio.EN_PROCESO
+                    EstadoEnvio.PLANIFICADO
             ));
         }
 
         solicitud.setRuta(rutaPrincipal);
-        solicitud.setEstado(totalAsignado >= solicitud.getContarBolsas()
-                ? EstadoEnvio.EN_PROCESO
-                : EstadoEnvio.PARCIAL);
+        solicitud.setEstado(EstadoEnvio.PLANIFICADO);
         solicitud.setAsignaciones(vistas);
 
         return solicitud;
@@ -1199,7 +1268,8 @@ public class SimulacionService {
                 TASA_MUTACION,
                 TAMANO_TORNEO,
                 ESCALAS_INTERMEDIAS_MAX,
-                fechaHoraInicioSimulacion.plusMinutes(minutoInicio)
+                fechaHoraInicioSimulacion.plusMinutes(minutoInicio),
+                MINUTOS_ESPERA_MINIMA_ESCALA
         );
     }
 
@@ -1293,7 +1363,7 @@ public class SimulacionService {
                 .filter(candidato -> Objects.equals(candidato.getIdEnvio(), idEnvio))
                 .findFirst()
                 .orElse(null);
-        if (envio == null || envio.getEstado() == EstadoEnvio.COMPLETADO) {
+        if (envio == null || envio.getEstado() == EstadoEnvio.COMPLETADO || envio.getEstado() == EstadoEnvio.ENTREGADO) {
             return;
         }
 
@@ -1304,7 +1374,7 @@ public class SimulacionService {
         Aeropuerto origenSimulado = aeropuertosSimulados.get(envio.getOrigen().getCodigo());
         if (origenSimulado == null || !origenSimulado.tieneCapacidad(envio.getContarBolsas())) {
             envio.setRuta(null);
-            envio.setEstado(EstadoEnvio.INGRESADO);
+            envio.setEstado(EstadoEnvio.REGISTRADO);
             publicarCambiosPorReplanificacion(idEnvio, minutoReplanificacion);
             return;
         }
@@ -1331,7 +1401,7 @@ public class SimulacionService {
 
         if (asignaciones.isEmpty()) {
             envio.setRuta(null);
-            envio.setEstado(EstadoEnvio.INGRESADO);
+            envio.setEstado(EstadoEnvio.REGISTRADO);
             publicarCambiosPorReplanificacion(idEnvio, minutoReplanificacion);
             return;
         }

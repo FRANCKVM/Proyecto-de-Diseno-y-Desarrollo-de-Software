@@ -3,7 +3,6 @@ import {
   getCurrentLiveSimulationState,
   getLiveSimulationMap,
   getLiveSimulationState,
-  listLiveSimulationShipments,
   startLiveSimulation,
   stopLiveSimulation,
 } from "@/services/simulationService";
@@ -26,13 +25,10 @@ import type { TipoSimulacion } from "@/types/common.types";
 
 const STATE_POLL_INTERVAL_MS = 3000;
 const MAP_POLL_INTERVAL_MS = 6000;
-const SHIPMENTS_POLL_INTERVAL_MS = 12000;
 const FALLBACK_STATE_POLL_INTERVAL_MS = 5000;
 const FALLBACK_MAP_POLL_INTERVAL_MS = 10000;
-const FALLBACK_SHIPMENTS_POLL_INTERVAL_MS = 20000;
 const SSE_FALLBACK_DELAY_MS = 10000;
 const SSE_REFRESH_DEBOUNCE_MS = 700;
-const SSE_SHIPMENTS_REFRESH_THROTTLE_MS = 15000;
 const DEFAULT_SIMULATION_K = 1;
 
 const K_BY_TIPO = {
@@ -140,13 +136,11 @@ export const useLiveSimulation = (
     tipoSimulacion,
     estado,
     mapa,
-    envios,
     isRunning,
     setIdSimulacion,
     setTipoSimulacion,
     setEstado,
     setMapa,
-    setEnvios,
     setIsRunning,
     reset,
   } = useLiveSimulationStore();
@@ -154,14 +148,11 @@ export const useLiveSimulation = (
   const startedRef = useRef(false);
   const isFetchingStateRef = useRef(false);
   const isFetchingMapRef = useRef(false);
-  const isFetchingShipmentsRef = useRef(false);
-  const shipmentsRefreshTimerRef = useRef<number | null>(null);
   const stateRefreshTimerRef = useRef<number | null>(null);
-  const pendingShipmentsRefreshRef = useRef(false);
-  const lastShipmentsRefreshAtRef = useRef(0);
   const [isSseConnected, setIsSseConnected] = useState(false);
   const [sseFallbackActive, setSseFallbackActive] = useState(false);
   const [mapClockTickMs, setMapClockTickMs] = useState(() => Date.now());
+  const [shipmentsRefreshVersion, setShipmentsRefreshVersion] = useState(0);
 
   const attachState = (data: BackendEstadoSimulacion) => {
     if (data.idSimulacion === null) {
@@ -207,28 +198,12 @@ export const useLiveSimulation = (
     }
   }, [idSimulacion, setMapa]);
 
-  const fetchLiveShipments = useCallback(async () => {
-    if (idSimulacion === null || isFetchingShipmentsRef.current) {
-      return;
-    }
-    isFetchingShipmentsRef.current = true;
-
-    try {
-      const enviosActuales = await listLiveSimulationShipments(idSimulacion);
-      setEnvios(enviosActuales);
-      lastShipmentsRefreshAtRef.current = Date.now();
-    } finally {
-      isFetchingShipmentsRef.current = false;
-    }
-  }, [idSimulacion, setEnvios]);
-
   const fetchFullSnapshot = useCallback(async () => {
     await Promise.all([
       fetchLiveState(),
       fetchLiveMap(),
-      fetchLiveShipments(),
     ]);
-  }, [fetchLiveMap, fetchLiveShipments, fetchLiveState]);
+  }, [fetchLiveMap, fetchLiveState]);
 
   const scheduleStateRefresh = useCallback(() => {
     if (stateRefreshTimerRef.current !== null) {
@@ -241,54 +216,10 @@ export const useLiveSimulation = (
     }, SSE_REFRESH_DEBOUNCE_MS);
   }, [fetchLiveState]);
 
-  const scheduleShipmentsRefresh = useCallback(() => {
-    pendingShipmentsRefreshRef.current = true;
-
-    if (shipmentsRefreshTimerRef.current !== null) {
-      window.clearTimeout(shipmentsRefreshTimerRef.current);
-    }
-
-    const runScheduledRefresh = () => {
-      shipmentsRefreshTimerRef.current = null;
-
-      if (!pendingShipmentsRefreshRef.current) {
-        return;
-      }
-
-      if (isFetchingShipmentsRef.current) {
-        shipmentsRefreshTimerRef.current = window.setTimeout(
-          runScheduledRefresh,
-          SSE_REFRESH_DEBOUNCE_MS
-        );
-        return;
-      }
-
-      const elapsedMs = Date.now() - lastShipmentsRefreshAtRef.current;
-      if (elapsedMs < SSE_SHIPMENTS_REFRESH_THROTTLE_MS) {
-        shipmentsRefreshTimerRef.current = window.setTimeout(
-          runScheduledRefresh,
-          SSE_SHIPMENTS_REFRESH_THROTTLE_MS - elapsedMs
-        );
-        return;
-      }
-
-      pendingShipmentsRefreshRef.current = false;
-      void fetchLiveShipments();
-    };
-
-    shipmentsRefreshTimerRef.current = window.setTimeout(
-      runScheduledRefresh,
-      SSE_REFRESH_DEBOUNCE_MS
-    );
-  }, [fetchLiveShipments]);
-
   useEffect(() => {
     return () => {
       if (stateRefreshTimerRef.current !== null) {
         window.clearTimeout(stateRefreshTimerRef.current);
-      }
-      if (shipmentsRefreshTimerRef.current !== null) {
-        window.clearTimeout(shipmentsRefreshTimerRef.current);
       }
     };
   }, []);
@@ -446,14 +377,14 @@ export const useLiveSimulation = (
           return;
         case "shipment.updated":
         case "shipment.replanned":
-          scheduleShipmentsRefresh();
+          setShipmentsRefreshVersion((current) => current + 1);
           return;
         case "error":
           scheduleStateRefresh();
           return;
       }
     },
-    [scheduleShipmentsRefresh, scheduleStateRefresh, setMapa]
+    [scheduleStateRefresh, setMapa]
   );
 
   const handleSseConnectedChange = useCallback((connected: boolean) => {
@@ -516,9 +447,6 @@ export const useLiveSimulation = (
     const mapIntervalMs = isFallback
       ? FALLBACK_MAP_POLL_INTERVAL_MS
       : MAP_POLL_INTERVAL_MS;
-    const shipmentsIntervalMs = isFallback
-      ? FALLBACK_SHIPMENTS_POLL_INTERVAL_MS
-      : SHIPMENTS_POLL_INTERVAL_MS;
     const shouldPollHeavyData = effectivePollingMode === "full" || isFallback;
 
     const refreshVisibleData = () => {
@@ -530,7 +458,7 @@ export const useLiveSimulation = (
 
       if (shouldPollHeavyData) {
         void fetchLiveMap();
-        void fetchLiveShipments();
+        setShipmentsRefreshVersion((current) => current + 1);
       }
     };
 
@@ -547,12 +475,6 @@ export const useLiveSimulation = (
             void fetchLiveMap();
           }, mapIntervalMs)
         : null;
-    const shipmentsIntervalId =
-      shouldPollHeavyData
-        ? window.setInterval(() => {
-            void fetchLiveShipments();
-          }, shipmentsIntervalMs)
-        : null;
 
     const handleVisibilityChange = () => {
       refreshVisibleData();
@@ -565,15 +487,11 @@ export const useLiveSimulation = (
       if (mapIntervalId !== null) {
         window.clearInterval(mapIntervalId);
       }
-      if (shipmentsIntervalId !== null) {
-        window.clearInterval(shipmentsIntervalId);
-      }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [
     effectivePollingMode,
     fetchLiveMap,
-    fetchLiveShipments,
     fetchLiveState,
     idSimulacion,
     sseFallbackActive,
@@ -638,7 +556,8 @@ export const useLiveSimulation = (
     idSimulacion,
     estado,
     mapa,
-    envios,
+    envios: [],
+    shipmentsRefreshVersion,
     flights,
     occupancyByIcao,
     isRunning,

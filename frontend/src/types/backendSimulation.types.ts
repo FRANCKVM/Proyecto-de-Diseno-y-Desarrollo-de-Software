@@ -42,8 +42,15 @@ export interface BackendAsignacionEnvio {
   idAsignacion: number | null;
   ruta: BackendRuta | null;
   cantidadBolsas: number;
-  estado: "INGRESADO" | "PARCIAL" | "EN_PROCESO" | "COMPLETADO";
+  estado: BackendEstadoEnvio;
 }
+
+export type BackendEstadoEnvio =
+  | "REGISTRADO"
+  | "PLANIFICADO"
+  | "EN_TRANSITO"
+  | "COMPLETADO"
+  | "ENTREGADO";
 
 export interface BackendSolicitudEnvio {
   idEnvio: number | null;
@@ -57,8 +64,55 @@ export interface BackendSolicitudEnvio {
   destino: BackendAeropuerto;
   contarBolsas: number;
   diasTiempoMaximo: number;
-  estado: "INGRESADO" | "PARCIAL" | "EN_PROCESO" | "COMPLETADO";
+  estado: BackendEstadoEnvio;
   asignaciones?: BackendAsignacionEnvio[];
+}
+
+export type BackendListadoStatus =
+  | "registrados"
+  | "planificados"
+  | "en-transito"
+  | "completados"
+  | "entregados";
+
+export interface BackendPagedResponse<T> {
+  items: T[];
+  page: number;
+  size: number;
+  totalItems: number;
+  totalPages: number;
+  hasMore: boolean;
+  countsByStatus?: Record<string, number>;
+  countsByDirection?: Record<string, number>;
+}
+
+export interface BackendPageQuery {
+  page?: number;
+  size?: number;
+  codigo?: string;
+  estado?: string;
+  aeropuerto?: string;
+  direccion?: string;
+  horasEntregados?: number;
+}
+
+export interface BackendRouteSegment {
+  fromIcao: string;
+  toIcao: string;
+}
+
+export interface BackendBaggageItem {
+  id: string;
+  shipmentId: number | null;
+  shipmentCode: string;
+  shipmentApiCode: string | null;
+  bagIndex: number;
+  routeLabel: string;
+  routeSegments: BackendRouteSegment[];
+  assigned: boolean;
+  status: BackendListadoStatus;
+  originIcao: string;
+  destinationIcao: string;
 }
 
 export interface BackendEstadoSimulacion {
@@ -127,6 +181,18 @@ export interface BackendEstadoOperacion {
   enTransito: number;
   entregadas: number;
   cumplimiento: number;
+}
+
+export interface BackendOperacionHomeResumen {
+  vuelosActivos: number;
+  vuelosIntercontinentalesActivos: number;
+  enviosEnCurso: number;
+  maletasEnCurso: number;
+  enviosDentroDePlazo: number;
+  totalEnvios: number;
+  cumplimiento: number;
+  ocupacionPorAeropuerto: Record<string, number>;
+  actividadReciente: BackendSolicitudEnvio[];
 }
 
 export interface CreateOperationShipmentRequest {

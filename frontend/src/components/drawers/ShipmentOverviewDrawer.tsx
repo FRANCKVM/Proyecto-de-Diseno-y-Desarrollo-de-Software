@@ -1,39 +1,50 @@
-import { useState } from "react";
-import { Eye } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Eye, Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import Tag from "@/components/atoms/Tag";
 import { useDrawerStore } from "@/store/drawerStore";
 import {
   buildShipmentRouteSegments,
 } from "@/utils/shipmentFocus";
-import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import {
   formatShipmentDisplayCode,
   getShipmentApiIdentifier,
 } from "@/utils/shipmentCode";
+import { USE_MOCK_DATA } from "@/utils/constants";
+import {
+  DELIVERY_RELEASE_DELAY_MINUTES,
+  EMPTY_SHIPMENT_STATUS_COUNTS,
+  SHIPMENT_STATUS_BADGE_LABEL,
+  SHIPMENT_STATUS_LABEL,
+  SHIPMENT_STATUS_OPTIONS,
+  getShipmentStatusTagVariant,
+  getShipmentTimelineMinutes,
+  resolveShipmentListStatus,
+  type ShipmentViewMode,
+} from "@/utils/shipmentStatus";
+import { listOperationShipmentsPage } from "@/services/operationService";
+import { listLiveSimulationShipmentsPage } from "@/services/simulationService";
 import {
   formatUtcDateTime,
   formatUtcSimulationMinute,
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
-import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
+import type {
+  BackendPagedResponse,
+  BackendPageQuery,
+  BackendSolicitudEnvio,
+} from "@/types/backendSimulation.types";
 
 interface ShipmentOverviewDrawerProps {
   shipments: BackendSolicitudEnvio[];
   idSimulacion?: number | null;
   referenceMinute?: number | null;
   simulationStart?: string | null;
+  refreshKey?: number;
+  airportOptions?: string[];
 }
 
-type ShipmentStatus = "planificados" | "en-curso" | "entregados";
-type ShipmentViewMode = "todos" | "en-curso" | "entregados";
-
-const ESTADO_LABEL: Record<BackendSolicitudEnvio["estado"], string> = {
-  INGRESADO: "Ingresado",
-  PARCIAL: "Parcial",
-  EN_PROCESO: "En proceso",
-  COMPLETADO: "Completado",
-};
+const SHIPMENT_LIST_PAGE_SIZE = 80;
 
 const getCurrentUtcMinute = (): number => {
   const now = new Date();
@@ -50,49 +61,6 @@ const getUtcMinutesSinceShipmentDay = (
   }
 
   return Math.floor((Date.now() - shipmentDayMs) / 60_000);
-};
-
-const parseTimelineDateTimeMs = (value: string | null | undefined): number | null => {
-  return parseUtcDateTimeMs(value);
-};
-
-const getShipmentTimeline = (
-  shipment: BackendSolicitudEnvio,
-  simulationStart?: string | null
-): { firstDeparture: number | null; lastArrival: number | null } => {
-  const routeGroups = getShipmentRouteGroups(shipment);
-
-  if (routeGroups.length === 0) {
-    return { firstDeparture: null, lastArrival: null };
-  }
-
-  let firstDeparture: number | null = null;
-  let lastArrival: number | null = null;
-
-  for (const group of routeGroups) {
-    for (const occurrence of group.ruta?.ocurrencias ?? []) {
-      const baseMs = parseTimelineDateTimeMs(simulationStart)
-        ?? parseUtcDateTimeMs(`${shipment.fecha}T00:00:00`);
-      const departureMs = parseUtcDateTimeMs(occurrence.fechaHoraSalida);
-      const arrivalMs = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
-
-      if (baseMs === null || departureMs === null || arrivalMs === null) {
-        continue;
-      }
-
-      const departure = Math.round((departureMs - baseMs) / 60_000);
-      const arrival = Math.round((arrivalMs - baseMs) / 60_000);
-
-      firstDeparture =
-        firstDeparture === null
-          ? departure
-          : Math.min(firstDeparture, departure);
-      lastArrival =
-        lastArrival === null ? arrival : Math.max(lastArrival, arrival);
-    }
-  }
-
-  return { firstDeparture, lastArrival };
 };
 
 const getElapsedMinutes = (
@@ -131,40 +99,24 @@ const getFirstDepartureMinute = (
   shipment: BackendSolicitudEnvio,
   simulationStart?: string | null
 ): number | null => {
-  return getShipmentTimeline(shipment, simulationStart).firstDeparture;
+  return getShipmentTimelineMinutes(shipment, simulationStart).firstDeparture;
 };
 
 const getLastArrivalMinute = (
   shipment: BackendSolicitudEnvio,
   simulationStart?: string | null
 ): number | null => {
-  return getShipmentTimeline(shipment, simulationStart).lastArrival;
+  return getShipmentTimelineMinutes(shipment, simulationStart).lastArrival;
 };
 
-const resolveDerivedShipmentStatus = (
+const getDeliveredMinute = (
   shipment: BackendSolicitudEnvio,
-  referenceMinute: number,
   simulationStart?: string | null
-): ShipmentStatus => {
-  if (shipment.estado === "COMPLETADO") {
-    return "entregados";
-  }
-
-  const timeline = getShipmentTimeline(shipment, simulationStart);
-
-  if (timeline.lastArrival !== null && referenceMinute >= timeline.lastArrival) {
-    return "entregados";
-  }
-
-  if (
-    shipment.estado === "PARCIAL" ||
-    shipment.estado === "EN_PROCESO" ||
-    (timeline.firstDeparture !== null && referenceMinute >= timeline.firstDeparture)
-  ) {
-    return "en-curso";
-  }
-
-  return "planificados";
+): number | null => {
+  const lastArrival = getLastArrivalMinute(shipment, simulationStart);
+  return lastArrival !== null
+    ? lastArrival + DELIVERY_RELEASE_DELAY_MINUTES
+    : null;
 };
 
 const ShipmentOverviewDrawer = ({
@@ -172,6 +124,8 @@ const ShipmentOverviewDrawer = ({
   idSimulacion,
   referenceMinute,
   simulationStart,
+  refreshKey = 0,
+  airportOptions: airportOptionsProp = [],
 }: ShipmentOverviewDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
   const openShipment = useDrawerStore((s) => s.openShipment);
@@ -181,48 +135,212 @@ const ShipmentOverviewDrawer = ({
   const [mode, setMode] = useState<ShipmentViewMode>("todos");
   const [deliveredHours, setDeliveredHours] = useState(6);
   const [airportFilter, setAirportFilter] = useState("todos");
+  const [shipmentSearch, setShipmentSearch] = useState("");
+  const [visibleShipmentLimit, setVisibleShipmentLimit] = useState(
+    SHIPMENT_LIST_PAGE_SIZE
+  );
+  const [pagedShipments, setPagedShipments] =
+    useState<BackendPagedResponse<BackendSolicitudEnvio> | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const usesBackendPaging = !USE_MOCK_DATA;
   const getReferenceMinuteForShipment = (shipment: BackendSolicitudEnvio) =>
     referenceMinute ?? getUtcMinutesSinceShipmentDay(shipment);
 
-  const airportOptions = Array.from(
-    new Set(
-      shipments.map((shipment) => shipment.origen.codigo)
-    )
-  ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  const airportOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...airportOptionsProp,
+            ...shipments.map((shipment) => shipment.origen.codigo),
+          ]
+        )
+      ).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" })),
+    [airportOptionsProp, shipments]
+  );
 
   const shipmentStatus = (shipment: BackendSolicitudEnvio) =>
-    resolveDerivedShipmentStatus(
+    resolveShipmentListStatus(
       shipment,
       getReferenceMinuteForShipment(shipment),
       simulationStart
     );
-  const inProgressShipments = shipments.filter(
-    (shipment) => shipmentStatus(shipment) === "en-curso"
-  );
-  const deliveredShipments = shipments.filter((shipment) => {
-    if (shipmentStatus(shipment) !== "entregados") {
-      return false;
-    }
+  const registeredShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "registrados");
+  const inTransitShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "en-transito");
+  const plannedShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "planificados");
+  const completedShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => shipmentStatus(shipment) === "completados");
+  const deliveredShipments = usesBackendPaging
+    ? []
+    : shipments.filter((shipment) => {
+        if (shipmentStatus(shipment) !== "entregados") {
+          return false;
+        }
 
-    const elapsed = getElapsedMinutes(
-      getLastArrivalMinute(shipment, simulationStart),
-      getReferenceMinuteForShipment(shipment)
-    );
+        const elapsed = getElapsedMinutes(
+          getDeliveredMinute(shipment, simulationStart),
+          getReferenceMinuteForShipment(shipment)
+        );
 
-    return elapsed !== null && elapsed < deliveredHours * 60;
-  });
+        return elapsed !== null && elapsed < deliveredHours * 60;
+      });
   const visibleShipmentsByMode =
     mode === "todos"
       ? shipments
-      : mode === "en-curso"
-        ? inProgressShipments
+      : mode === "registrados"
+        ? registeredShipments
+      : mode === "planificados"
+        ? plannedShipments
+        : mode === "en-transito"
+        ? inTransitShipments
+        : mode === "completados"
+        ? completedShipments
         : deliveredShipments;
-  const visibleShipments =
-    airportFilter === "todos"
-      ? visibleShipmentsByMode
-      : visibleShipmentsByMode.filter(
-          (shipment) => shipment.origen.codigo === airportFilter
-        );
+  const normalizedShipmentSearch = shipmentSearch.trim().toLowerCase();
+  const visibleShipments = usesBackendPaging
+    ? []
+    : visibleShipmentsByMode.filter((shipment) => {
+    const matchesAirport =
+      airportFilter === "todos" || shipment.origen.codigo === airportFilter;
+    const matchesSearch =
+      normalizedShipmentSearch.length === 0 ||
+      getShipmentCodeLabel(shipment).toLowerCase().includes(normalizedShipmentSearch);
+
+    return matchesAirport && matchesSearch;
+  });
+  const localPagedShipments = visibleShipments.slice(0, visibleShipmentLimit);
+  const visiblePagedShipments = pagedShipments?.items ?? localPagedShipments;
+  const totalVisibleShipments = pagedShipments?.totalItems ?? visibleShipments.length;
+  const hiddenShipmentCount = Math.max(
+    0,
+    totalVisibleShipments - visiblePagedShipments.length
+  );
+  const statusCounts = pagedShipments?.countsByStatus;
+  const getStatusCount = (key: ShipmentViewMode, fallback: number) =>
+    statusCounts?.[key] ?? fallback;
+  const countShipmentsByStatus = (status: Exclude<ShipmentViewMode, "todos">) => {
+    switch (status) {
+      case "registrados":
+        return registeredShipments.length;
+      case "planificados":
+        return plannedShipments.length;
+      case "en-transito":
+        return inTransitShipments.length;
+      case "completados":
+        return completedShipments.length;
+      case "entregados":
+        return deliveredShipments.length;
+    }
+  };
+  const getShipmentTimeLabel = (
+    shipment: BackendSolicitudEnvio,
+    status: Exclude<ShipmentViewMode, "todos">
+  ) => {
+    if (status === "registrados") {
+      return "Sin ruta asignada";
+    }
+
+    if (status === "planificados") {
+      return `Salida: ${formatUtcSimulationMinute(
+        getFirstDepartureMinute(shipment, simulationStart),
+        simulationStart
+      )}`;
+    }
+
+    if (status === "en-transito") {
+      return `Llegada estimada: ${formatUtcSimulationMinute(
+        getLastArrivalMinute(shipment, simulationStart),
+        simulationStart
+      )}`;
+    }
+
+    if (status === "completados") {
+      return `Completado: ${formatUtcSimulationMinute(
+        getLastArrivalMinute(shipment, simulationStart),
+        simulationStart
+      )}`;
+    }
+
+    return `Entregado: ${formatUtcSimulationMinute(
+      getDeliveredMinute(shipment, simulationStart),
+      simulationStart
+    )}`;
+  };
+
+  useEffect(() => {
+    setVisibleShipmentLimit(SHIPMENT_LIST_PAGE_SIZE);
+  }, [airportFilter, deliveredHours, mode, shipmentSearch]);
+
+  useEffect(() => {
+    if (!usesBackendPaging) {
+      setPagedShipments(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const params: BackendPageQuery = {
+      page: 0,
+      size: visibleShipmentLimit,
+      codigo: shipmentSearch.trim() || undefined,
+      estado: mode,
+      aeropuerto: airportFilter,
+      direccion: airportFilter === "todos" ? undefined : "salientes",
+      horasEntregados: deliveredHours,
+    };
+
+    setIsPageLoading(true);
+    const request =
+      idSimulacion != null
+        ? listLiveSimulationShipmentsPage(idSimulacion, params)
+        : listOperationShipmentsPage(params);
+
+    request
+      .then((response) => {
+        if (!isCancelled) {
+          setPagedShipments(response);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setPagedShipments({
+            items: [],
+            page: 0,
+            size: visibleShipmentLimit,
+            totalItems: 0,
+            totalPages: 0,
+            hasMore: false,
+            countsByStatus: {
+              ...EMPTY_SHIPMENT_STATUS_COUNTS,
+            },
+          });
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsPageLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    airportFilter,
+    deliveredHours,
+    idSimulacion,
+    mode,
+    refreshKey,
+    shipmentSearch,
+    usesBackendPaging,
+    visibleShipmentLimit,
+  ]);
 
   const handleHoursChange = (value: string) => {
     const nextValue = Number(value);
@@ -251,41 +369,65 @@ const ShipmentOverviewDrawer = ({
   };
 
   return (
-    <DrawerBase title="Panel de envíos" onClose={close}>
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <button
-          type="button"
-          className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "todos"
-              ? "bg-primary border-primary text-text-inverse"
-              : "bg-card border-border text-text-primary hover:bg-field"
-          }`}
-          onClick={() => setMode("todos")}
+    <DrawerBase
+      title="Panel de envíos"
+      hideHeader
+      onClose={close}
+      footer={
+        <div className="flex items-center justify-between text-secondary text-text-primary">
+          <span>Envíos mostrados</span>
+          <span className="text-button text-text-primary">
+            {visiblePagedShipments.length}/{totalVisibleShipments}
+          </span>
+        </div>
+      }
+    >
+      <div className="mb-5">
+        <label
+          htmlFor="shipment-status-filter"
+          className="block text-label-sm text-text-primary mb-1"
         >
-          Todos ({shipments.length})
-        </button>
-        <button
-          type="button"
-          className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "en-curso"
-              ? "bg-primary border-primary text-text-inverse"
-              : "bg-card border-border text-text-primary hover:bg-field"
-          }`}
-          onClick={() => setMode("en-curso")}
+          Filtrar por estado
+        </label>
+        <select
+          id="shipment-status-filter"
+          value={mode}
+          onChange={(event) => setMode(event.target.value as ShipmentViewMode)}
+          className="w-full bg-field border border-border rounded-input px-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
         >
-          En curso ({inProgressShipments.length})
-        </button>
-        <button
-          type="button"
-          className={`px-3 py-2 rounded-input border text-button transition-colors ${
-            mode === "entregados"
-              ? "bg-primary border-primary text-text-inverse"
-              : "bg-card border-border text-text-primary hover:bg-field"
-          }`}
-          onClick={() => setMode("entregados")}
+          <option value="todos">
+            Todos ({getStatusCount("todos", shipments.length)})
+          </option>
+          {SHIPMENT_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {SHIPMENT_STATUS_LABEL[status]} ({getStatusCount(status, countShipmentsByStatus(status))})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mb-5">
+        <label
+          htmlFor="shipment-search"
+          className="block text-label-sm text-text-primary mb-1"
         >
-          Entregados ({deliveredShipments.length})
-        </button>
+          Buscar envío
+        </label>
+        <div className="relative">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary"
+            aria-hidden
+          />
+          <input
+            id="shipment-search"
+            type="search"
+            value={shipmentSearch}
+            onChange={(event) => setShipmentSearch(event.target.value)}
+            placeholder="Código de envío"
+            className="tasf-input-placeholder w-full bg-field border border-border rounded-input pl-9 pr-3 py-2 text-button text-text-primary focus:outline-none focus:border-primary"
+          />
+        </div>
       </div>
 
       {mode === "entregados" && (
@@ -330,33 +472,23 @@ const ShipmentOverviewDrawer = ({
         </select>
       </div>
 
-      {visibleShipments.length === 0 ? (
+      {isPageLoading && visiblePagedShipments.length === 0 ? (
+        <p className="text-body text-text-primary">
+          Cargando envíos...
+        </p>
+      ) : visiblePagedShipments.length === 0 ? (
         <p className="text-body text-text-primary">
           No hay envíos para esta vista.
         </p>
       ) : (
         <ul className="space-y-2">
-          {visibleShipments.map((shipment) => {
+          {visiblePagedShipments.map((shipment) => {
             const shipmentCode =
               shipment.idEnvio !== null
                 ? getShipmentApiIdentifier(shipment.idEnvio)
                 : null;
             const derivedStatus = shipmentStatus(shipment);
-            const timeLabel =
-              derivedStatus === "planificados"
-                ? `Salida: ${formatUtcSimulationMinute(
-                    getFirstDepartureMinute(shipment, simulationStart),
-                    simulationStart
-                  )}`
-                : derivedStatus === "en-curso"
-                  ? `Llegada estimada: ${formatUtcSimulationMinute(
-                      getLastArrivalMinute(shipment, simulationStart),
-                      simulationStart
-                    )}`
-                : `Entrega: ${formatUtcSimulationMinute(
-                    getLastArrivalMinute(shipment, simulationStart),
-                    simulationStart
-                  )}`;
+            const timeLabel = getShipmentTimeLabel(shipment, derivedStatus);
 
             return (
               <li
@@ -398,13 +530,9 @@ const ShipmentOverviewDrawer = ({
                     <Eye size={16} strokeWidth={2.2} aria-hidden />
                   </button>
                   <Tag
-                    variant={derivedStatus === "entregados" ? "normal" : "primary"}
+                    variant={getShipmentStatusTagVariant(derivedStatus)}
                   >
-                    {derivedStatus === "en-curso"
-                      ? "En curso"
-                      : derivedStatus === "entregados"
-                        ? "Completado"
-                        : ESTADO_LABEL[shipment.estado]}
+                    {SHIPMENT_STATUS_BADGE_LABEL[derivedStatus]}
                   </Tag>
                   <span className="text-secondary text-text-primary">
                     {shipment.contarBolsas} maletas
@@ -413,6 +541,21 @@ const ShipmentOverviewDrawer = ({
               </li>
             );
           })}
+          {hiddenShipmentCount > 0 && (
+            <li>
+              <button
+                type="button"
+                onClick={() =>
+                  setVisibleShipmentLimit((currentLimit) =>
+                    currentLimit + SHIPMENT_LIST_PAGE_SIZE
+                  )
+                }
+                className="mt-2 w-full rounded-input border border-border bg-field px-3 py-2 text-button text-primary hover:border-primary hover:bg-primary-soft transition-colors"
+              >
+                Mostrar más ({hiddenShipmentCount})
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </DrawerBase>

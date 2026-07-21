@@ -3,7 +3,10 @@ import L from "leaflet";
 import { Marker } from "react-leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { EstadoSemaforo } from "@/types/common.types";
-import { ESTADO_COLOR_HEX } from "@/utils/airportHelpers";
+import {
+  ALMACEN_VACIO_COLOR_HEX,
+  ESTADO_COLOR_HEX,
+} from "@/utils/airportHelpers";
 import { AIRPORT_MARKER, COLORS } from "@/styles/theme";
 
 interface AirportMarkerProps {
@@ -45,6 +48,7 @@ const buildIconHtml = (
 
   return `
     <div class="tasf-airport-marker" style="${selected ? "transform: scale(1.12);" : ""}">
+      <span class="tasf-airport-aura" style="--tasf-airport-aura-color:${color};"></span>
       <svg width="${totalSize}" height="${totalSize}" viewBox="0 0 ${totalSize} ${totalSize}" xmlns="http://www.w3.org/2000/svg">
         ${
           selected
@@ -79,7 +83,10 @@ const AirportMarker = ({
   selected = false,
   onClick,
 }: AirportMarkerProps) => {
-  const color = ESTADO_COLOR_HEX[estado];
+  const color =
+    ocupacion !== undefined && ocupacion <= 0
+      ? ALMACEN_VACIO_COLOR_HEX
+      : ESTADO_COLOR_HEX[estado];
 
   // Memoizamos el icono porque crear divIcon en cada render reinstancia
   // el DOM del marker y mata la performance con muchos aeropuertos.

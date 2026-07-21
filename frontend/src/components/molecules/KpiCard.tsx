@@ -7,7 +7,7 @@ interface KpiCardProps {
   dotVariant: StatusDotVariant;
   label: string;
   value: string | number;
-  /** Texto pequeno bajo el valor (ej: "3 continentes", "6 rutas inter"). */
+  /** Texto pequeno bajo el valor (ej: "3 continentes", "vuelos operativos"). */
   subtitulo?: string;
   /** Variante de color del valor numerico. */
   valueVariant?: KpiValueVariant;
