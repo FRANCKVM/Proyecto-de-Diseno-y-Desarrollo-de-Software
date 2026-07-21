@@ -278,7 +278,7 @@ const FlightDrawer = ({
 
   if (isLoading) {
     return (
-      <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
+      <DrawerBase eyebrow="Vuelo" title="Cargando" onClose={close}>
         <p className="text-body text-text-primary">Cargando información...</p>
       </DrawerBase>
     );
@@ -286,7 +286,7 @@ const FlightDrawer = ({
 
   if (notFound || !flight) {
     return (
-      <DrawerBase eyebrow="Vuelo" title={codigo} onClose={close}>
+      <DrawerBase eyebrow="Vuelo" title="Sin información" onClose={close}>
         <p className="text-body text-text-primary">
           No se encontró información para este vuelo.
         </p>
