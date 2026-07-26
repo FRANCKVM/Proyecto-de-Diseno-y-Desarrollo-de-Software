@@ -162,6 +162,7 @@ const DrawerHost = ({
           key="shipment-form"
           airports={airports}
           occupancyByIcao={occupancyByIcao}
+          refreshKey={shipmentsRefreshKey}
           onCreated={onShipmentCreated}
         />
       );

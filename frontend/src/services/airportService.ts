@@ -49,8 +49,15 @@ export const listAirports = async (): Promise<AirportWithCoords[]> => {
  * Endpoint: GET /aeropuertos/{icao}
  */
 export const getAirportByIcao = async (
-  icao: string
+  icao: string,
+  options?: { forceRefresh?: boolean }
 ): Promise<AirportWithCoords | null> => {
+  if (options?.forceRefresh) {
+    const airports = await fetchAllAirportsReferenceData();
+    useReferenceDataStore.getState().setAirports(airports);
+    return airports.find((airport) => airport.icao === icao) ?? null;
+  }
+
   const cachedAirport = getCachedAirportByIcao(icao);
   if (cachedAirport) {
     return cachedAirport;

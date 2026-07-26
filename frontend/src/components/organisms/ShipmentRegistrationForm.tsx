@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { MapPin } from "lucide-react";
 import { cn } from "@/utils/cn";
+import { getAirportByIcao } from "@/services/airportService";
 import { createOperationShipment } from "@/services/operationService";
 import { resolveBrowserOriginAirport } from "@/utils/browserOriginAirport";
 import type { AirportWithCoords } from "@/types/airport.types";
@@ -11,6 +12,7 @@ interface ShipmentRegistrationFormProps {
   occupancyByIcao?: Record<string, number>;
   onCreated?: () => Promise<void> | void;
   onCancel?: () => void;
+  refreshKey?: number;
   submitLabel?: string;
   className?: string;
 }
@@ -33,10 +35,13 @@ const ShipmentRegistrationForm = ({
   occupancyByIcao = {},
   onCreated,
   onCancel,
+  refreshKey = 0,
   submitLabel = "Registrar envio",
   className,
 }: ShipmentRegistrationFormProps) => {
   const [form, setForm] = useState<CreateOperationShipmentRequest>(INITIAL_FORM);
+  const [refreshedOrigin, setRefreshedOrigin] =
+    useState<AirportWithCoords | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -53,18 +58,34 @@ const ShipmentRegistrationForm = ({
     () => resolveBrowserOriginAirport(airportOptions),
     [airportOptions]
   );
-  const selectedOrigin = originResolution.airport;
+  const detectedOrigin = originResolution.airport;
+  const selectedOrigin =
+    refreshedOrigin && refreshedOrigin.icao === detectedOrigin?.icao
+      ? refreshedOrigin
+      : detectedOrigin;
   const selectedOriginIcao = selectedOrigin?.icao ?? "";
   const destinationOptions = useMemo(
     () => airportOptions.filter((airport) => airport.icao !== selectedOriginIcao),
     [airportOptions, selectedOriginIcao]
   );
   const originCapacity = selectedOrigin?.capacity ?? null;
-  const originOccupancy = selectedOriginIcao
+  const fallbackOriginOccupancy = selectedOriginIcao
     ? occupancyByIcao[selectedOriginIcao]
     : undefined;
   const originAvailableBags =
-    originCapacity !== null ? Math.max(0, Math.floor(originCapacity)) : null;
+    selectedOrigin?.availableCapacity !== undefined
+      ? Math.max(0, Math.floor(selectedOrigin.availableCapacity))
+      : originCapacity !== null
+        ? Math.max(0, Math.floor(originCapacity))
+        : null;
+  const originUsedBags =
+    originCapacity !== null && originAvailableBags !== null
+      ? Math.max(0, originCapacity - originAvailableBags)
+      : null;
+  const originOccupancy =
+    originCapacity !== null && originCapacity > 0 && originUsedBags !== null
+      ? (originUsedBags * 100) / originCapacity
+      : fallbackOriginOccupancy;
   const exceedsOriginCapacity =
     originAvailableBags !== null && form.contarBolsas > originAvailableBags;
   const capacityErrorMessage =
@@ -95,6 +116,25 @@ const ShipmentRegistrationForm = ({
       };
     });
   }, [selectedOriginIcao]);
+
+  useEffect(() => {
+    const originIcao = detectedOrigin?.icao;
+    if (!originIcao) {
+      setRefreshedOrigin(null);
+      return;
+    }
+
+    let cancelled = false;
+    void getAirportByIcao(originIcao, { forceRefresh: true }).then((airport) => {
+      if (!cancelled) {
+        setRefreshedOrigin(airport);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detectedOrigin?.icao, refreshKey]);
 
   useEffect(() => {
     if (!error && !success) {

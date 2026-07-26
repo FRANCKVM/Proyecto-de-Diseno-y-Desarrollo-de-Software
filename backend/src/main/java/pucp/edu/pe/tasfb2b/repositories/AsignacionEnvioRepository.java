@@ -82,4 +82,11 @@ public interface AsignacionEnvioRepository extends JpaRepository<AsignacionEnvio
             order by a.envio.idEnvio asc, a.idAsignacion asc
             """)
     List<AsignacionEnvio> findByOcurrenciaIds(@Param("idsOcurrencia") List<Long> idsOcurrencia);
+
+    @Query("""
+            select a.envio.origen.codigo, coalesce(sum(a.cantidadBolsas), 0)
+            from AsignacionEnvio a
+            group by a.envio.origen.codigo
+            """)
+    List<Object[]> sumarBolsasAsignadasPorOrigen();
 }

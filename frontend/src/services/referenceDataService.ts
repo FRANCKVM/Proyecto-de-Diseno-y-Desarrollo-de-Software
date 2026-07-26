@@ -17,6 +17,7 @@ const mapBackendAirport = (airport: BackendAeropuerto): AirportWithCoords => ({
   cityCode: airport.codigo,
   gmt: airport.desplazamientoGMT,
   capacity: airport.capacidad,
+  availableCapacity: airport.capacidadDisponible,
   latDMS: "",
   lngDMS: "",
   lat: airport.latitud ?? 0,

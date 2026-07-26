@@ -7,12 +7,14 @@ import type { AirportWithCoords } from "@/types/airport.types";
 interface ShipmentFormDrawerProps {
   airports: AirportWithCoords[];
   occupancyByIcao?: Record<string, number>;
+  refreshKey?: number;
   onCreated?: () => Promise<void> | void;
 }
 
 const ShipmentFormDrawer = ({
   airports,
   occupancyByIcao,
+  refreshKey = 0,
   onCreated,
 }: ShipmentFormDrawerProps) => {
   const close = useDrawerStore((s) => s.close);
@@ -33,6 +35,7 @@ const ShipmentFormDrawer = ({
           <ShipmentRegistrationForm
             airports={airports}
             occupancyByIcao={occupancyByIcao}
+            refreshKey={refreshKey}
             onCreated={async () => {
               await onCreated?.();
               close();

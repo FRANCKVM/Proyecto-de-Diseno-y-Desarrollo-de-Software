@@ -25,6 +25,8 @@ export interface Airport {
   gmt: number;
   /** Capacidad maxima del almacen, en numero de maletas. */
   capacity: number;
+  /** Capacidad disponible actual, cuando el backend la provee. */
+  availableCapacity?: number;
   /** Latitud en formato DMS (ej: "04° 42' 05\" N"). */
   latDMS: string;
   /** Longitud en formato DMS (ej: "74° 08' 49\" W"). */

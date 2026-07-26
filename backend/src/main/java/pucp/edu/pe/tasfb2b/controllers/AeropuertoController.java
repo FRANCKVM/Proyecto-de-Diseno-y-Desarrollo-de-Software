@@ -3,11 +3,15 @@ package pucp.edu.pe.tasfb2b.controllers;
 import org.springframework.http.ResponseEntity;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
+import pucp.edu.pe.tasfb2b.controllers.dto.AeropuertoResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
+import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
 import pucp.edu.pe.tasfb2b.services.SeguimientoService;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.time.LocalDate;
 
 @RestController
@@ -15,25 +19,34 @@ import java.time.LocalDate;
 public class AeropuertoController {
 
     private final AeropuertoRepository aeropuertoRepository;
+    private final AsignacionEnvioRepository asignacionEnvioRepository;
     private final SeguimientoService seguimientoService;
 
     public AeropuertoController(
             AeropuertoRepository aeropuertoRepository,
+            AsignacionEnvioRepository asignacionEnvioRepository,
             SeguimientoService seguimientoService
     ) {
         this.aeropuertoRepository = aeropuertoRepository;
+        this.asignacionEnvioRepository = asignacionEnvioRepository;
         this.seguimientoService = seguimientoService;
     }
 
     @GetMapping
-    public ResponseEntity<List<Aeropuerto>> listarAeropuertos() {
-        return ResponseEntity.ok(aeropuertoRepository.findAll());
+    public ResponseEntity<List<AeropuertoResponse>> listarAeropuertos() {
+        Map<String, Integer> bolsasAsignadasPorOrigen = obtenerBolsasAsignadasPorOrigen();
+        return ResponseEntity.ok(aeropuertoRepository.findAll().stream()
+                .map(aeropuerto -> mapearAeropuerto(aeropuerto, bolsasAsignadasPorOrigen))
+                .toList());
     }
 
     @GetMapping("/{codigo}")
     public ResponseEntity<?> obtenerAeropuerto(@PathVariable String codigo) {
+        Map<String, Integer> bolsasAsignadasPorOrigen = obtenerBolsasAsignadasPorOrigen();
         return aeropuertoRepository.findByCodigo(codigo)
-                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .<ResponseEntity<?>>map(aeropuerto -> ResponseEntity.ok(
+                        mapearAeropuerto(aeropuerto, bolsasAsignadasPorOrigen)
+                ))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
@@ -51,5 +64,40 @@ public class AeropuertoController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
+    }
+
+    private Map<String, Integer> obtenerBolsasAsignadasPorOrigen() {
+        return asignacionEnvioRepository.sumarBolsasAsignadasPorOrigen().stream()
+                .collect(Collectors.toMap(
+                        fila -> String.valueOf(fila[0]),
+                        fila -> fila[1] instanceof Number numero ? numero.intValue() : 0
+                ));
+    }
+
+    private AeropuertoResponse mapearAeropuerto(
+            Aeropuerto aeropuerto,
+            Map<String, Integer> bolsasAsignadasPorOrigen
+    ) {
+        int capacidadDisponible = aeropuerto.getCapacidad() != null
+                ? aeropuerto.getCapacidad()
+                : 0;
+        int bolsasAsignadas = bolsasAsignadasPorOrigen.getOrDefault(
+                aeropuerto.getCodigo(),
+                0
+        );
+        int capacidadTotal = capacidadDisponible + bolsasAsignadas;
+
+        return new AeropuertoResponse(
+                aeropuerto.getCodigo(),
+                aeropuerto.getCiudad(),
+                aeropuerto.getRegion(),
+                aeropuerto.getPais(),
+                aeropuerto.getAlias(),
+                aeropuerto.getDesplazamientoGMT(),
+                capacidadTotal,
+                capacidadDisponible,
+                aeropuerto.getLatitud(),
+                aeropuerto.getLongitud()
+        );
     }
 }

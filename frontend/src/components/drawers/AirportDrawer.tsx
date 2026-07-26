@@ -331,7 +331,12 @@ const AirportDrawer = ({
       }
 
       try {
-        const airportData = showLoading ? await getAirportByIcao(icao) : null;
+        const shouldRefreshAirport = idSimulacion == null && forceRefresh;
+        const airportData = showLoading || shouldRefreshAirport
+          ? await getAirportByIcao(icao, {
+              forceRefresh: shouldRefreshAirport,
+            })
+          : null;
         const flightsByDate = await Promise.all(
           flightQueryDates.map((date) =>
             listFlightsByAirport(icao, idSimulacion, {
@@ -376,7 +381,7 @@ const AirportDrawer = ({
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [flightQueryDates, icao, idSimulacion]);
+  }, [flightQueryDates, icao, idSimulacion, refreshKey]);
 
   useEffect(() => {
     setActiveView(showFlights ? "vuelos" : "envios");
@@ -460,9 +465,15 @@ const AirportDrawer = ({
   ]);
 
   const capacity = airport?.capacity ?? 300;
-  const ocupadas = ocupacion !== undefined
+  const availableCapacity = airport?.availableCapacity;
+  const ocupadas = idSimulacion == null && availableCapacity !== undefined
+    ? Math.max(0, capacity - availableCapacity)
+    : ocupacion !== undefined
     ? Math.round((ocupacion / 100) * capacity)
     : 0;
+  const occupancyPct = capacity > 0
+    ? (ocupadas * 100) / capacity
+    : ocupacion;
   const currentFlights = flights
     .filter((flight) =>
       isFlightRelevantAtReference(flight, simulationStart, referenceMinute)
@@ -655,7 +666,7 @@ const AirportDrawer = ({
         <InfoRow label="Zona horaria" value={`${airport.gmt >= 0 ? "+" : ""}${airport.gmt}`} />
         <InfoRow
           label="Ocupación"
-          value={ocupacion !== undefined ? `${Math.round(ocupacion)}%` : "No disponible"}
+          value={occupancyPct !== undefined ? `${Math.round(occupancyPct)}%` : "No disponible"}
         />
         <InfoRow label="Capacidad" value={`${ocupadas} / ${capacity} maletas`} />
       </section>

@@ -6,6 +6,7 @@ export interface BackendAeropuerto {
   alias: string | null;
   desplazamientoGMT: number;
   capacidad: number;
+  capacidadDisponible?: number;
   latitud: number | null;
   longitud: number | null;
 }
