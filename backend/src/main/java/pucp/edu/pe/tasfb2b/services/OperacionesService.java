@@ -5,6 +5,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.multipart.MultipartFile;
+import pucp.edu.pe.tasfb2b.controllers.dto.CargaEnviosOperacionResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.EstadoOperacionResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.BaggageItemResponse;
 import pucp.edu.pe.tasfb2b.controllers.dto.PagedResponse;
@@ -26,6 +28,9 @@ import pucp.edu.pe.tasfb2b.repositories.RutaRepository;
 import pucp.edu.pe.tasfb2b.repositories.SolicitudEnvioRepository;
 import pucp.edu.pe.tasfb2b.repositories.VueloRepository;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -324,6 +329,62 @@ public class OperacionesService {
         return envio;
     }
 
+    @Transactional
+    public CargaEnviosOperacionResponse cargarEnviosOperacionDesdeTxt(MultipartFile archivo) throws IOException {
+        if (archivo == null || archivo.isEmpty()) {
+            throw new IllegalArgumentException("Debe seleccionar un archivo TXT con envios.");
+        }
+
+        String nombreArchivo = archivo.getOriginalFilename();
+        if (nombreArchivo == null || nombreArchivo.isBlank()) {
+            throw new IllegalArgumentException("No se pudo obtener el nombre del archivo de envios.");
+        }
+
+        if (!nombreArchivo.toLowerCase().endsWith(".txt")) {
+            throw new IllegalArgumentException("El archivo debe tener extension .txt.");
+        }
+
+        Aeropuerto origen = obtenerOrigenDesdeNombreArchivo(nombreArchivo);
+        int totalLineas = 0;
+        int registradas = 0;
+        int omitidas = 0;
+        List<String> errores = new ArrayList<>();
+
+        String contenido = new String(archivo.getBytes(), StandardCharsets.UTF_8);
+        for (String lineaOriginal : contenido.lines().toList()) {
+            String linea = lineaOriginal.trim();
+            if (linea.isEmpty()) {
+                continue;
+            }
+
+            totalLineas++;
+
+            try {
+                SolicitudEnvio solicitud = parsearSolicitudOperacionTxt(linea, origen);
+                procesarSolicitudReal(solicitud);
+                registradas++;
+            } catch (DateTimeException | IllegalArgumentException e) {
+                omitidas++;
+                registrarErrorCargaTxt(errores, totalLineas, e.getMessage());
+            }
+        }
+
+        if (totalLineas == 0) {
+            throw new IllegalArgumentException("El archivo no contiene lineas de envios.");
+        }
+
+        if (registradas > 0) {
+            publicarOperacionActualizada("shipment.bulk-created");
+        }
+
+        return new CargaEnviosOperacionResponse(
+                totalLineas,
+                registradas,
+                omitidas,
+                errores
+        );
+    }
+
     @Transactional(readOnly = true)
     public EstadoOperacionResponse obtenerEstadoOperacion() {
         List<SolicitudEnvio> envios = obtenerEnviosOperacion();
@@ -538,6 +599,142 @@ public class OperacionesService {
         }
 
         return List.of(ruta);
+    }
+
+    private Aeropuerto obtenerOrigenDesdeNombreArchivo(String nombreArchivo) {
+        String[] partesNombre = nombreArchivo.split("_");
+
+        if (partesNombre.length < 3 || partesNombre[2].isBlank()) {
+            throw new IllegalArgumentException(
+                    "El nombre del archivo debe seguir el formato _envios_ICAO_.txt."
+            );
+        }
+
+        String codigoOrigen = partesNombre[2].trim().toUpperCase();
+        return aeropuertoRepository.findByCodigo(codigoOrigen)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "No existe aeropuerto origen en la BD: " + codigoOrigen
+                ));
+    }
+
+    private SolicitudEnvio parsearSolicitudOperacionTxt(String linea, Aeropuerto origen) {
+        String[] partes = linea.split("-");
+
+        if (partes.length < 7) {
+            throw new IllegalArgumentException("Formato incompleto.");
+        }
+
+        LocalDate fechaSolicitud = extraerFechaSolicitudTxt(partes);
+        LocalTime horaSolicitud = extraerHoraSolicitudTxt(partes);
+        LocalDateTime fechaHoraUtc = convertirFechaHoraLocalAUtc(fechaSolicitud, horaSolicitud, origen);
+        String codigoDestino = partes[4].trim().toUpperCase();
+        int cantidadMaletas = Integer.parseInt(partes[5].trim());
+        int idCliente = Integer.parseInt(partes[6].trim());
+
+        if (cantidadMaletas <= 0) {
+            throw new IllegalArgumentException("La cantidad de maletas debe ser mayor que 0.");
+        }
+
+        Aeropuerto destino = aeropuertoRepository.findByCodigo(codigoDestino)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "No existe aeropuerto destino en la BD: " + codigoDestino
+                ));
+
+        if (origen.equals(destino)) {
+            throw new IllegalArgumentException("El aeropuerto de origen debe ser distinto al destino.");
+        }
+
+        return new SolicitudEnvio(
+                null,
+                fechaHoraUtc.toLocalDate(),
+                fechaHoraUtc.toLocalTime(),
+                idCliente,
+                origen,
+                destino,
+                cantidadMaletas,
+                calcularPlazoMaximoDias(origen, destino)
+        );
+    }
+
+    private LocalDateTime convertirFechaHoraLocalAUtc(
+            LocalDate fechaLocal,
+            LocalTime horaLocal,
+            Aeropuerto aeropuerto
+    ) {
+        int desplazamientoHoras = aeropuerto != null && aeropuerto.getDesplazamientoGMT() != null
+                ? aeropuerto.getDesplazamientoGMT()
+                : 0;
+
+        return LocalDateTime.of(fechaLocal, horaLocal).minusHours(desplazamientoHoras);
+    }
+
+    private LocalTime extraerHoraSolicitudTxt(String[] partes) {
+        for (int i = 0; i < partes.length - 1; i++) {
+            String hora = partes[i].trim();
+            String minuto = partes[i + 1].trim();
+
+            if (hora.matches("\\d{2}") && minuto.matches("\\d{2}")) {
+                int horaInt = Integer.parseInt(hora);
+                int minutoInt = Integer.parseInt(minuto);
+
+                if (horaInt >= 0 && horaInt < 24 && minutoInt >= 0 && minutoInt < 60) {
+                    return LocalTime.of(horaInt, minutoInt);
+                }
+            }
+        }
+
+        for (String parte : partes) {
+            String valor = parte.trim();
+
+            if (valor.matches("\\d{2}:\\d{2}")) {
+                return LocalTime.parse(valor);
+            }
+        }
+
+        return LocalTime.of(0, 0);
+    }
+
+    private LocalDate extraerFechaSolicitudTxt(String[] partes) {
+        if (partes.length > 1) {
+            String valor = partes[1].trim();
+            if (valor.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                return LocalDate.parse(valor);
+            }
+
+            if (valor.matches("\\d{8}")) {
+                return parsearFechaCompacta(valor);
+            }
+        }
+
+        for (String parte : partes) {
+            String valor = parte.trim();
+
+            if (valor.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                return LocalDate.parse(valor);
+            }
+
+            if (valor.matches("\\d{8}")) {
+                return parsearFechaCompacta(valor);
+            }
+        }
+
+        return LocalDate.now(ZoneOffset.UTC);
+    }
+
+    private LocalDate parsearFechaCompacta(String valor) {
+        int anio = Integer.parseInt(valor.substring(0, 4));
+        int mes = Integer.parseInt(valor.substring(4, 6));
+        int dia = Integer.parseInt(valor.substring(6, 8));
+
+        return LocalDate.of(anio, mes, dia);
+    }
+
+    private void registrarErrorCargaTxt(List<String> errores, int linea, String mensaje) {
+        if (errores.size() >= 8) {
+            return;
+        }
+
+        errores.add("Linea " + linea + ": " + mensaje);
     }
 
     private List<SolicitudEnvio> normalizarSolicitudes(List<SolicitudEnvio> solicitudesEntrantes) {

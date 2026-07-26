@@ -9,7 +9,7 @@ import { useFlightSimulation } from "@/hooks/useFlightSimulation";
 import { useOperationData } from "@/hooks/useOperationData";
 import { useDrawerStore } from "@/store/drawerStore";
 import { USE_MOCK_DATA } from "@/utils/constants";
-import { formatStartDateTime } from "@/utils/simulationClock";
+import { formatOperationDateTimeWithYear } from "@/utils/contextDateTime";
 import {
   buildEmptyMapFlights,
   mergeMapFlights,
@@ -111,7 +111,7 @@ const OperacionDiaADiaPage = () => {
       <main className="flex-1 min-h-0 bg-map-bg relative">
         <TopBar
           variant="dia-a-dia"
-          fechaActual={formatStartDateTime(systemDate)}
+          fechaActual={formatOperationDateTimeWithYear(systemDate)}
           kpis={{
             enviosHoy: USE_MOCK_DATA ? 23 : estado?.enviosHoy ?? 0,
             ...capacityKpis,

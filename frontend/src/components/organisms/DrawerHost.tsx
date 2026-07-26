@@ -66,6 +66,7 @@ const DrawerHost = ({
           occupancyByIcao={occupancyByIcao}
           rangosSemaforo={rangosSemaforo}
           shipments={shipments}
+          idSimulacion={idSimulacion}
           referenceMinute={referenceMinute}
           simulationStart={simulationStart}
         />

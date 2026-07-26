@@ -7,8 +7,8 @@ import { getFlightByCode } from "@/services/flightService";
 import { getShipmentByCode } from "@/services/shipmentService";
 import { useDrawerStore } from "@/store/drawerStore";
 import { parseShipmentIdentifier } from "@/utils/shipmentCode";
+import { formatContextDateTimeWithYear } from "@/utils/contextDateTime";
 import {
-  formatUtcDateTimeWithYear,
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
 import type { EstadoVuelo, VueloDetalle } from "@/types/flight.types";
@@ -26,10 +26,13 @@ const PANEL_REFRESH_MS_SIMULATION = 3000;
 const PANEL_REFRESH_MS_OPERATION = 10000;
 
 /**
- * Formatea ISO 8601 a "DD/MM/YYYY HH:mm" en UTC.
+ * Formatea ISO 8601 segun el contexto: local en operacion, UTC en simulacion.
  */
-const formatFecha = (iso: string | null | undefined): string => {
-  return formatUtcDateTimeWithYear(iso, "Sin dato");
+const formatFecha = (
+  iso: string | null | undefined,
+  idSimulacion?: number | null
+): string => {
+  return formatContextDateTimeWithYear(iso, idSimulacion, "Sin dato");
 };
 
 const parseFlightDateMs = (iso: string | null | undefined): number => {
@@ -369,10 +372,13 @@ const FlightDrawer = ({
           label="Ocupación"
           value={`${flight.ocupacion} / ${flight.capacidad} (${formatPercent(ocupacionPct)})`}
         />
-        <InfoRow label="Fecha salida" value={formatFecha(flight.fechaSalida)} />
+        <InfoRow
+          label="Fecha salida"
+          value={formatFecha(flight.fechaSalida, idSimulacion)}
+        />
         <InfoRow
           label="Fecha llegada est."
-          value={formatFecha(flight.fechaLlegadaEstimada)}
+          value={formatFecha(flight.fechaLlegadaEstimada, idSimulacion)}
         />
         <InfoRow
           label="Tiempo restante"
@@ -387,7 +393,7 @@ const FlightDrawer = ({
           <TimelineStep
             color={isCancelled ? "neutral" : "success"}
             label={`Origen (${flight.origenIcao})`}
-            sublabel={`${formatFecha(flight.fechaSalida)} — Salida`}
+            sublabel={`${formatFecha(flight.fechaSalida, idSimulacion)} — Salida`}
             status={isCancelled ? "Cancelado" : "Completado"}
             statusColor={isCancelled ? "text-danger" : "text-success"}
           />
@@ -402,7 +408,10 @@ const FlightDrawer = ({
           <TimelineStep
             color={isCompleted ? "success" : "neutral"}
             label={`Destino (${flight.destinoIcao})`}
-            sublabel={`${formatFecha(flight.fechaLlegadaEstimada)} — Llegada est.`}
+            sublabel={`${formatFecha(
+              flight.fechaLlegadaEstimada,
+              idSimulacion
+            )} — Llegada est.`}
             status={isCompleted ? "Completado" : isCancelled ? "Cancelado" : "Pendiente"}
             statusColor={
               isCompleted

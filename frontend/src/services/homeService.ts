@@ -7,9 +7,9 @@ import type {
 } from "@/types/backendSimulation.types";
 import { getAssignedBags, getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import { resolveShipmentListStatus } from "@/utils/shipmentStatus";
+import { formatOperationDateTime } from "@/utils/contextDateTime";
 import {
   buildUtcDateTime,
-  formatUtcDateTime,
   pad2,
 } from "@/utils/utcDateTime";
 
@@ -68,12 +68,16 @@ const formatActivityTimestamp = (date: Date | null) => {
   }
 
   const now = new Date();
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const targetDay = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const targetDay = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate()
+  ).getTime();
   const diffDays = Math.round(
     (today - targetDay) / (1000 * 60 * 60 * 24)
   );
-  const hora = `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
+  const hora = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 
   if (diffDays === 0) {
     return `Hoy ${hora}`;
@@ -83,7 +87,7 @@ const formatActivityTimestamp = (date: Date | null) => {
     return `Ayer ${hora}`;
   }
 
-  return formatUtcDateTime(date).slice(0, 5);
+  return formatOperationDateTime(date).slice(0, 5);
 };
 
 const buildActivityMessage = (

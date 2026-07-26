@@ -9,6 +9,7 @@ import pucp.edu.pe.tasfb2b.entities.SolicitudEnvio;
 import pucp.edu.pe.tasfb2b.entities.VueloOcurrencia;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -588,7 +589,7 @@ public class EnvioListadoService {
     }
 
     private LocalDateTime normalizarReferencia(LocalDateTime referencia) {
-        return referencia != null ? referencia : LocalDateTime.now();
+        return referencia != null ? referencia : LocalDateTime.now(ZoneOffset.UTC);
     }
 
     private int calcularTotalPaginas(long total, int size) {

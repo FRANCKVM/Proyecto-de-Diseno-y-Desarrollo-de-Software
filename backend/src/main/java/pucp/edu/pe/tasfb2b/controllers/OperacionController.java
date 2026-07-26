@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import pucp.edu.pe.tasfb2b.controllers.dto.RegistrarOperacionEnvioRequest;
 import pucp.edu.pe.tasfb2b.services.OperationSseService;
 import pucp.edu.pe.tasfb2b.services.OperacionesService;
@@ -96,6 +97,26 @@ public class OperacionController {
             );
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping(
+            value = "/envios/txt",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<?> cargarEnviosTxt(@RequestParam("archivo") MultipartFile archivo) {
+        try {
+            return ResponseEntity.ok(operacionesService.cargarEnviosOperacionDesdeTxt(archivo));
+        } catch (ObjectOptimisticLockingFailureException e) {
+            return ResponseEntity.status(409).body(
+                    "La capacidad de uno de los vuelos cambio mientras se cargaba el archivo. Intente nuevamente."
+            );
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError()
+                    .body("Error al cargar el archivo de envios");
         }
     }
 

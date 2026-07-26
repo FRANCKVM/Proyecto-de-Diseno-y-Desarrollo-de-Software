@@ -11,6 +11,7 @@ import type {
   BackendPageQuery,
   BackendPagedResponse,
   BackendSolicitudEnvio,
+  OperationShipmentTxtUploadResponse,
 } from "@/types/backendSimulation.types";
 
 export const getOperationState = async (): Promise<BackendEstadoOperacion | null> => {
@@ -164,6 +165,42 @@ export const createOperationShipment = async (
       error?.response?.data && typeof error.response.data === "string"
         ? error.response.data
         : "No se pudo registrar el envio.";
+    throw new Error(message);
+  }
+};
+
+export const uploadOperationShipmentsTxt = async (
+  file: File
+): Promise<OperationShipmentTxtUploadResponse> => {
+  if (USE_MOCK_DATA) {
+    return mockResolve<OperationShipmentTxtUploadResponse>({
+      totalLineas: 12,
+      enviosRegistrados: 12,
+      lineasOmitidas: 0,
+      errores: [],
+    });
+  }
+
+  const formData = new FormData();
+  formData.append("archivo", file);
+
+  try {
+    const { data } = await api.post<OperationShipmentTxtUploadResponse>(
+      "/operacion/envios/txt",
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+        timeout: 120_000,
+      }
+    );
+    return data;
+  } catch (error: any) {
+    const message =
+      error?.response?.data && typeof error.response.data === "string"
+        ? error.response.data
+        : "No se pudo cargar el archivo de envios.";
     throw new Error(message);
   }
 };

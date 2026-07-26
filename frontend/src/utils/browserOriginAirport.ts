@@ -7,6 +7,7 @@ const TIMEZONE_TO_AIRPORT_ICAO: Record<string, string> = {
   "America/Argentina/Buenos_Aires": "SABE",
   "America/Buenos_Aires": "SABE",
   "Europe/Copenhagen": "EKCH",
+  "Europe/Paris": "EKCH",
 };
 
 export interface BrowserOriginAirportResolution {

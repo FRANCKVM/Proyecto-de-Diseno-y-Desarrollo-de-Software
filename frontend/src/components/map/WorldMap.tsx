@@ -11,7 +11,15 @@ import {
   TileLayer,
   useMap,
 } from "react-leaflet";
-import { Layers, Route, RouteOff } from "lucide-react";
+import {
+  Crosshair,
+  Layers,
+  Plane,
+  Route,
+  RouteOff,
+  Warehouse,
+  type LucideIcon,
+} from "lucide-react";
 import L from "leaflet";
 import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import type { AirportWithCoords } from "@/types/airport.types";
@@ -20,9 +28,11 @@ import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { cn } from "@/utils/cn";
 import {
-  UMBRAL_SEMAFORO_AMBAR_DEFAULT,
-  UMBRAL_SEMAFORO_VERDE_DEFAULT,
-} from "@/utils/constants";
+  useDrawerStore,
+  type ActiveFlightSemaphoreFilter,
+  type SemaphoreFilterValue,
+  type WarehouseSemaphoreFilter,
+} from "@/store/drawerStore";
 import { COLORS } from "@/styles/theme";
 import AirportMarker from "@/components/map/AirportMarker";
 import FlightMarker from "@/components/map/FlightMarker";
@@ -54,14 +64,12 @@ export interface MapFlightCancellationEvent {
   flightCode?: string | null;
 }
 
-type ActiveFlightSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 type ActiveFlightStatusFilter =
   | "todos"
   | "programado"
   | "en_vuelo"
   | "completado"
   | "cancelado";
-type WarehouseSemaphoreFilter = "todos" | "vacios" | EstadoSemaforo;
 
 interface WorldMapProps {
   airports: AirportWithCoords[];
@@ -187,6 +195,7 @@ const CANCELLATION_ALERT_DURATION_MS = 4_800;
 const SEEN_CANCELLATION_STORAGE_KEY = "tasf-seen-cancellation-alert-ids";
 const MAX_STORED_CANCELLATION_IDS = 500;
 const LEGEND_MARGIN = 0;
+const EMPTY_SEMAPHORE_FILTER: SemaphoreFilterValue[] = [];
 
 const normalizeMapFlightId = (value: string | null | undefined): string | null => {
   if (value === null || value === undefined) {
@@ -240,53 +249,128 @@ const persistSeenCancellationIds = (ids: Set<string>) => {
   }
 };
 
-const clampPercent = (value: number): number =>
-  Math.max(0, Math.min(100, Math.round(value)));
+const SEMAPHORE_FILTER_OPTIONS: Array<{
+  value: SemaphoreFilterValue;
+  label: string;
+  className: string;
+  activeClassName: string;
+}> = [
+  {
+    value: "vacios",
+    label: "Vacios",
+    className: "border-[#4b5563] bg-[#6B7280] hover:ring-2 hover:ring-[#6B7280]/30",
+    activeClassName:
+      "border-[#374151] bg-[#6B7280] shadow-card ring-2 ring-primary ring-offset-2 ring-offset-card scale-105",
+  },
+  {
+    value: "normal",
+    label: "Verde",
+    className: "border-[#16a34a] bg-success hover:ring-2 hover:ring-success/30",
+    activeClassName:
+      "border-[#15803d] bg-success shadow-card ring-2 ring-primary ring-offset-2 ring-offset-card scale-105",
+  },
+  {
+    value: "elevado",
+    label: "Ambar",
+    className: "border-[#f59e0b] bg-warning hover:ring-2 hover:ring-warning/30",
+    activeClassName:
+      "border-[#d97706] bg-warning shadow-card ring-2 ring-primary ring-offset-2 ring-offset-card scale-105",
+  },
+  {
+    value: "critico",
+    label: "Rojo",
+    className: "border-[#ef4444] bg-danger hover:ring-2 hover:ring-danger/30",
+    activeClassName:
+      "border-[#dc2626] bg-danger shadow-card ring-2 ring-primary ring-offset-2 ring-offset-card scale-105",
+  },
+];
 
-const buildSemaphoreLegendItems = (rangosSemaforo?: RangoSemaforo) => {
-  const verde = clampPercent(
-    rangosSemaforo?.verde ?? UMBRAL_SEMAFORO_VERDE_DEFAULT
-  );
-  const ambar = clampPercent(
-    Math.max(
-      verde,
-      rangosSemaforo?.ambar ?? UMBRAL_SEMAFORO_AMBAR_DEFAULT
-    )
+const matchesSemaphoreSelection = (
+  filters: SemaphoreFilterValue[],
+  occupancy: number | undefined,
+  estado: EstadoSemaforo | null
+): boolean =>
+  filters.length === 0 ||
+  filters.some((filter) =>
+    filter === "vacios"
+      ? occupancy === 0
+      : occupancy !== undefined && occupancy > 0 && estado === filter
   );
 
-  return [
-    {
-      key: "vacios",
-      label: "Vacios",
-      range: "0%",
-      colorClass: "bg-[#6B7280]",
-    },
-    {
-      key: "normal",
-      label: "Verde",
-      range: `>0 - ${verde}%`,
-      colorClass: "bg-success",
-    },
-    {
-      key: "elevado",
-      label: "Ambar",
-      range: `${verde} - ${ambar}%`,
-      colorClass: "bg-warning",
-    },
-    {
-      key: "critico",
-      label: "Rojo",
-      range: `${ambar} - 100%`,
-      colorClass: "bg-danger",
-    },
-  ];
+const fitMapToOverview = (
+  map: L.Map,
+  positions: LatLngExpression[],
+  animate: boolean
+) => {
+  map.invalidateSize();
+
+  if (positions.length === 0) {
+    map.setView(INITIAL_CENTER, INITIAL_ZOOM, { animate });
+    return;
+  }
+
+  if (positions.length === 1) {
+    map.setView(positions[0], OVERVIEW_MAX_ZOOM, { animate });
+    return;
+  }
+
+  const bounds = L.latLngBounds(positions);
+  if (!bounds.isValid()) {
+    map.setView(INITIAL_CENTER, INITIAL_ZOOM, { animate });
+    return;
+  }
+
+  map.fitBounds(bounds, {
+    animate,
+    maxZoom: OVERVIEW_MAX_ZOOM,
+    padding: OVERVIEW_PADDING,
+  });
 };
 
-const SemaphoreLegendCard = ({
-  rangosSemaforo,
+const SemaphoreFilterGroup = ({
+  title,
+  Icon,
+  value,
+  onChange,
 }: {
-  rangosSemaforo?: RangoSemaforo;
-}) => {
+  title: string;
+  Icon: LucideIcon;
+  value: SemaphoreFilterValue[];
+  onChange: (value: SemaphoreFilterValue[]) => void;
+}) => (
+  <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" role="group" aria-label={`Filtrar ${title} por semaforo`}>
+      {SEMAPHORE_FILTER_OPTIONS.map((option) => {
+        const isSelected = value.includes(option.value);
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-label={`${title}: ${option.label}`}
+            aria-pressed={isSelected}
+            title={`${title}: ${option.label}`}
+            onClick={() =>
+              onChange(
+                isSelected
+                  ? value.filter((filter) => filter !== option.value)
+                  : [...value, option.value]
+              )
+            }
+            className={cn(
+              "inline-flex h-8 w-8 items-center justify-center rounded-full border-2 p-0 text-white transition-all duration-150 focus-visible:outline-primary",
+              isSelected ? option.activeClassName : option.className
+            )}
+          >
+            <Icon size={14} strokeWidth={2.4} aria-hidden />
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
+const MapSemaphoreFilterCard = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef({
@@ -297,9 +381,17 @@ const SemaphoreLegendCard = ({
   const [position, setPosition] = useState<{ left: number; top: number } | null>(
     null
   );
-  const items = useMemo(
-    () => buildSemaphoreLegendItems(rangosSemaforo),
-    [rangosSemaforo]
+  const warehouseSemaphoreFilter = useDrawerStore(
+    (s) => s.warehouseSemaphoreFilter
+  );
+  const setWarehouseSemaphoreFilter = useDrawerStore(
+    (s) => s.setWarehouseSemaphoreFilter
+  );
+  const activeFlightSemaphoreFilter = useDrawerStore(
+    (s) => s.activeFlightSemaphoreFilter
+  );
+  const setActiveFlightSemaphoreFilter = useDrawerStore(
+    (s) => s.setActiveFlightSemaphoreFilter
   );
 
   useEffect(() => {
@@ -336,6 +428,11 @@ const SemaphoreLegendCard = ({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button")) {
+      event.stopPropagation();
+      return;
+    }
+
     const container = containerRef.current;
     const card = cardRef.current;
     if (!container || !card) {
@@ -410,21 +507,19 @@ const SemaphoreLegendCard = ({
         onPointerCancel={handlePointerUp}
       >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <p className="shrink-0 text-label-sm text-text-primary">Semaforo</p>
-          {items.map((item) => (
-            <div key={item.key} className="flex items-center gap-1.5 whitespace-nowrap">
-              <span
-                className={`h-3.5 w-3.5 rounded-full ${item.colorClass}`}
-                aria-hidden
-              />
-              <span className="text-secondary text-text-primary">
-                {item.label}
-              </span>
-              <span className="text-secondary text-text-primary">
-                {item.range}
-              </span>
-            </div>
-          ))}
+          <SemaphoreFilterGroup
+            title="Almacenes"
+            Icon={Warehouse}
+            value={warehouseSemaphoreFilter}
+            onChange={setWarehouseSemaphoreFilter}
+          />
+          <span className="hidden h-7 w-px bg-border sm:block" aria-hidden />
+          <SemaphoreFilterGroup
+            title="Vuelos"
+            Icon={Plane}
+            value={activeFlightSemaphoreFilter}
+            onChange={setActiveFlightSemaphoreFilter}
+          />
         </div>
       </div>
     </div>
@@ -550,6 +645,43 @@ const MapTileStyleSelector = ({
   );
 };
 
+const MapResetViewButton = ({
+  positions,
+}: {
+  positions: LatLngExpression[];
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const map = useMap();
+  const title = "Centrar vista del mapa";
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-auto absolute bottom-4 left-[7.5rem] z-[950]"
+    >
+      <button
+        type="button"
+        onClick={() => fitMapToOverview(map, positions, true)}
+        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card/95 text-text-primary shadow-card backdrop-blur-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        aria-label={title}
+        title={title}
+      >
+        <Crosshair size={20} strokeWidth={2.2} aria-hidden />
+      </button>
+    </div>
+  );
+};
+
 const MapFocusController = ({
   airport,
   flight,
@@ -636,28 +768,7 @@ const MapAutoFitController = ({
 
     isAutoFittingRef.current = true;
     hasAutoFitRef.current = true;
-    map.invalidateSize();
-
-    if (positions.length === 1) {
-      map.setView(positions[0], OVERVIEW_MAX_ZOOM, { animate: false });
-      window.setTimeout(() => {
-        isAutoFittingRef.current = false;
-      }, 0);
-      return;
-    }
-
-    const bounds = L.latLngBounds(positions);
-    if (!bounds.isValid()) {
-      isAutoFittingRef.current = false;
-      hasAutoFitRef.current = false;
-      return;
-    }
-
-    map.fitBounds(bounds, {
-      animate: false,
-      maxZoom: OVERVIEW_MAX_ZOOM,
-      padding: OVERVIEW_PADDING,
-    });
+    fitMapToOverview(map, positions, false);
 
     window.setTimeout(() => {
       isAutoFittingRef.current = false;
@@ -690,9 +801,9 @@ const WorldMap = ({
   focusedAirportIcao,
   focusedFlightId,
   warehouseRegionFilter = "todos",
-  warehouseSemaphoreFilter = "todos",
+  warehouseSemaphoreFilter = EMPTY_SEMAPHORE_FILTER,
   activeFlightRegionFilter = "todos",
-  activeFlightSemaphoreFilter = "todos",
+  activeFlightSemaphoreFilter = EMPTY_SEMAPHORE_FILTER,
   activeFlightAirportFilter = "todos",
   activeFlightStatusFilter = "todos",
   activeFlightSearchFilter = "",
@@ -811,11 +922,10 @@ const WorldMap = ({
         ? airports.filter((airport) => {
             const occupancy = occupancyByIcao[airport.icao] ?? 0;
             const estado = getEstadoSemaforo(occupancy, rangosSemaforo);
-            return (
-              warehouseSemaphoreFilter === "todos" ||
-              (warehouseSemaphoreFilter === "vacios"
-                ? occupancy === 0
-                : occupancy > 0 && estado === warehouseSemaphoreFilter)
+            return matchesSemaphoreSelection(
+              warehouseSemaphoreFilter,
+              occupancy,
+              estado
             );
           })
         : airports.filter((airport) => {
@@ -823,11 +933,11 @@ const WorldMap = ({
             const estado = getEstadoSemaforo(occupancy, rangosSemaforo);
             const matchesRegion =
               airport.region?.trim() === warehouseRegionFilter;
-            const matchesSemaphore =
-              warehouseSemaphoreFilter === "todos" ||
-              (warehouseSemaphoreFilter === "vacios"
-                ? occupancy === 0
-                : occupancy > 0 && estado === warehouseSemaphoreFilter);
+            const matchesSemaphore = matchesSemaphoreSelection(
+              warehouseSemaphoreFilter,
+              occupancy,
+              estado
+            );
 
             return matchesRegion && matchesSemaphore;
           });
@@ -910,13 +1020,11 @@ const WorldMap = ({
       activeFlightRegionFilter === "todos" ||
       from?.region?.trim() === activeFlightRegionFilter ||
       to?.region?.trim() === activeFlightRegionFilter;
-    const matchesSemaphore =
-      activeFlightSemaphoreFilter === "todos" ||
-      (activeFlightSemaphoreFilter === "vacios"
-        ? occupancy === 0
-        : occupancy !== undefined &&
-          occupancy > 0 &&
-          estado === activeFlightSemaphoreFilter);
+    const matchesSemaphore = matchesSemaphoreSelection(
+      activeFlightSemaphoreFilter,
+      occupancy,
+      estado
+    );
     const matchesAirport =
       activeFlightAirportFilter === "todos" ||
       flight.fromIcao === activeFlightAirportFilter ||
@@ -1101,7 +1209,8 @@ const WorldMap = ({
         selectedStyle={selectedMapStyle}
         onSelect={setSelectedMapStyle}
       />
-      <SemaphoreLegendCard rangosSemaforo={rangosSemaforo} />
+      <MapResetViewButton positions={overviewPositions} />
+      <MapSemaphoreFilterCard />
     </LeafletMap>
   );
 };

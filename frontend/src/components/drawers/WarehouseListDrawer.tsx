@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { Eye, Search, X } from "lucide-react";
+import { Eye, Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
-import {
-  useDrawerStore,
-  type WarehouseSemaphoreFilter,
-} from "@/store/drawerStore";
+import { useDrawerStore } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
 import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import { cn } from "@/utils/cn";
 import {
-  formatUtcSimulationMinute,
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
+import {
+  formatContextDateTime,
+  formatContextSimulationMinute,
+  getCurrentOperationMinuteOfDay,
+  getOperationMinuteOfDay,
+} from "@/utils/contextDateTime";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { BackendSolicitudEnvio } from "@/types/backendSimulation.types";
 import type { EstadoSemaforo, RangoSemaforo } from "@/types/common.types";
@@ -21,6 +23,7 @@ interface WarehouseListDrawerProps {
   occupancyByIcao?: Record<string, number>;
   rangosSemaforo?: RangoSemaforo;
   shipments?: BackendSolicitudEnvio[];
+  idSimulacion?: number | null;
   referenceMinute?: number | null;
   simulationStart?: string | null;
 }
@@ -37,44 +40,7 @@ const SEMAPHORE_TEXT_CLASS: Record<EstadoSemaforo, string> = {
   critico: "text-danger",
 };
 
-const SEMAPHORE_FILTER_OPTIONS: Array<{
-  value: Exclude<WarehouseSemaphoreFilter, "todos">;
-  label: string;
-  className: string;
-  activeClassName: string;
-}> = [
-  {
-    value: "vacios",
-    label: "Vacíos",
-    className: "border-[#4b5563] bg-[#6B7280] hover:ring-2 hover:ring-[#6B7280]/30",
-    activeClassName: "border-[#374151] bg-[#6B7280] shadow-card ring-2 ring-[#6B7280]/45",
-  },
-  {
-    value: "normal",
-    label: "Verde",
-    className: "border-[#16a34a] bg-success hover:ring-2 hover:ring-success/30",
-    activeClassName: "border-[#15803d] bg-success shadow-card ring-2 ring-success/45",
-  },
-  {
-    value: "elevado",
-    label: "Ámbar",
-    className: "border-[#f59e0b] bg-warning hover:ring-2 hover:ring-warning/30",
-    activeClassName: "border-[#d97706] bg-warning shadow-card ring-2 ring-warning/45",
-  },
-  {
-    value: "critico",
-    label: "Rojo",
-    className: "border-[#ef4444] bg-danger hover:ring-2 hover:ring-danger/30",
-    activeClassName: "border-[#dc2626] bg-danger shadow-card ring-2 ring-danger/45",
-  },
-];
-
 const DAY_MINUTES = 24 * 60;
-
-const getCurrentUtcMinute = (): number => {
-  const now = new Date();
-  return now.getUTCHours() * 60 + now.getUTCMinutes();
-};
 
 const normalizeMinute = (minute: number): number =>
   ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
@@ -97,11 +63,14 @@ const getNearestFlightMinute = (
   airportIcao: string,
   referenceMinute: number,
   kind: "arrival" | "departure",
+  idSimulacion?: number | null,
   simulationStart?: string | null
-): { minute: number | null; distance: number | null } => {
+): { minute: number | null; distance: number | null; eventMs: number | null } => {
   let nearestMinute: number | null = null;
   let nearestDistance: number | null = null;
-  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
+  let nearestEventMs: number | null = null;
+  const simulationStartMs =
+    idSimulacion != null ? parseUtcDateTimeMs(simulationStart) : null;
 
   for (const shipment of shipments) {
     for (const group of getShipmentRouteGroups(shipment)) {
@@ -120,7 +89,10 @@ const getNearestFlightMinute = (
 
         const flightMinute = simulationStartMs !== null
           ? Math.round((eventMs - simulationStartMs) / 60_000)
-          : new Date(eventMs).getUTCHours() * 60 + new Date(eventMs).getUTCMinutes();
+          : getOperationMinuteOfDay(eventMs);
+        if (flightMinute === null) {
+          continue;
+        }
         const distance = simulationStartMs !== null
           ? flightMinute - referenceMinute
           : getMinutesUntil(flightMinute, referenceMinute);
@@ -132,12 +104,13 @@ const getNearestFlightMinute = (
         if (nearestDistance === null || distance < nearestDistance) {
           nearestDistance = distance;
           nearestMinute = flightMinute;
+          nearestEventMs = eventMs;
         }
       }
     }
   }
 
-  return { minute: nearestMinute, distance: nearestDistance };
+  return { minute: nearestMinute, distance: nearestDistance, eventMs: nearestEventMs };
 };
 
 const WarehouseListDrawer = ({
@@ -145,6 +118,7 @@ const WarehouseListDrawer = ({
   occupancyByIcao,
   rangosSemaforo,
   shipments = [],
+  idSimulacion,
   referenceMinute,
   simulationStart,
 }: WarehouseListDrawerProps) => {
@@ -154,12 +128,10 @@ const WarehouseListDrawer = ({
   const selectedRegion = useDrawerStore((s) => s.warehouseRegionFilter);
   const setSelectedRegion = useDrawerStore((s) => s.setWarehouseRegionFilter);
   const occupancyFilter = useDrawerStore((s) => s.warehouseSemaphoreFilter);
-  const setOccupancyFilter = useDrawerStore(
-    (s) => s.setWarehouseSemaphoreFilter
-  );
   const [searchCode, setSearchCode] = useState("");
   const [sortMode, setSortMode] = useState<WarehouseSortMode>("ocupacion-desc");
-  const currentReferenceMinute = referenceMinute ?? getCurrentUtcMinute();
+  const currentReferenceMinute =
+    referenceMinute ?? getCurrentOperationMinuteOfDay();
 
   const regionOptions = Array.from(
     new Set(
@@ -180,10 +152,12 @@ const WarehouseListDrawer = ({
       selectedRegion === "todos" ||
       airport.region?.trim() === selectedRegion;
     const matchesOccupancy =
-      occupancyFilter === "todos" ||
-      (occupancyFilter === "vacios"
-        ? ocupacion === 0
-        : ocupacion > 0 && estado === occupancyFilter);
+      occupancyFilter.length === 0 ||
+      occupancyFilter.some((filter) =>
+        filter === "vacios"
+          ? ocupacion === 0
+          : ocupacion > 0 && estado === filter
+      );
 
     return matchesCode && matchesRegion && matchesOccupancy;
   });
@@ -197,6 +171,7 @@ const WarehouseListDrawer = ({
           airport.icao,
           currentReferenceMinute,
           "arrival",
+          idSimulacion,
           simulationStart
         ),
         nextDeparture: getNearestFlightMinute(
@@ -204,6 +179,7 @@ const WarehouseListDrawer = ({
           airport.icao,
           currentReferenceMinute,
           "departure",
+          idSimulacion,
           simulationStart
         ),
       },
@@ -242,6 +218,21 @@ const WarehouseListDrawer = ({
       ? country
       : a.name.localeCompare(b.name, "es", { sensitivity: "base" });
   });
+
+  const formatScheduleTime = (
+    schedule: { minute: number | null; eventMs: number | null } | undefined
+  ): string => {
+    if (idSimulacion == null) {
+      return formatContextDateTime(schedule?.eventMs ?? null, idSimulacion, "Sin vuelos");
+    }
+
+    return formatContextSimulationMinute(
+      schedule?.minute ?? null,
+      simulationStart,
+      idSimulacion,
+      "Sin vuelos"
+    );
+  };
 
   return (
     <DrawerBase
@@ -294,49 +285,6 @@ const WarehouseListDrawer = ({
               </option>
             ))}
           </select>
-        </div>
-
-        <div>
-          <span className="block text-label-sm text-text-primary mb-1">
-            Filtrar por semáforo
-          </span>
-          <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semáforo">
-            <button
-              type="button"
-              aria-label="Mostrar todos"
-              aria-pressed={occupancyFilter === "todos"}
-              title="Mostrar todos"
-              onClick={() => setOccupancyFilter("todos")}
-              className={cn(
-                "h-9 w-9 rounded-full border-2 p-0 transition-all duration-150 focus-visible:outline-primary inline-flex items-center justify-center",
-                occupancyFilter === "todos"
-                  ? "border-[#111827] bg-white text-[#111827] shadow-card ring-2 ring-[#111827]/15"
-                  : "border-[#9ca3af] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
-              )}
-            >
-              <X size={16} aria-hidden />
-            </button>
-            {SEMAPHORE_FILTER_OPTIONS.map((option) => {
-              const isSelected = occupancyFilter === option.value;
-
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-label={option.label}
-                  aria-pressed={isSelected}
-                  title={option.label}
-                  onClick={() =>
-                    setOccupancyFilter(isSelected ? "todos" : option.value)
-                  }
-                  className={cn(
-                    "h-9 w-9 rounded-full border-2 p-0 transition-all duration-150 focus-visible:outline-primary",
-                    isSelected ? option.activeClassName : option.className
-                  )}
-                />
-              );
-            })}
-          </div>
         </div>
 
         <div>
@@ -400,18 +348,10 @@ const WarehouseListDrawer = ({
                       Capacidad: {airport.capacity} maletas
                     </p>
                     <p className="text-secondary text-text-primary">
-                      Próx. llegada: {formatUtcSimulationMinute(
-                        schedule?.nextArrival.minute ?? null,
-                        simulationStart,
-                        "Sin vuelos"
-                      )}
+                      Próx. llegada: {formatScheduleTime(schedule?.nextArrival)}
                     </p>
                     <p className="text-secondary text-text-primary">
-                      Próx. salida: {formatUtcSimulationMinute(
-                        schedule?.nextDeparture.minute ?? null,
-                        simulationStart,
-                        "Sin vuelos"
-                      )}
+                      Próx. salida: {formatScheduleTime(schedule?.nextDeparture)}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

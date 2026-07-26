@@ -6,6 +6,7 @@ import { useDrawerStore } from "@/store/drawerStore";
 import {
   buildShipmentRouteSegments,
 } from "@/utils/shipmentFocus";
+import { getShipmentRouteGroups } from "@/utils/shipmentAssignments";
 import {
   formatShipmentDisplayCode,
   getShipmentApiIdentifier,
@@ -25,8 +26,10 @@ import {
 import { listOperationShipmentsPage } from "@/services/operationService";
 import { listLiveSimulationShipmentsPage } from "@/services/simulationService";
 import {
-  formatUtcDateTime,
-  formatUtcSimulationMinute,
+  formatContextDateTime,
+  formatContextSimulationMinute,
+} from "@/utils/contextDateTime";
+import {
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
 import type {
@@ -78,9 +81,14 @@ const getElapsedMinutes = (
   return referenceMinute - eventMinute;
 };
 
-const formatShipmentDateTime = (fecha: string, hora: string): string => {
-  return formatUtcDateTime(
+const formatShipmentDateTime = (
+  fecha: string,
+  hora: string,
+  idSimulacion?: number | null
+): string => {
+  return formatContextDateTime(
     `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}`,
+    idSimulacion,
     `${fecha} ${hora}`
   );
 };
@@ -117,6 +125,34 @@ const getDeliveredMinute = (
   return lastArrival !== null
     ? lastArrival + DELIVERY_RELEASE_DELAY_MINUTES
     : null;
+};
+
+const getShipmentTimelineInstants = (
+  shipment: BackendSolicitudEnvio
+): { firstDepartureMs: number | null; lastArrivalMs: number | null } => {
+  let firstDepartureMs: number | null = null;
+  let lastArrivalMs: number | null = null;
+
+  for (const group of getShipmentRouteGroups(shipment)) {
+    for (const occurrence of group.ruta?.ocurrencias ?? []) {
+      const departureMs = parseUtcDateTimeMs(occurrence.fechaHoraSalida);
+      const arrivalMs = parseUtcDateTimeMs(occurrence.fechaHoraLlegada);
+
+      if (departureMs !== null) {
+        firstDepartureMs =
+          firstDepartureMs === null
+            ? departureMs
+            : Math.min(firstDepartureMs, departureMs);
+      }
+
+      if (arrivalMs !== null) {
+        lastArrivalMs =
+          lastArrivalMs === null ? arrivalMs : Math.max(lastArrivalMs, arrivalMs);
+      }
+    }
+  }
+
+  return { firstDepartureMs, lastArrivalMs };
 };
 
 const ShipmentOverviewDrawer = ({
@@ -243,35 +279,57 @@ const ShipmentOverviewDrawer = ({
     shipment: BackendSolicitudEnvio,
     status: Exclude<ShipmentViewMode, "todos">
   ) => {
+    const timelineInstants = getShipmentTimelineInstants(shipment);
+    const formatOperationInstant = (
+      valueMs: number | null,
+      fallback = "Sin hora"
+    ) => formatContextDateTime(valueMs, idSimulacion, fallback);
+
     if (status === "registrados") {
       return "Sin ruta asignada";
     }
 
     if (status === "planificados") {
-      return `Salida: ${formatUtcSimulationMinute(
-        getFirstDepartureMinute(shipment, simulationStart),
-        simulationStart
-      )}`;
+      return idSimulacion == null
+        ? `Salida: ${formatOperationInstant(timelineInstants.firstDepartureMs)}`
+        : `Salida: ${formatContextSimulationMinute(
+            getFirstDepartureMinute(shipment, simulationStart),
+            simulationStart,
+            idSimulacion
+          )}`;
     }
 
     if (status === "en-transito") {
-      return `Llegada estimada: ${formatUtcSimulationMinute(
-        getLastArrivalMinute(shipment, simulationStart),
-        simulationStart
-      )}`;
+      return idSimulacion == null
+        ? `Llegada estimada: ${formatOperationInstant(timelineInstants.lastArrivalMs)}`
+        : `Llegada estimada: ${formatContextSimulationMinute(
+            getLastArrivalMinute(shipment, simulationStart),
+            simulationStart,
+            idSimulacion
+          )}`;
     }
 
     if (status === "completados") {
-      return `Completado: ${formatUtcSimulationMinute(
-        getLastArrivalMinute(shipment, simulationStart),
-        simulationStart
-      )}`;
+      return idSimulacion == null
+        ? `Completado: ${formatOperationInstant(timelineInstants.lastArrivalMs)}`
+        : `Completado: ${formatContextSimulationMinute(
+            getLastArrivalMinute(shipment, simulationStart),
+            simulationStart,
+            idSimulacion
+          )}`;
     }
 
-    return `Entregado: ${formatUtcSimulationMinute(
-      getDeliveredMinute(shipment, simulationStart),
-      simulationStart
-    )}`;
+    return idSimulacion == null
+      ? `Entregado: ${formatOperationInstant(
+          timelineInstants.lastArrivalMs !== null
+            ? timelineInstants.lastArrivalMs + DELIVERY_RELEASE_DELAY_MINUTES * 60_000
+            : null
+        )}`
+      : `Entregado: ${formatContextSimulationMinute(
+          getDeliveredMinute(shipment, simulationStart),
+          simulationStart,
+          idSimulacion
+        )}`;
   };
 
   useEffect(() => {
@@ -513,7 +571,11 @@ const ShipmentOverviewDrawer = ({
                     {shipment.origen.codigo} &gt; {shipment.destino.codigo}
                   </span>
                   <span className="text-secondary text-text-primary block">
-                    Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
+                    Registro: {formatShipmentDateTime(
+                      shipment.fecha,
+                      shipment.hora,
+                      idSimulacion
+                    )}
                   </span>
                   <span className="text-secondary text-text-primary block">
                     {timeLabel}

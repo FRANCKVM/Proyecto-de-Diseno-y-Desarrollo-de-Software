@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye, Search } from "lucide-react";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import InfoRow from "@/components/molecules/InfoRow";
@@ -22,8 +22,9 @@ import {
   getShipmentApiIdentifier,
 } from "@/utils/shipmentCode";
 import { cn } from "@/utils/cn";
+import { formatContextDateTime } from "@/utils/contextDateTime";
 import {
-  formatUtcDateTime,
+  addDaysToIsoDateUtc,
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
 import { cacheFlightsForAirport } from "@/store/referenceDataStore";
@@ -80,8 +81,11 @@ const VUELO_ESTADO_TAG_VARIANT: Record<
   cancelado: "critico",
 };
 
-const formatFlightDateTime = (iso: string): string => {
-  return formatUtcDateTime(iso, "Sin dato");
+const formatFlightDateTime = (
+  iso: string,
+  idSimulacion?: number | null
+): string => {
+  return formatContextDateTime(iso, idSimulacion, "Sin dato");
 };
 
 const parseDateTimeMs = (value: string | null | undefined): number | null => {
@@ -177,9 +181,14 @@ const getFlightActionKey = (flight: VueloDetalle): string =>
 const formatFlightDisplayCode = (flight: VueloDetalle): string =>
   `${flight.origenIcao}>${flight.destinoIcao}-${flight.codigo}`;
 
-const formatShipmentDateTime = (fecha: string, hora: string): string => {
-  return formatUtcDateTime(
+const formatShipmentDateTime = (
+  fecha: string,
+  hora: string,
+  idSimulacion?: number | null
+): string => {
+  return formatContextDateTime(
     `${fecha}T${hora}${hora.length === 5 ? ":00" : ""}`,
+    idSimulacion,
     `${fecha} ${hora}`
   );
 };
@@ -279,6 +288,13 @@ const AirportDrawer = ({
     simulationStart,
     referenceMinute
   );
+  const flightQueryDates = useMemo(() => {
+    const previousDate = addDaysToIsoDateUtc(queryDate, -1);
+    const nextDate = idSimulacion == null ? addDaysToIsoDateUtc(queryDate, 1) : null;
+    return [previousDate, queryDate, nextDate].filter(
+      (date): date is string => Boolean(date)
+    );
+  }, [idSimulacion, queryDate]);
   const {
     cancelFlight,
     cancellingFlightKey,
@@ -316,10 +332,19 @@ const AirportDrawer = ({
 
       try {
         const airportData = showLoading ? await getAirportByIcao(icao) : null;
-        const flightsData = await listFlightsByAirport(icao, idSimulacion, {
-          forceRefresh,
-          fecha: queryDate,
+        const flightsByDate = await Promise.all(
+          flightQueryDates.map((date) =>
+            listFlightsByAirport(icao, idSimulacion, {
+              forceRefresh,
+              fecha: date,
+            })
+          )
+        );
+        const flightsByOccurrence = new Map<number, VueloDetalle>();
+        flightsByDate.flat().forEach((flight) => {
+          flightsByOccurrence.set(flight.idOcurrencia, flight);
         });
+        const flightsData = Array.from(flightsByOccurrence.values());
 
         if (cancelled) return;
         if (airportData) setAirport(airportData);
@@ -351,7 +376,7 @@ const AirportDrawer = ({
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [icao, idSimulacion, queryDate]);
+  }, [flightQueryDates, icao, idSimulacion]);
 
   useEffect(() => {
     setActiveView(showFlights ? "vuelos" : "envios");
@@ -767,8 +792,11 @@ const AirportDrawer = ({
                       code={formatFlightDisplayCode(v)}
                       statusLabel={VUELO_ESTADO_LABEL[v.estado] ?? v.estado}
                       statusVariant={VUELO_ESTADO_TAG_VARIANT[v.estado]}
-                      departureText={formatFlightDateTime(v.fechaSalida)}
-                      arrivalText={formatFlightDateTime(v.fechaLlegadaEstimada)}
+                      departureText={formatFlightDateTime(v.fechaSalida, idSimulacion)}
+                      arrivalText={formatFlightDateTime(
+                        v.fechaLlegadaEstimada,
+                        idSimulacion
+                      )}
                       progressPct={progressPct}
                       occupancyPct={occupancyPct}
                       rangosSemaforo={rangosSemaforo}
@@ -896,7 +924,11 @@ const AirportDrawer = ({
                         {shipment.origen.codigo} &gt; {shipment.destino.codigo}
                       </span>
                       <span className="text-secondary text-text-primary block">
-                        Registro: {formatShipmentDateTime(shipment.fecha, shipment.hora)}
+                        Registro: {formatShipmentDateTime(
+                          shipment.fecha,
+                          shipment.hora,
+                          idSimulacion
+                        )}
                       </span>
                     </div>
                     <div className="flex flex-col items-end gap-1">

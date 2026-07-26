@@ -6,7 +6,8 @@ import Tag from "@/components/atoms/Tag";
 import { getShipmentByCode } from "@/services/shipmentService";
 import { useDrawerStore } from "@/store/drawerStore";
 import { DELIVERY_RELEASE_DELAY_MINUTES } from "@/utils/shipmentStatus";
-import { formatUtcDateTime, parseUtcDateTimeMs } from "@/utils/utcDateTime";
+import { formatContextDateTime } from "@/utils/contextDateTime";
+import { parseUtcDateTimeMs } from "@/utils/utcDateTime";
 import type { ShipmentRouteSegment } from "@/utils/shipmentFocus";
 import type {
   BloquePaquetes,
@@ -29,8 +30,11 @@ const PANEL_REFRESH_MS_OPERATION = 10000;
 /**
  * Formatea ISO 8601 a "DD/MM HH:mm".
  */
-const formatFechaCorta = (iso: string): string => {
-  return formatUtcDateTime(iso, "Sin dato");
+const formatFechaCorta = (
+  iso: string,
+  idSimulacion?: number | null
+): string => {
+  return formatContextDateTime(iso, idSimulacion, "Sin dato");
 };
 
 const getPackageStatusVariant = (
@@ -370,7 +374,8 @@ const formatFlightRouteCode = (
 
 const buildRouteSummarySteps = (
   shipment: EnvioDetalle,
-  referenceMs: number
+  referenceMs: number,
+  idSimulacion?: number | null
 ): RouteSummaryStep[] => {
   const flightSteps = shipment.ruta
     .map((hito, index) => ({ hito, index }))
@@ -386,10 +391,10 @@ const buildRouteSummarySteps = (
       .find((candidate) => candidate.tipo !== "vuelo");
     const fromIcao = previousStop?.aeropuertoIcao ?? shipment.origenIcao;
     const toIcao = nextStop?.aeropuertoIcao ?? shipment.destinoIcao;
-    const departureLabel = previousStop
-      ? formatFechaCorta(previousStop.fecha)
-      : formatFechaCorta(hito.fecha);
-    const arrivalLabel = nextStop ? formatFechaCorta(nextStop.fecha) : null;
+    const departureLabel = formatFechaCorta(hito.fecha, idSimulacion);
+    const arrivalLabel = nextStop
+      ? formatFechaCorta(nextStop.fecha, idSimulacion)
+      : null;
     const startMs = getHitoMs(hito);
     const endMs = getHitoMs(nextStop);
 
@@ -411,7 +416,7 @@ const buildRouteSummarySteps = (
   return shipment.ruta.map((hito, index) => ({
     key: `${hito.aeropuertoIcao}-${index}`,
     label: hito.aeropuertoIcao,
-    sublabel: `${formatFechaCorta(hito.fecha)} — ${
+    sublabel: `${formatFechaCorta(hito.fecha, idSimulacion)} — ${
       hito.tipo === "salida"
         ? "Salida"
         : hito.tipo === "escala"
@@ -473,8 +478,8 @@ const ShipmentDrawer = ({
     [shipment]
   );
   const routeSummarySteps = useMemo(
-    () => (shipment ? buildRouteSummarySteps(shipment, referenceMs) : []),
-    [referenceMs, shipment]
+    () => (shipment ? buildRouteSummarySteps(shipment, referenceMs, idSimulacion) : []),
+    [idSimulacion, referenceMs, shipment]
   );
 
   useEffect(() => {
@@ -626,7 +631,7 @@ const ShipmentDrawer = ({
         />
         <InfoRow
           label="Fecha registro"
-          value={formatFechaCorta(shipment.fechaRegistro)}
+          value={formatFechaCorta(shipment.fechaRegistro, idSimulacion)}
         />
         <InfoRow
           label="Cantidad maletas"
@@ -756,11 +761,6 @@ const RouteStep = ({ step }: RouteStepProps) => {
   const dotClass = DOT_COLOR_BY_STATUS[status] ?? "bg-text-tertiary";
   const statusColor = STATUS_COLOR[status] ?? "text-text-primary";
   const statusText = STATUS_LABEL[status] ?? status;
-  const hito = {
-    fecha: "",
-    tipo: "",
-    vueloCodigo: null as string | null,
-  };
 
   return (
     <div className="flex gap-3 relative pb-3">
@@ -774,36 +774,6 @@ const RouteStep = ({ step }: RouteStepProps) => {
           <span className={`text-secondary ${statusColor}`}>{statusText}</span>
         </div>
         <p className="text-secondary text-text-primary">{step.sublabel}</p>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="flex gap-3 relative pb-3">
-      <div className="flex flex-col items-center pt-1">
-        <div className={`w-3 h-3 rounded-full ${dotClass} relative z-10`} />
-        {!step.isLast && <div className="w-px flex-1 bg-border mt-1" />}
-      </div>
-      <div className="flex-1">
-        <div className="flex items-center justify-between">
-          <span className="text-button text-text-primary">
-            {step.label}
-          </span>
-          <span className={`text-secondary ${statusColor}`}>{statusText}</span>
-        </div>
-        <p className="text-secondary text-text-primary">
-          {formatFechaCorta(hito.fecha)} —{" "}
-          {hito.tipo === "salida"
-            ? "Salida"
-            : hito.tipo === "vuelo"
-            ? "En vuelo"
-            : hito.tipo === "escala"
-            ? "Escala"
-            : "Entrega"}
-        </p>
-        {hito.vueloCodigo && hito.tipo !== "vuelo" && (
-          <p className="text-secondary text-primary">{hito.vueloCodigo}</p>
-        )}
       </div>
     </div>
   );

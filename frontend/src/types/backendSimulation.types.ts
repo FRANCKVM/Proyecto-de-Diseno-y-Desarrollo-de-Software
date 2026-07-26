@@ -200,3 +200,10 @@ export interface CreateOperationShipmentRequest {
   destinoIcao: string;
   contarBolsas: number;
 }
+
+export interface OperationShipmentTxtUploadResponse {
+  totalLineas: number;
+  enviosRegistrados: number;
+  lineasOmitidas: number;
+  errores: string[];
+}

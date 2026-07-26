@@ -8,6 +8,7 @@ interface DrawerBaseProps {
   children: ReactNode;
   footer?: ReactNode;
   hideHeader?: boolean;
+  widthClassName?: string;
   onClose: () => void;
 }
 
@@ -17,11 +18,13 @@ const DrawerBase = ({
   children,
   footer,
   hideHeader = false,
+  widthClassName = "w-drawer",
   onClose,
 }: DrawerBaseProps) => (
   <aside
     className={cn(
-      "fixed right-0 top-11 h-[calc(100vh-2.75rem)] w-drawer rounded-none bg-card border border-r-0 border-border shadow-drawer z-[950] flex flex-col",
+      "fixed right-0 top-11 h-[calc(100vh-2.75rem)] rounded-none bg-card border border-r-0 border-border shadow-drawer z-[950] flex flex-col",
+      widthClassName,
       "drawer-enter drawer-enter-active"
     )}
     role="dialog"

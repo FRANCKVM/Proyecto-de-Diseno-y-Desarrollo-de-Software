@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
 import type { TagVariant } from "@/components/atoms/Tag";
 import DrawerBase from "@/components/drawers/DrawerBase";
 import FlightListCard from "@/components/molecules/FlightListCard";
@@ -10,17 +9,18 @@ import {
 } from "@/services/flightService";
 import {
   useDrawerStore,
-  type ActiveFlightSemaphoreFilter,
   type ActiveFlightStatusFilter,
 } from "@/store/drawerStore";
 import { getEstadoSemaforo } from "@/utils/airportHelpers";
-import { cn } from "@/utils/cn";
 import {
   addDaysToIsoDateUtc,
-  formatUtcSimulationMinute,
-  pad2,
   parseUtcDateTimeMs,
 } from "@/utils/utcDateTime";
+import {
+  formatContextDateTime,
+  formatContextSimulationMinute,
+  getOperationMinuteOfDay,
+} from "@/utils/contextDateTime";
 import type { AirportWithCoords } from "@/types/airport.types";
 import type { RangoSemaforo } from "@/types/common.types";
 import type { VueloDetalle } from "@/types/flight.types";
@@ -53,6 +53,7 @@ interface PanelFlight {
   departureMinute?: number;
   arrivalMinute?: number;
   departureIso?: string;
+  arrivalIso?: string;
 }
 
 const STATUS_LABEL: Record<FlightPanelStatus, string> = {
@@ -80,38 +81,6 @@ const STATUS_FILTER_OPTIONS: Array<{
   { value: "cancelado", label: "Cancelados" },
 ];
 
-const SEMAPHORE_FILTER_OPTIONS: Array<{
-  value: Exclude<ActiveFlightSemaphoreFilter, "todos">;
-  label: string;
-  className: string;
-  activeClassName: string;
-}> = [
-  {
-    value: "vacios",
-    label: "Vacíos",
-    className: "border-[#4b5563] bg-[#6B7280] hover:ring-2 hover:ring-[#6B7280]/30",
-    activeClassName: "border-[#374151] bg-[#6B7280] shadow-card ring-2 ring-[#6B7280]/45",
-  },
-  {
-    value: "normal",
-    label: "Verde",
-    className: "border-[#16a34a] bg-success hover:ring-2 hover:ring-success/30",
-    activeClassName: "border-[#15803d] bg-success shadow-card ring-2 ring-success/45",
-  },
-  {
-    value: "elevado",
-    label: "Ámbar",
-    className: "border-[#f59e0b] bg-warning hover:ring-2 hover:ring-warning/30",
-    activeClassName: "border-[#d97706] bg-warning shadow-card ring-2 ring-warning/45",
-  },
-  {
-    value: "critico",
-    label: "Rojo",
-    className: "border-[#ef4444] bg-danger hover:ring-2 hover:ring-danger/30",
-    activeClassName: "border-[#dc2626] bg-danger shadow-card ring-2 ring-danger/45",
-  },
-];
-
 type FlightSortMode =
   | "ocupacion-desc"
   | "ocupacion-asc"
@@ -120,11 +89,7 @@ type FlightSortMode =
   | "origen"
   | "destino";
 
-const DAY_MINUTES = 24 * 60;
 const FLIGHT_LIST_PAGE_SIZE = 80;
-
-const normalizeMinute = (minute: number): number =>
-  ((Math.floor(minute) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
 
 const resolveTemporalStatus = (
   status: FlightPanelStatus,
@@ -155,29 +120,26 @@ const resolveTemporalStatus = (
   return "completado";
 };
 
-const formatMinuteTime = (value: number): string => {
-  const normalized = normalizeMinute(value);
-  const hours = Math.floor(normalized / 60);
-  const minutes = normalized % 60;
-
-  return `${pad2(hours)}:${pad2(minutes)}`;
-};
-
-const formatMinuteDateTime = (
-  value: number | undefined,
+const formatPanelFlightTime = (
+  minute: number | undefined,
+  iso: string | undefined,
+  idSimulacion: number | null | undefined,
   simulationStart: string | null | undefined
 ): string => {
-  if (value === undefined) {
+  if (idSimulacion == null) {
+    return formatContextDateTime(iso, idSimulacion, "Sin dato");
+  }
+
+  if (minute === undefined) {
     return "Sin dato";
   }
 
-  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
-  if (simulationStartMs !== null) {
-    return formatUtcSimulationMinute(value, simulationStart);
-  }
-
-  const dayNumber = Math.floor(Math.max(0, value) / DAY_MINUTES) + 1;
-  return `Día ${dayNumber} ${formatMinuteTime(value)}`;
+  return formatContextSimulationMinute(
+    minute,
+    simulationStart,
+    idSimulacion,
+    "Sin dato"
+  );
 };
 
 const compareNullableNumber = (
@@ -205,11 +167,13 @@ const compareNullableNumber = (
 
 const buildOccurrencePanelFlights = (
   occurrences: VueloDetalle[],
+  idSimulacion?: number | null,
   simulationStart?: string | null,
   referenceMinute?: number | null,
   nowMs = Date.now()
 ): PanelFlight[] => {
-  const simulationStartMs = parseUtcDateTimeMs(simulationStart);
+  const simulationStartMs =
+    idSimulacion != null ? parseUtcDateTimeMs(simulationStart) : null;
   return occurrences.map((occurrence) => {
     const departureMs = parseUtcDateTimeMs(occurrence.fechaSalida) ?? NaN;
     const arrivalMs = parseUtcDateTimeMs(occurrence.fechaLlegadaEstimada) ?? NaN;
@@ -230,8 +194,12 @@ const buildOccurrencePanelFlights = (
       : Math.min(0.999, Math.max(0.001, (referenceMs - departureMs) / durationMs));
     const departureMinute = simulationStartMs !== null
       ? Math.round((departureMs - simulationStartMs) / 60_000)
-      : new Date(departureMs).getUTCHours() * 60 + new Date(departureMs).getUTCMinutes();
-    const arrivalMinute = departureMinute + Math.max(1, Math.round(durationMs / 60_000));
+      : getOperationMinuteOfDay(departureMs) ?? undefined;
+    const arrivalMinute = simulationStartMs !== null
+      ? typeof departureMinute === "number" && Number.isFinite(departureMinute)
+        ? departureMinute + Math.max(1, Math.round(durationMs / 60_000))
+        : undefined
+      : getOperationMinuteOfDay(arrivalMs) ?? undefined;
 
     return {
       id: String(occurrence.idOcurrencia),
@@ -247,6 +215,7 @@ const buildOccurrencePanelFlights = (
       departureMinute,
       arrivalMinute,
       departureIso: occurrence.fechaSalida,
+      arrivalIso: occurrence.fechaLlegadaEstimada,
     };
   }).filter((flight) => {
     const departureMs = parseUtcDateTimeMs(flight.departureIso);
@@ -279,9 +248,6 @@ const ActiveFlightsDrawer = ({
   const selectedRegion = useDrawerStore((s) => s.activeFlightRegionFilter);
   const setSelectedRegion = useDrawerStore((s) => s.setActiveFlightRegionFilter);
   const semaphoreFilter = useDrawerStore((s) => s.activeFlightSemaphoreFilter);
-  const setSemaphoreFilter = useDrawerStore(
-    (s) => s.setActiveFlightSemaphoreFilter
-  );
   const [sortMode, setSortMode] = useState<FlightSortMode>("ocupacion-desc");
   const selectedAirport = useDrawerStore((s) => s.activeFlightAirportFilter);
   const setSelectedAirport = useDrawerStore(
@@ -308,8 +274,11 @@ const ActiveFlightsDrawer = ({
   );
   const occurrenceQueryDates = useMemo(() => {
     const previousDate = addDaysToIsoDateUtc(queryDate, -1);
-    return previousDate ? [previousDate, queryDate] : [queryDate];
-  }, [queryDate]);
+    const nextDate = idSimulacion == null ? addDaysToIsoDateUtc(queryDate, 1) : null;
+    return [previousDate, queryDate, nextDate].filter(
+      (date): date is string => Boolean(date)
+    );
+  }, [idSimulacion, queryDate]);
   const {
     cancelFlight,
     cancellingFlightKey,
@@ -406,11 +375,12 @@ const ActiveFlightsDrawer = ({
   const panelFlights = useMemo(
     () => buildOccurrencePanelFlights(
       occurrences,
+      idSimulacion,
       simulationStart,
       referenceMinute,
       nowMs
     ),
-    [nowMs, occurrences, referenceMinute, simulationStart]
+    [idSimulacion, nowMs, occurrences, referenceMinute, simulationStart]
   );
   const displayedPanelFlights = useMemo(
     () =>
@@ -463,12 +433,14 @@ const ActiveFlightsDrawer = ({
           from?.region?.trim() === selectedRegion ||
           to?.region?.trim() === selectedRegion;
         const matchesSemaphore =
-          semaphoreFilter === "todos" ||
-          (semaphoreFilter === "vacios"
-            ? occupancy === 0
-            : occupancy !== undefined &&
-              occupancy > 0 &&
-              estado === semaphoreFilter);
+          semaphoreFilter.length === 0 ||
+          semaphoreFilter.some((filter) =>
+            filter === "vacios"
+              ? occupancy === 0
+              : occupancy !== undefined &&
+                occupancy > 0 &&
+                estado === filter
+          );
         const matchesAirport =
           selectedAirport === "todos" ||
           flight.fromIcao === selectedAirport ||
@@ -665,49 +637,6 @@ const ActiveFlightsDrawer = ({
           </div>
 
           <div>
-            <span className="block text-label-sm text-text-primary mb-1">
-              Filtrar por semáforo
-            </span>
-            <div className="flex items-center gap-3" role="group" aria-label="Filtrar por semáforo">
-              <button
-                type="button"
-                aria-label="Mostrar todos"
-                aria-pressed={semaphoreFilter === "todos"}
-                title="Mostrar todos"
-                onClick={() => setSemaphoreFilter("todos")}
-                className={cn(
-                  "h-9 w-9 rounded-full border-2 p-0 transition-all duration-150 focus-visible:outline-primary inline-flex items-center justify-center",
-                  semaphoreFilter === "todos"
-                    ? "border-[#111827] bg-white text-[#111827] shadow-card ring-2 ring-[#111827]/15"
-                    : "border-[#9ca3af] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
-                )}
-              >
-                <X size={16} aria-hidden />
-              </button>
-              {SEMAPHORE_FILTER_OPTIONS.map((option) => {
-                const isSelected = semaphoreFilter === option.value;
-
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-label={option.label}
-                    aria-pressed={isSelected}
-                    title={option.label}
-                    onClick={() =>
-                      setSemaphoreFilter(isSelected ? "todos" : option.value)
-                    }
-                    className={cn(
-                      "h-9 w-9 rounded-full border-2 p-0 transition-all duration-150 focus-visible:outline-primary",
-                      isSelected ? option.activeClassName : option.className
-                    )}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
             <label
               htmlFor="active-flight-airport-filter"
               className="block text-label-sm text-text-primary mb-1"
@@ -794,12 +723,16 @@ const ActiveFlightsDrawer = ({
                   code={formatFlightDisplayCode(flight)}
                   statusLabel={STATUS_LABEL[flight.estado]}
                   statusVariant={STATUS_TAG_VARIANT[flight.estado]}
-                  departureText={formatMinuteDateTime(
+                  departureText={formatPanelFlightTime(
                     flight.departureMinute,
+                    flight.departureIso,
+                    idSimulacion,
                     simulationStart
                   )}
-                  arrivalText={formatMinuteDateTime(
+                  arrivalText={formatPanelFlightTime(
                     flight.arrivalMinute,
+                    flight.arrivalIso,
+                    idSimulacion,
                     simulationStart
                   )}
                   progressPct={progressPct}

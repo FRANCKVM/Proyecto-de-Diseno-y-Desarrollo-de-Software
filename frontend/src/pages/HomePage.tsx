@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import KpiCard from "@/components/molecules/KpiCard";
 import ActivityItem from "@/components/molecules/ActivityItem";
 import ShipmentRegistrationForm from "@/components/organisms/ShipmentRegistrationForm";
+import ShipmentTxtUploadPanel from "@/components/organisms/ShipmentTxtUploadPanel";
 import { useAirports } from "@/hooks/useAirports";
 import { useUserStore } from "@/store/userStore";
 import {
@@ -12,10 +13,12 @@ import {
 } from "@/services/homeService";
 import { getOperationHomeSummary } from "@/services/operationService";
 import { ROUTES } from "@/utils/routes";
+import { cn } from "@/utils/cn";
 import type { ActividadReciente } from "@/types/activity.types";
 import type { BackendOperacionHomeResumen } from "@/types/backendSimulation.types";
 
 const HOME_REFRESH_INTERVAL_MS = 15000;
+type RegistrationMode = "manual" | "txt";
 
 /**
  * Pantalla de inicio del sistema.
@@ -40,6 +43,8 @@ const HomePage = () => {
     useState<BackendOperacionHomeResumen | null>(null);
   const [isLoadingHome, setIsLoadingHome] = useState(true);
   const [homeError, setHomeError] = useState<string | null>(null);
+  const [registrationMode, setRegistrationMode] =
+    useState<RegistrationMode>("manual");
 
   useEffect(() => {
     let isMounted = true;
@@ -169,26 +174,72 @@ const HomePage = () => {
       {/* Dos columnas: Registro + Actividad reciente */}
       <div className="grid grid-cols-2 gap-5 mb-5">
         <section className="bg-card border border-border rounded-card p-6 shadow-card">
-          <h2 className="text-section-title mb-4">Registrar nuevo envio</h2>
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <h2 className="text-section-title">Registrar nuevo envio</h2>
+            <div
+              className="inline-flex rounded-input border border-border bg-field p-0.5"
+              role="tablist"
+              aria-label="Tipo de registro de envio"
+            >
+              {([
+                ["manual", "Manual"],
+                ["txt", "Carga TXT"],
+              ] as const).map(([mode, label]) => {
+                const selected = registrationMode === mode;
 
-          {isLoadingAirports ? (
-            <p className="text-body text-text-secondary">
-              Cargando aeropuertos...
-            </p>
-          ) : airportsError ? (
-            <div className="rounded-input border border-danger/30 bg-danger-soft px-4 py-3">
-              <p className="text-body text-danger">
-                No se pudieron cargar los aeropuertos desde el backend.
-              </p>
-              <p className="text-secondary text-danger mt-1">
-                {airportsError.message}
-              </p>
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    onClick={() => setRegistrationMode(mode)}
+                    className={cn(
+                      "min-w-[92px] rounded-input px-3 py-1.5 text-button transition-colors",
+                      selected
+                        ? "bg-card text-primary shadow-card"
+                        : "text-text-secondary hover:text-primary"
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+
+          {registrationMode === "manual" ? (
+            isLoadingAirports ? (
+              <p className="text-body text-text-secondary">
+                Cargando aeropuertos...
+              </p>
+            ) : airportsError ? (
+              <div className="rounded-input border border-danger/30 bg-danger-soft px-4 py-3">
+                <p className="text-body text-danger">
+                  No se pudieron cargar los aeropuertos desde el backend.
+                </p>
+                <p className="text-secondary text-danger mt-1">
+                  {airportsError.message}
+                </p>
+              </div>
+            ) : (
+              <ShipmentRegistrationForm
+                airports={airports}
+                occupancyByIcao={occupancyByIcao}
+                onCreated={refreshHomeData}
+              />
+            )
           ) : (
-            <ShipmentRegistrationForm
-              airports={airports}
-              occupancyByIcao={occupancyByIcao}
-              onCreated={refreshHomeData}
+            <ShipmentTxtUploadPanel
+              onUploaded={() => {
+                void refreshHomeData().catch((error) => {
+                  setHomeError(
+                    error instanceof Error
+                      ? error.message
+                      : "No se pudieron cargar los envios del panel principal."
+                  );
+                });
+              }}
             />
           )}
         </section>
