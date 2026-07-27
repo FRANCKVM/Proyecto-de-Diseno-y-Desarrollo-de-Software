@@ -86,7 +86,22 @@ public interface AsignacionEnvioRepository extends JpaRepository<AsignacionEnvio
     @Query("""
             select a.envio.origen.codigo, coalesce(sum(a.cantidadBolsas), 0)
             from AsignacionEnvio a
+            where a.capacidadOrigenLiberada is null or a.capacidadOrigenLiberada = false
             group by a.envio.origen.codigo
             """)
     List<Object[]> sumarBolsasAsignadasPorOrigen();
+
+    @EntityGraph(attributePaths = {
+            "envio",
+            "envio.origen",
+            "ruta",
+            "ruta.ocurrencias"
+    })
+    @Query("""
+            select a
+            from AsignacionEnvio a
+            where a.capacidadOrigenLiberada is null or a.capacidadOrigenLiberada = false
+            order by a.idAsignacion asc
+            """)
+    List<AsignacionEnvio> findPendientesLiberacionOrigen();
 }

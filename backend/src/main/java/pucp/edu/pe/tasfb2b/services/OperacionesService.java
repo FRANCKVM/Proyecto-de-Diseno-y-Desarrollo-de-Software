@@ -174,6 +174,39 @@ public class OperacionesService {
         }
     }
 
+    @Scheduled(fixedRate = 60000)
+    @Transactional
+    public void liberarCapacidadOrigenPorSalidasOperacion() {
+        LocalDateTime ahora = LocalDateTime.now(ZoneOffset.UTC);
+        boolean huboCambios = false;
+
+        for (AsignacionEnvio asignacion : asignacionEnvioRepository.findPendientesLiberacionOrigen()) {
+            VueloOcurrencia primeraOcurrencia = obtenerPrimeraOcurrencia(asignacion.getRuta());
+            if (primeraOcurrencia == null
+                    || primeraOcurrencia.getFechaHoraSalida() == null
+                    || primeraOcurrencia.getFechaHoraSalida().isAfter(ahora)) {
+                continue;
+            }
+
+            SolicitudEnvio envio = asignacion.getEnvio();
+            Aeropuerto origen = envio != null ? envio.getOrigen() : null;
+            int bolsas = asignacion.getCantidadBolsas() != null ? asignacion.getCantidadBolsas() : 0;
+
+            if (origen != null && bolsas > 0) {
+                origen.aumentarCapacidad(bolsas);
+                aeropuertoRepository.save(origen);
+            }
+
+            asignacion.setCapacidadOrigenLiberada(true);
+            asignacionEnvioRepository.save(asignacion);
+            huboCambios = true;
+        }
+
+        if (huboCambios) {
+            publicarOperacionActualizada("warehouse.capacity-released");
+        }
+    }
+
     @Transactional
     public VueloCancelacion cancelarVueloOperacion(Integer idVuelo, LocalDateTime fechaHoraSalida) {
         if (idVuelo == null) {
@@ -411,8 +444,9 @@ public class OperacionesService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public OperacionHomeResumenResponse obtenerResumenHomeOperacion(int limiteActividad) {
+        liberarCapacidadOrigenPorSalidasOperacion();
         List<SolicitudEnvio> envios = obtenerEnviosOperacion();
         LocalDateTime ahoraUtc = LocalDateTime.now(ZoneOffset.UTC);
         List<VueloOcurrencia> vuelosActivos = vueloOcurrenciaService.listarOperativas(
@@ -452,8 +486,9 @@ public class OperacionesService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public MapaSimulacionEstado obtenerMapaOperacion() {
+        liberarCapacidadOrigenPorSalidasOperacion();
         List<SolicitudEnvio> envios = obtenerEnviosOperacion();
         return new MapaSimulacionEstado(
                 0,
@@ -464,7 +499,7 @@ public class OperacionesService {
     }
 
     @Scheduled(fixedRate = 5000)
-    @Transactional(readOnly = true)
+    @Transactional
     public void publicarSnapshotMapaOperacionProgramado() {
         if (!operationSseService.hasSubscribers()) {
             return;
@@ -1057,13 +1092,14 @@ public class OperacionesService {
 
         if (!asignaciones.isEmpty()) {
             int bolsasAsignadas = asignaciones.stream()
+                    .filter(asignacion -> !asignacion.isCapacidadOrigenLiberada())
                     .mapToInt(asignacion -> asignacion.getCantidadBolsas() != null
                             ? asignacion.getCantidadBolsas()
                             : 0)
                     .sum();
 
             Aeropuerto origen = envio.getOrigen();
-            if (origen != null) {
+            if (origen != null && bolsasAsignadas > 0) {
                 origen.aumentarCapacidad(bolsasAsignadas);
                 aeropuertoRepository.save(origen);
             }
@@ -1086,6 +1122,13 @@ public class OperacionesService {
             return;
         }
         liberarCapacidadRuta(envio.getRuta(), envio.getContarBolsas());
+    }
+
+    private VueloOcurrencia obtenerPrimeraOcurrencia(Ruta ruta) {
+        if (ruta == null || ruta.getOcurrencias().isEmpty()) {
+            return null;
+        }
+        return ruta.getOcurrencias().get(0);
     }
 
     private void liberarCapacidadRuta(Ruta ruta, Integer bolsas) {

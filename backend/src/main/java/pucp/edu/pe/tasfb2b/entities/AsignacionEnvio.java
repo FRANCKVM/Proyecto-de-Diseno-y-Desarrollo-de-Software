@@ -26,6 +26,9 @@ public class AsignacionEnvio {
     @Column(name = "estado", nullable = false)
     private EstadoEnvio estado = EstadoEnvio.PLANIFICADO;
 
+    @Column(name = "capacidad_origen_liberada")
+    private Boolean capacidadOrigenLiberada = false;
+
     public AsignacionEnvio() {
     }
 
@@ -39,6 +42,7 @@ public class AsignacionEnvio {
         this.ruta = ruta;
         this.cantidadBolsas = cantidadBolsas;
         this.estado = estado != null ? estado : EstadoEnvio.PLANIFICADO;
+        this.capacidadOrigenLiberada = false;
     }
 
     public Integer getIdAsignacion() {
@@ -79,5 +83,13 @@ public class AsignacionEnvio {
 
     public void setEstado(EstadoEnvio estado) {
         this.estado = estado != null ? estado : EstadoEnvio.PLANIFICADO;
+    }
+
+    public boolean isCapacidadOrigenLiberada() {
+        return Boolean.TRUE.equals(capacidadOrigenLiberada);
+    }
+
+    public void setCapacidadOrigenLiberada(Boolean capacidadOrigenLiberada) {
+        this.capacidadOrigenLiberada = Boolean.TRUE.equals(capacidadOrigenLiberada);
     }
 }

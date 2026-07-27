@@ -7,6 +7,7 @@ import pucp.edu.pe.tasfb2b.controllers.dto.AeropuertoResponse;
 import pucp.edu.pe.tasfb2b.entities.Aeropuerto;
 import pucp.edu.pe.tasfb2b.repositories.AeropuertoRepository;
 import pucp.edu.pe.tasfb2b.repositories.AsignacionEnvioRepository;
+import pucp.edu.pe.tasfb2b.services.OperacionesService;
 import pucp.edu.pe.tasfb2b.services.SeguimientoService;
 
 import java.util.List;
@@ -20,20 +21,24 @@ public class AeropuertoController {
 
     private final AeropuertoRepository aeropuertoRepository;
     private final AsignacionEnvioRepository asignacionEnvioRepository;
+    private final OperacionesService operacionesService;
     private final SeguimientoService seguimientoService;
 
     public AeropuertoController(
             AeropuertoRepository aeropuertoRepository,
             AsignacionEnvioRepository asignacionEnvioRepository,
+            OperacionesService operacionesService,
             SeguimientoService seguimientoService
     ) {
         this.aeropuertoRepository = aeropuertoRepository;
         this.asignacionEnvioRepository = asignacionEnvioRepository;
+        this.operacionesService = operacionesService;
         this.seguimientoService = seguimientoService;
     }
 
     @GetMapping
     public ResponseEntity<List<AeropuertoResponse>> listarAeropuertos() {
+        operacionesService.liberarCapacidadOrigenPorSalidasOperacion();
         Map<String, Integer> bolsasAsignadasPorOrigen = obtenerBolsasAsignadasPorOrigen();
         return ResponseEntity.ok(aeropuertoRepository.findAll().stream()
                 .map(aeropuerto -> mapearAeropuerto(aeropuerto, bolsasAsignadasPorOrigen))
@@ -42,6 +47,7 @@ public class AeropuertoController {
 
     @GetMapping("/{codigo}")
     public ResponseEntity<?> obtenerAeropuerto(@PathVariable String codigo) {
+        operacionesService.liberarCapacidadOrigenPorSalidasOperacion();
         Map<String, Integer> bolsasAsignadasPorOrigen = obtenerBolsasAsignadasPorOrigen();
         return aeropuertoRepository.findByCodigo(codigo)
                 .<ResponseEntity<?>>map(aeropuerto -> ResponseEntity.ok(
